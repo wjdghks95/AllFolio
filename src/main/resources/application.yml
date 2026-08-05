@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: allfolio
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/allfolio
+    username: allfolio
+    password: allfolio
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    distribution:
+      percentiles-histogram:
+        allfolio.simulation.duration: true
+
+logging:
+  level:
+    root: INFO
+    com.allfolio: DEBUG

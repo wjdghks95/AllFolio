@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: allfolio-postgres
+    environment:
+      POSTGRES_DB: allfolio
+      POSTGRES_USER: allfolio
+      POSTGRES_PASSWORD: allfolio
+    ports:
+      - "5432:5432"
+    volumes:
+      - allfolio-pg-data:/var/lib/postgresql
+
+  # Phase 2에서 활성화
+  # redis:
+  #   image: redis:8.8-alpine
+  #   container_name: allfolio-redis
+  #   ports:
+  #     - "6379:6379"
+
+volumes:
+  allfolio-pg-data:

@@ -10,3 +10,12 @@
 # OS
 Thumbs.db
 .DS_Store
+
+# Gradle Build
+build/
+.gradle/
+out/
+
+# Environment
+.env
+.env.local
