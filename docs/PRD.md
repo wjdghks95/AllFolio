@@ -1,6 +1,6 @@
 # AllFolio — Product Requirements Document (PRD)
 
-**버전:** 1.1.0  
+**버전:** 1.2.0  
 **최종 수정:** 2026-08-05  
 **작성자:** JEONGHWANLEE  
 **상태:** Draft (개발 착수 전)
@@ -57,7 +57,7 @@
 - **업비트(코인)**: 24/7 운영.
 - **운영 규모**: MVP 기준 단일 인스턴스. 유저 수 100명 이하.
 - **환율**: 실시간 환율 API (외환은행 또는 무료 API). USD/KRW 기준.
-- **하이브리드 앱 클라이언트**: 프론트엔드는 웹 앱을 **Capacitor로 래핑하는 WebView 기반 하이브리드**로 배포 예정. 백엔드는 이를 전제로 설계하며, 웹과 동일한 REST/SSE 스택을 재사용한다. 모바일 특수 처리는 (1) CORS origin 허용, (2) Push 게이트웨이 두 가지로 최소화.
+- **하이브리드 앱 클라이언트**: 프론트엔드는 웹 앱을 **Capacitor로 래핑하는 WebView 기반 하이브리드**로 배포 예정. 백엔드는 이를 전제로 설계하며, 웹과 동일한 REST/SSE 스택을 재사용한다. 모바일 특수 처리는 (1) CORS origin 허용, (2) Push 게이트웨이 두 가지로 최소화. **⚠️ 주의: Capacitor의 `CapacitorHttp`가 기본 `EventSource` API를 가로채 SSE 스트리밍이 깨지는 공개 버그 존재 (ionic-team/capacitor Issue #6582). 프론트엔드 팀은 `capacitor-eventsource` npm 플러그인 사용 또는 네이티브 SSE 구현 필요.**
 - **면책 조항**: 물타기 시뮬레이터(FR-02)의 결과는 단순 수학적 계산이며 **투자 자문이 아님**. 앱 내 고정 배너 및 이용약관에 "본 서비스는 자본시장법상 투자자문업에 해당하지 않으며 투자 결정의 책임은 유저에게 있습니다" 명시 필수.
 - **외부 API 재배포 제한**: 업비트·KIS로부터 수신한 시세는 **AllFolio 서비스 내 자체 유저 노출 목적으로만 사용**. 제3자 재배포·오픈 API 노출 금지. 상용 유저 규모 확장 시 각 사업자와 재계약 검토 필요.
 - **개인정보 국외 이전**: 하이브리드 앱 Push 토큰이 **FCM(Google, 미국)·APNs(Apple, 미국)** 서버를 경유함. 개인정보처리방침에 국외 이전 고지 항목 필수 기재.
@@ -128,16 +128,16 @@
 |---|---|---|---|
 | Language | **Java 25 LTS** | 25 (2025-09 GA) | 최신 LTS. Virtual Thread Pinning 이슈가 Java 24부터 대폭 개선. Spring Boot 공식 문서가 **"Java 24+ 권장"** 명시 (context7 조회 확인) |
 | Framework | **Spring Boot 4.1.0** | 4.1.0 GA | 최신 GA. `spring.threads.virtual.enabled=true`로 MVC/WebSocket/JPA 전 계층 Virtual Thread 자동 적용. `SimpleAsyncTaskExecutorBuilder.virtualThreads(true)` 신규 API |
-| Concurrency (선택) | **Structured Concurrency** | JEP 505 (JDK 25) | 업비트+KIS+환율 등 다중 외부 API 병렬 호출을 `StructuredTaskScope`로 fan-out 처리. 오류 전파 구조 명확 |
+| Concurrency (선택) | **Structured Concurrency** | JEP 505 (JDK 25) ⚠️ **5차 Preview** | 업비트+KIS+환율 등 다중 외부 API 병렬 호출을 `StructuredTaskScope`로 fan-out 처리. 오류 전파 구조 명확. **단, Java 25 기준에도 Preview API — `--enable-preview` 필수, GA 미확정. 미사용 시 `ExecutorService` + `CompletableFuture.allOf()`로 동일 패턴 대체 가능** |
 | ORM | Spring Data JPA (Hibernate 7) | 7.x | Optimistic Locking (`@Version`), BigDecimal 타입 매핑, Java 25 완전 지원 |
 | RDBMS | **PostgreSQL 18** | 18 (2025-09 GA) | ① **비동기 I/O (AIO)** — Seq Scan·Bitmap Heap Scan·Vacuum 대폭 가속 ② **NUMERIC 곱/나눗셈 성능 향상** — BigDecimal 시세 연산에 직결 ③ **`uuidv7()`** — 시간순 정렬 UUID (감사 로그 PK에 이상적) ④ **B-tree Skip Scan** — 복합 인덱스 조회 최적화 ⑤ **Temporal PK/FK** — 시세 이력 유효기간 무결성 |
 | Cache / Rate Limit | **Redis 8.8** | 8.8 GA | ① **`INCREX` 명령** — 윈도우 카운터 rate limiter를 네이티브 원자 명령으로 구현 (Bucket4j 불필요) ② **Redis TimeSeries** (`TS.ADD`/`TS.RANGE`) — 시세 틱 저장·조회에 최적화 |
 | Streaming | **SSE** (Server-Sent Events) | HTTP/1.1 | 단방향 서버 push. `Last-Event-ID` 표준 재연결 지원. WebSocket 대비 프로토콜 오버헤드 절감 |
 | Precision | **Java BigDecimal** | JDK 25 | `double` 부동소수 오차 방지. 스케일/`RoundingMode.HALF_UP` 제어 |
-| Resilience | **Resilience4j** | 2.2+ | Circuit Breaker / Retry / Bulkhead — 외부 API 장애 대응 |
+| Resilience | **Resilience4j** | 2.2+ ⚠️ | Circuit Breaker / Retry / Bulkhead — 외부 API 장애 대응. **Spring Boot 4 / Spring Framework 7 공식 호환 미확정** (Issue #2351). Circuit Breaker 외 Retry는 Spring Boot 4 네이티브 `@Retryable`로 대체 검토. MDC trace ID 소실 이슈 별도 대응 필요 (§6.6 참고) |
 | Schema Migration | **Flyway** | 11.x | 버전 관리형 DB 마이그레이션 |
 | Observability | **Micrometer + OTel Bridge + Prometheus + Grafana** | OTel 1.x | 업계 표준 OpenTelemetry로 Metrics·Traces 통합. Grafana Loki(logs) + Tempo(traces) 옵션 |
-| Load Test | **k6** | 최신 | SSE 시나리오 지원, JS 스크립팅, 비교 리포트 |
+| Load Test | **k6 + xk6-sse** | 최신 | JS 스크립팅, 비교 리포트. **k6 공식 빌드는 SSE 미지원** — `xk6-sse` 커뮤니티 확장 별도 빌드 필요 (`xk6 build --with github.com/phymbert/xk6-sse`). Phase 4 산출물에 Dockerfile 포함 |
 | Testing | JUnit 5 + WireMock + Testcontainers | 최신 | 외부 WS Mock, PostgreSQL·Redis 실제 컨테이너 통합 테스트 |
 | Build / Infra | Gradle 8+ (Kotlin DSL) + Docker + docker-compose | — | 로컬/CI 환경 재현성 |
 | External | 업비트 WebSocket, 한국투자증권 Open API, 환율 API | — | 원천 시세·환율 데이터 |
@@ -157,6 +157,7 @@
 | GC 전략 | G1GC (기본) | **Generational ZGC** (JDK 21+ GA) | SSE 1,000 커넥션 유지 중 긴 GC pause가 연결 끊김 유발 가능 → ZGC 전환을 벤치마크 Phase에서 실험 |
 | AOT | JIT (기본) | **GraalVM Native Image** | 메모리·콜드스타트 절감 강력하나 리플렉션·프록시 대응 복잡. Phase 4 부록 실험 항목으로 명시 |
 | 메시지 브로커 | **Redis Pub/Sub** | Kafka / Redpanda | MVP 규모에 Kafka는 오버킬. Redis Pub/Sub으로 시세 팬아웃. 다중 인스턴스 확장 시 Kafka 마이그레이션 경로 언급 |
+| Resilience 구현 | **Resilience4j** (CB 한정) | Spring Boot 4 네이티브 `@Retryable` / `@ConcurrencyLimit` | SB4 네이티브 어노테이션은 Retry·동시성 제어의 80% 커버. 단, Circuit Breaker와 Bulkhead는 네이티브 미지원 → Resilience4j CB만 선택적 사용. SB4 호환 확정 전까지 `spring-retry`로 Retry 대체하여 의존 범위 최소화 |
 
 ---
 
@@ -270,6 +271,7 @@ double price = 58333.33; // ← 절대 금지
 | **측정 방법** | Throttling Off: DB INSERT 카운터(Prometheus). Throttling On: 동일 트래픽에서 카운터 비교 → 절감률 계산 |
 | **Redis 장애 시** | Circuit Breaker 개방 → DB 직접 Write Fallback (100% I/O) + 알림 |
 | **Stale Data** | Redis 캐시 TTL 5초. 5초 이내 캐시는 "최신 데이터"로 취급 |
+| **Lettuce INCREX Fallback** | Spring Boot 기본 Redis 클라이언트(Lettuce)의 INCREX 지원이 미확정 (redis/lettuce Issue #3750). Phase 2 착수 시 Lettuce 버전 확인 필수. 미지원 확인 시 §6.6의 **Lua Script Fallback**으로 대체 |
 
 ---
 
@@ -279,8 +281,10 @@ double price = 58333.33; // ← 절대 금지
 |---|---|
 | **목표** | 동시 SSE **1,000 커넥션** 유지, 시세 **500 tick/s** 처리 |
 | **활성화** | `spring.threads.virtual.enabled=true` (Spring Boot 4.1) |
-| **Pinning 회피** | JDBC 호출 시 `synchronized` 블록 없음 확인. HikariCP Virtual Thread 친화 설정 (`keepaliveTime` 등). `synchronized` → `ReentrantLock` 대체 |
-| **JVM 모니터링** | JFR(Java Flight Recorder)로 Pinning 이벤트 캡처 (`jdk.VirtualThreadPinned`) |
+| **Pinning 상태** | **JEP 491(Java 24)로 `synchronized` 블록 핀닝 해결됨** — 코드 수정 없이 Java 25 업그레이드만으로 자동 적용. HikariCP 5.0+ 사용 시 JDBC 드라이버 핀닝도 해소 |
+| **실제 위험 ①** | **ThreadLocal 메모리 블로트** — Virtual Thread 수천 개가 각자 ThreadLocal 보유 시 힙 압박. MDC·SecurityContext 등 ThreadLocal 의존 라이브러리 버전 확인 (Logback 1.4.11+, Log4j2 2.20+) |
+| **실제 위험 ②** | **MDC trace ID 소실** — Resilience4j `TimeLimiter`가 내부 executor에서 `CompletableFuture` 실행 시 MDC context 미전파 → traceId 소실. Java 25 Scoped Values 또는 `ContextPropagator` 커스텀 구현으로 해결 (§6.6 참고) |
+| **JVM 모니터링** | JFR(Java Flight Recorder)로 Pinning 이벤트 잔존 확인 (`jdk.VirtualThreadPinned`) — 레거시 라이브러리 의존 코드 탐지용 |
 | **Thread Pool** | Virtual Thread는 별도 Pool 없음. JVM 스케줄러가 Carrier Thread 관리 |
 | **GC 옵션** | 기본 G1GC. 벤치마크 Phase에서 **Generational ZGC** 전환 실험 (`-XX:+UseZGC -XX:+ZGenerational`) |
 
@@ -353,6 +357,7 @@ resilience4j:
 | SSE 이미터 등록/제거 | ConcurrentHashMap 접근 | `ConcurrentHashMap<UserId, SseEmitter>` + 이미터 완료 콜백 제거 |
 | 시세 업데이트 vs 포트폴리오 조회 | 계산 중 시세 교체 | Redis 단일 GET 원자 명령 — 부분 업데이트 없음 |
 | Structured Concurrency | 다중 외부 API 동시 실패 | `StructuredTaskScope.ShutdownOnFailure` — 하나 실패 시 전체 취소 |
+| **Resilience4j + Virtual Thread MDC 소실** | `TimeLimiter`가 `CompletableFuture`를 내부 executor에서 실행 시 Virtual Thread의 MDC `traceId` 미전파 → §6.8 추적 불가 | Java 25 **Scoped Values** (`ScopedValue.where()`) 로 context 전달하거나, Resilience4j `ContextPropagator` 인터페이스 커스텀 구현. 대안: `TimeLimiter` 미사용 시 해당 없음 |
 
 **Race Condition 방지 예 (Lua Script — Redis 8.8 이전 호환):**
 ```lua
@@ -1031,10 +1036,13 @@ sequenceDiagram
 |---|---|---|---|
 | 한국투자증권 API Key 발급 거절/지연 | 중 | 높음 | WireMock으로 WebSocket Mock. 업비트 코인만으로 MVP 완성 |
 | BigDecimal 연산 GC 압박 | 낮 | 중 | Heap 모니터링. BigDecimal 객체 재사용 범위 제한. ZGC 전환 |
-| Virtual Thread Pinning | 중 | 높음 | JFR `jdk.VirtualThreadPinned` 이벤트 모니터링. `synchronized` 전수 검사 |
+| Virtual Thread Pinning (`synchronized`) | **낮** (Java 24+ JEP 491로 해결) | 낮 | JFR `jdk.VirtualThreadPinned`로 레거시 라이브러리 잔존 확인. ThreadLocal 블로트·MDC 소실이 실질 위험 (§6.3) |
 | Redis 8.8 호환성 이슈 | 낮 | 중 | Testcontainers에서 Redis 8.8 이미지 사용. INCREX 미지원 시 Lua Script Fallback |
 | 외부 API 정책 변경 (Rate Limit 강화) | 중 | 중 | Resilience4j + 재연결 전략 + 환경변수 Rate Limit 설정 |
 | PostgreSQL 18 마이그레이션 미검증 | 낮 | 낮 | Testcontainers 18 이미지로 CI 검증 |
+| JEP 505 Structured Concurrency Preview | 중 | 중 | GA 미확정. `--enable-preview` 운영 배포 위험. Preview 사용 시 build.gradle.kts에 플래그 명시. 대안: `ExecutorService` + `CompletableFuture.allOf()` |
+| Capacitor EventSource API 비호환 | 높 | 높음 | Capacitor Issue #6582. `capacitor-eventsource` 플러그인 또는 네이티브 SSE 구현 필요. 프론트엔드 팀 착수 전 사전 검증 필수 |
+| Resilience4j Spring Boot 4 호환 미확정 | 중 | 중 | Issue #2351 진행 중. Retry는 `spring-retry`로 대체. Circuit Breaker는 Resilience4j 의존 불가피. MDC 소실은 Scoped Values로 대응 |
 
 ### E. Development Milestones
 
