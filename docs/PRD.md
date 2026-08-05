@@ -1,7 +1,7 @@
 # AllFolio — Product Requirements Document (PRD)
 
-**버전:** 1.0.0  
-**최종 수정:** 2026-08-04  
+**버전:** 1.1.0  
+**최종 수정:** 2026-08-05  
 **작성자:** JEONGHWANLEE  
 **상태:** Draft (개발 착수 전)
 
@@ -15,9 +15,11 @@
 4. [Tech Stack](#4-tech-stack)
 5. [Functional Requirements](#5-functional-requirements)
 6. [Non-Functional Requirements](#6-non-functional-requirements)
+   - 6.9 [Operations & SLO](#69-operations--slo)
 7. [Data Model & Entity Draft](#7-data-model--entity-draft)
 8. [Core API Spec Outline](#8-core-api-spec-outline)
 9. [Technical KPIs & Success Metrics](#9-technical-kpis--success-metrics)
+   - 9.4 [Product KPIs](#94-product-kpis)
 10. [Appendix](#10-appendix)
 
 ---
@@ -56,6 +58,10 @@
 - **운영 규모**: MVP 기준 단일 인스턴스. 유저 수 100명 이하.
 - **환율**: 실시간 환율 API (외환은행 또는 무료 API). USD/KRW 기준.
 - **하이브리드 앱 클라이언트**: 프론트엔드는 웹 앱을 **Capacitor로 래핑하는 WebView 기반 하이브리드**로 배포 예정. 백엔드는 이를 전제로 설계하며, 웹과 동일한 REST/SSE 스택을 재사용한다. 모바일 특수 처리는 (1) CORS origin 허용, (2) Push 게이트웨이 두 가지로 최소화.
+- **면책 조항**: 물타기 시뮬레이터(FR-02)의 결과는 단순 수학적 계산이며 **투자 자문이 아님**. 앱 내 고정 배너 및 이용약관에 "본 서비스는 자본시장법상 투자자문업에 해당하지 않으며 투자 결정의 책임은 유저에게 있습니다" 명시 필수.
+- **외부 API 재배포 제한**: 업비트·KIS로부터 수신한 시세는 **AllFolio 서비스 내 자체 유저 노출 목적으로만 사용**. 제3자 재배포·오픈 API 노출 금지. 상용 유저 규모 확장 시 각 사업자와 재계약 검토 필요.
+- **개인정보 국외 이전**: 하이브리드 앱 Push 토큰이 **FCM(Google, 미국)·APNs(Apple, 미국)** 서버를 경유함. 개인정보처리방침에 국외 이전 고지 항목 필수 기재.
+- **KIS API 상용 전환 조건**: 현재 개인 발급 API 키는 개발·데모 용도. 유저 대상 상용 서비스 배포 전 법인 또는 개인사업자 등록 후 상용 키 재발급 필요.
 
 ---
 
@@ -374,6 +380,8 @@ return current
 | **HTTPS** | TLS 1.3 필수. 로컬 개발은 mkcert 자체서명 인증서 |
 | **CORS** | `allowedOrigins`를 환경변수로 관리. `*` 금지. 하이브리드 앱 허용 origin: `capacitor://localhost`, `ionic://localhost`, `http://localhost` |
 | **SQL Injection** | Spring Data JPA Named Parameter 전용. Native Query 사용 시 `@Param` 강제 |
+| **개인신용정보 처리** | `Holdings.avgPrice`·`quantity`는 신용정보법상 개인신용정보에 해당 가능. 서비스 가입 시 수집·이용 동의 고지 필수. 목적 외 이용 금지. 계정 삭제 후 30일 내 완전 파기(물리 삭제). |
+| **탈퇴/개인정보 삭제** | 유저 탈퇴 시 `Users`·`Assets`·`Holdings`·`Transactions`·`DeviceTokens` 레코드 물리 삭제. `PriceSnapshots`는 시세 공공 데이터로 비개인정보이므로 유지. |
 
 ---
 
@@ -397,11 +405,30 @@ return current
 - MDC 필드: `traceId`, `userId`, `ticker`
 - 형식: JSON (Logback + logstash-logback-encoder)
 - 금융 감사 로그: `AUDIT` 마커 — Holding 생성/수정/삭제 이력
+- **프로덕트 이벤트 로그** 최소 스키마: `event_type` (예: `USER_SIGNUP`, `ASSET_ADDED`, `SIMULATE_EXECUTED`, `PUSH_OPENED`), `user_id`, `session_id`, `timestamp`. §9.4 Product KPI 측정의 기반 데이터.
 
 #### Tracing (OpenTelemetry)
 
 - `외부API 호출 → Redis 캐시 → SSE 전송` 구간 Span 명시
 - Grafana Tempo로 P99 latency 분포 시각화
+
+---
+
+### 6.9 Operations & SLO
+
+**목표:** 상용 서비스 관점의 가용성 목표와 운영 정책을 최소 수준으로 정의한다.
+
+| 항목 | 목표 / 정책 |
+|---|---|
+| **RTO** | 재해 발생 후 **4시간** 이내 서비스 복구 |
+| **RPO** | 최대 **15분** 데이터 손실 허용 (PostgreSQL PITR 15분 간격 WAL 아카이빙) |
+| **백업** | PostgreSQL: 일일 논리 백업 + 연속 WAL 아카이빙. Redis: RDB 스냅샷 1시간 간격 |
+| **온콜 알림 트리거** | Circuit Breaker Open (§6.4 기준), 외부 API 5분 연속 실패, DB Connection Pool ≥ 90%, 5xx 비율 ≥ 1% |
+| **알림 채널** | Prometheus Alertmanager → Slack DM + 이메일 |
+| **배포 전략** | Blue/Green 무중단 배포. 롤백 조건: 5xx 비율 1% 초과 5분 지속 시 이전 버전 자동 스위치백 |
+| **데이터 보존** | `price_snapshots` 파티션: 12개월 후 콜드 스토리지 아카이브 (pg_partman). 감사 로그(`AUDIT` 마커): **5년** 보존 (금융 관련 법정 기준). |
+| **환경 분리** | `dev` / `stg` / `prod` 3-tier. `prod` 환경 접근은 MFA(이중 인증) 필수 |
+| **인프라 선택** | 단일 인스턴스 MVP 기준. 벤더(AWS/GCP/Azure) 미결정 — Phase 1 착수 전 확정 필요 |
 
 ---
 
@@ -855,6 +882,23 @@ export const options = {
 3. **"Throttling으로 DB I/O를 몇 % 줄였는가?"** → Prometheus 카운터 비교 스크린샷 + 절감률 수치
 4. **"외부 API 장애 시 서비스는 어떻게 동작하는가?"** → Circuit Breaker → Stale Data 전략 → `isStale: true` 플래그 흐름 설명
 5. **"Redis 8.8 INCREX를 왜 선택했는가?"** → Bucket4j 대비 단일 원자 명령, 분산 환경 정확성 설명
+
+---
+
+### 9.4 Product KPIs
+
+**목표:** 기술 성능 외에 **유저 행동 지표**를 통해 서비스 핵심 가치 전달 여부를 측정한다. MVP 출시 3개월 기준.
+
+| KPI | 목표 | 측정 방법 |
+|---|---|---|
+| **DAU / MAU** | MAU 100, DAU/MAU ≥ 25% | 로그인 이벤트(`USER_LOGIN`) 집계 |
+| **온보딩 완료율** | 가입 후 자산 1건 이상 등록 ≥ 60% | 퍼널: `USER_SIGNUP` → `ASSET_ADD_CLICK` → `ASSET_SAVED` |
+| **D7 유지율** | ≥ 30% | 첫 로그인 코호트 기준 7일 후 재방문 비율 |
+| **시뮬레이터 사용률** | 활성 유저의 40% 이상 주 1회 이상 사용 | `SIMULATE_EXECUTED` 이벤트 유저별 주간 카운트 |
+| **Push 도달률 / 오픈률** | 도달 ≥ 95%, 오픈 ≥ 20% | FCM/APNs 응답 코드(`SUCCESS`/`FAILURE`) + `PUSH_OPENED` 딥링크 이벤트 |
+| **자산 등록 이탈률** | 폼 단계별 ≤ 20% | `ASSET_ADD_CLICK` → `TICKER_ENTERED` → `QUANTITY_ENTERED` → `ASSET_SAVED` 각 단계 이탈율 |
+
+> 측정 인프라: §6.8 Structured Logging의 프로덕트 이벤트 로그를 Grafana Loki로 수집. 고급 코호트 분석이 필요하면 BigQuery / Amplitude 연동 (로드맵).
 
 ---
 
