@@ -72,7 +72,11 @@
 
 ```
 implementation: spring-boot-starter-web, -data-jpa, -validation, -actuator, -security
-implementation: flyway-core, flyway-database-postgresql, postgresql
+implementation: spring-boot-flyway, flyway-database-postgresql, postgresql
+  ※ Spring Boot 4.1은 Flyway 오토컨피규레이션을 flyway-core가 아닌
+    org.springframework.boot:spring-boot-flyway 모듈로 분리함.
+    flyway-core만 추가하면 FlywayAutoConfiguration이 로드되지 않아
+    마이그레이션이 조용히 실행되지 않는다 (Step 2에서 실측 확인).
 implementation: micrometer-registry-prometheus
 implementation: nimbus-jose-jwt (JWT 발급/검증)
 implementation: logstash-logback-encoder

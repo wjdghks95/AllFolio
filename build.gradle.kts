@@ -26,7 +26,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
 
     // DB
-    implementation("org.flywaydb:flyway-core")
+    // Spring Boot 4.1은 Flyway 오토컨피규레이션을 flyway-core가 아닌 별도 모듈로 분리함
+    // (org.flywaydb:flyway-core만 있으면 FlywayAutoConfiguration 자체가 로드되지 않음)
+    implementation("org.springframework.boot:spring-boot-flyway")
     implementation("org.flywaydb:flyway-database-postgresql")
     runtimeOnly("org.postgresql:postgresql")
 
@@ -40,15 +42,12 @@ dependencies {
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")
 
     // Test
+    // Testcontainers 버전은 Spring Boot 4.1 BOM이 관리하는 2.x를 그대로 사용한다.
+    // (구 1.x를 별도 BOM으로 고정하면 Docker Engine 29+와 API 버전 협상이 깨진다 — Step 2에서 실측 확인)
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.testcontainers:junit-jupiter")
-    testImplementation("org.testcontainers:postgresql")
-}
-
-dependencyManagement {
-    imports {
-        mavenBom("org.testcontainers:testcontainers-bom:1.21.0")
-    }
+    testImplementation("org.springframework.boot:spring-boot-testcontainers")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testImplementation("org.testcontainers:testcontainers-postgresql")
 }
 
 tasks.test {

@@ -95,8 +95,8 @@ Flyway는 `src/main/resources/db/migration/V*.sql`에서 마이그레이션을 �
 
 **핵심 원칙:**
 - 모든 금융 컬럼은 `NUMERIC(28,8)` 사용 (BigDecimal 1:1 매핑)
-- 낙관적 잠금(Optimistic Lock)을 위해 `version BIGINT` 컬럼 필수
-- UUID v7은 PK 기본값 (`DEFAULT gen_random_uuid()`)
+- 낙관적 잠금(Optimistic Lock)을 위해 `version INT` 컬럼 필수 (holdings는 사용자 액션 기반 저빈도 쓰기 — BIGINT 불필요)
+- UUID v7은 PK 기본값 (`DEFAULT uuidv7()`)
 
 ### 로컬 개발 DB 설정
 
