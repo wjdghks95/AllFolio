@@ -17,7 +17,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./gradlew test
 
 # 특정 테스트 실행
-./gradlew test --tests com.allfolio.domain.asset.AssetTest
+./gradlew test --tests com.allfolio.AuthIntegrationTest
+./gradlew test --tests com.allfolio.SchemaMigrationTest
 
 # 테스트 output 자세히 보기
 ./gradlew test --info
@@ -28,8 +29,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Docker Compose로 PostgreSQL 시작
 docker compose up -d
 
-# 앱 시작
-./gradlew bootRun
+# 앱 시작 (JWT 시크릿 미설정 시 부팅 실패 — 의도된 동작, 아래 참고)
+ALLFOLIO_JWT_SECRET=$(openssl rand -base64 32) ./gradlew bootRun
 
 # 헬스 체크 (정상 부팅 확인)
 curl http://localhost:8080/actuator/health
@@ -38,10 +39,12 @@ curl http://localhost:8080/actuator/health
 curl http://localhost:8080/actuator/prometheus
 ```
 
+`ALLFOLIO_JWT_SECRET`은 기본값이 빈 문자열이라, 설정하지 않으면 앱이 **즉시 부팅 실패**합니다. 약한 키가 조용히 쓰이는 것을 막기 위한 의도된 동작이므로 기본값을 채워 넣지 마세요.
+
 ### 개발 시 유용한 명령어
 ```bash
 # 특정 클래스의 테스트만 재실행 (watch 없음)
-./gradlew test --tests "*AssetControllerTest"
+./gradlew test --tests "*AuthIntegrationTest"
 
 # 의존성 확인
 ./gradlew dependencies
@@ -54,7 +57,7 @@ curl http://localhost:8080/actuator/prometheus
 
 ## 아키텍처 개요
 
-AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. 현재는 **Phase 1 (자산 CRUD + 시뮬레이터)** 진행 중입니다.
+AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. 현재는 **Phase 1 (자산 CRUD + 시뮬레이터)** 진행 중이며, Step 1~3(프로젝트 스캐폴딩·DB 스키마·JWT 인증)은 완료됐고 Step 4(자산 CRUD + 포트폴리오 홈)부터 진행합니다. 진행 상황은 [`docs/PHASE1_PLAN.md`](docs/PHASE1_PLAN.md) 상단 표 참조.
 
 ### 핵심 기술 스택
 
@@ -69,10 +72,13 @@ AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. 현재�
 ### 계층 구조
 
 프로젝트는 표준 엔터프라이즈 구조를 따릅니다:
-- **`web`** — REST 컨트롤러 (HTTP 엔트리포인트)
-- **`domain`** — 비즈니스 로직 (자산, 포트폴리오, 시뮬레이션)
-- **`infra`** — 영속성 (JPA 리포지토리, DB 접근)
-- **`config`** — Spring 빈 설정, 보안 정책
+
+```
+web/         REST 컨트롤러 + dto/ (요청·응답 객체)
+domain/      엔티티 + service/ (비즈니스 로직) + repository/ + exception/
+infra/       security/ (JWT 발급·검증 필터)
+config/      Spring 빈 설정, 보안 정책
+```
 
 ### Phase 기반 로드맵
 
@@ -84,6 +90,19 @@ AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. 현재�
 | **Phase 4** | 대용량 부하 및 하이브리드 앱 | FCM/APNs, k6 벤치마크 |
 
 자세한 내용은 [`docs/PHASE1_PLAN.md`](docs/PHASE1_PLAN.md)와 [`docs/PRD.md`](docs/PRD.md) 참조.
+
+---
+
+## Spring Boot 4 특이사항
+
+Phase와 무관하게 이 저장소에서 계속 유효한 환경 제약입니다. 실측으로 확인된 함정이므로 재발 시 먼저 이 표부터 확인하세요.
+
+| 항목 | 내용 |
+|---|---|
+| Flyway 의존성 | `flyway-core`만으로는 오토컨피규레이션(설정 없이 기능을 자동 활성화하는 스프링 장치)이 로드되지 않아 마이그레이션이 조용히 건너뛰어짐. `org.springframework.boot:spring-boot-flyway` 모듈이 별도로 필요 |
+| MockMvc | `@SpringBootTest`가 더 이상 MockMvc를 자동 제공하지 않음. `spring-boot-starter-webmvc-test`를 테스트 의존성에 별도 추가 |
+| Security 자동 설정 | JWT 기반 무상태 인증이므로 `UserDetailsServiceAutoConfiguration`을 제외해야 함 — 제외하지 않으면 부팅 시 랜덤 생성 비밀번호가 로그에 남음 |
+| Testcontainers 버전 | 버전을 고정하지 말 것. Spring Boot 4.1 BOM이 관리하는 2.x를 그대로 사용 (1.x로 고정하면 Docker Engine 29+와 API 버전 협상이 깨짐) |
 
 ---
 
@@ -129,12 +148,12 @@ grep -r "double " src/main/java --include="*.java" | grep -v "Double\|//.*double
 
 ---
 
-## 물타기 시뮬레이터 (FR-02) 성능 KPI
+## 물타기 시뮬레이터 (F006) 성능 KPI
 
 - **응답시간 P99:** ≤ 5ms (1,000회 반복 호출)
 - **메트릭:** `allfolio.simulation.duration` (Prometheus)로 추적
 
-시뮬레이터는 **In-Memory 계산**이므로 DB 조회 없음. JVM 워밍업 후 검증.
+시뮬레이터는 **DB 쓰기 없음**. 대상 holding을 단건 조회한 뒤 In-Memory에서 가중평균을 계산한다 (조회는 발생하지만 저장은 하지 않는다). P99 목표치는 이 단건 조회를 포함한 수치다. JVM 워밍업 후 검증.
 
 ---
 
@@ -177,31 +196,8 @@ spring.jpa.open-in-view: false
 
 ---
 
-## 커밋 컨벤션
-
-Phase 커밋은 다음 형식을 따릅니다:
-
-```
-Phase 1 Step N — [기능 요약]
-
-[상세 설명 (필요시)]
-
-Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
-```
-
-예:
-```
-Phase 1 Step 2 — DB 스키마 & Flyway 마이그레이션
-
-- users, assets, holdings, transactions 테이블 정의
-- NUMERIC(28,8) 컬럼, UUID v7 PK, 낙관적 잠금
-- Testcontainers로 마이그레이션 검증
-```
-
----
-
 ## 참고 문서
 
-- **[PRD](docs/PRD.md)** — 전체 프로젝트 명세, 문제 정의, 데이터 모델
-- **[Phase 1 계획](docs/PHASE1_PLAN.md)** — 현재 Phase의 Step별 작업, 완료 기준, 주요 산출물
+- **[PRD](docs/PRD.md)** — 화면·기능 중심 MVP 명세(F001~F010), 데이터 모델. API 규격·에러 포맷·성능 KPI·리스크는 다루지 않음
+- **[Phase 1 계획](docs/PHASE1_PLAN.md)** — 현재 Phase의 Step별 작업, API 규격·에러 포맷·성능 KPI·리스크의 원본(single source of truth), 완료 기준, 주요 산출물
 - **[Spring Boot 레퍼런스](https://spring.io/projects/spring-boot)** — 프레임워크 문서
