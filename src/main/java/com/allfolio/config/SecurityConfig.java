@@ -40,7 +40,7 @@ public class SecurityConfig {
                 .logout(logout -> logout.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // Phase 2에서 /v1/auth/logout 등이 추가돼도 조용히 열리지 않도록 와일드카드 대신 명시 나열한다.
+                        // Task 019에서 /v1/auth/logout 등이 추가돼도 조용히 열리지 않도록 와일드카드 대신 명시 나열한다.
                         .requestMatchers("/v1/auth/signup", "/v1/auth/login").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**",
                                 "/actuator/info", "/actuator/prometheus").permitAll()

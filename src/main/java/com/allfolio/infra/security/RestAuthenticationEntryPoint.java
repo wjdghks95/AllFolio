@@ -11,7 +11,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 /**
  * AuthenticationException은 필터 체인에서 발생해 @RestControllerAdvice가 잡지 못한다.
  * handlerExceptionResolver로 위임해 GlobalExceptionHandler가 동일한 에러 응답 포맷으로 응답하게 한다
- * (PHASE1_PLAN.md Step 3 「에러 응답 포맷」).
+ * (docs/ROADMAP.md Task 003 「에러 응답 포맷」).
  */
 @Component
 public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {

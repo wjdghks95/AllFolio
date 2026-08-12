@@ -19,7 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * HS256 Access Token 발급·검증. Phase 1은 대칭키, Phase 2+에서 RS256/JWKS 전환 예정 (PHASE1_PLAN.md Step 3).
+ * HS256 Access Token 발급·검증 (docs/ROADMAP.md Task 003). 현재는 대칭키이며, 향후 RS256/JWKS 전환을 검토할 수 있다(ROADMAP 미배정).
  */
 @Component
 public class JwtIssuer {

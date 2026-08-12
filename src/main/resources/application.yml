@@ -23,7 +23,7 @@ spring:
 
 allfolio:
   jwt:
-    # 하드코딩 금지 (PHASE1_PLAN.md Step 3) — 환경변수 주입. 미설정 시 부팅 실패시켜 조용한 약한 키 사용을 막는다.
+    # 하드코딩 금지 (docs/ROADMAP.md Task 003) — 환경변수 주입. 미설정 시 부팅 실패시켜 조용한 약한 키 사용을 막는다.
     secret: ${ALLFOLIO_JWT_SECRET:}
     access-token-ttl: 15m
 

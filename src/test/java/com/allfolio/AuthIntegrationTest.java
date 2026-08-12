@@ -33,8 +33,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Phase 1 Step 3 — signup/login 흐름과 JWT 보호 경로 검증.
- * 에러 포맷·에러 코드, Security(Access Token 15분)를 대상으로 한다 (PHASE1_PLAN.md Step 3).
+ * docs/ROADMAP.md Task 003 — signup/login 흐름과 JWT 보호 경로 검증.
+ * 에러 포맷·에러 코드, Security(Access Token 15분)를 대상으로 한다.
  */
 @AutoConfigureMockMvc
 class AuthIntegrationTest extends AbstractIntegrationTest {
@@ -144,7 +144,7 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
     void signupWithUnacceptableMediaTypeReturnsNotAcceptable() {
         // JSON 컨버터만 등록돼 있으므로 Accept: text/csv는 406으로 떨어진다.
         // 에러 응답은 클라이언트 Accept와 무관하게 항상 JSON으로 강제된다(handleExceptionInternal의
-        // headers.setContentType(APPLICATION_JSON)) — "항상 3필드" 계약(PHASE1_PLAN.md Step 3)을 406에도 보장.
+        // headers.setContentType(APPLICATION_JSON)) — "항상 3필드" 계약(docs/ROADMAP.md Task 003)을 406에도 보장.
         MvcTestResult result = mvc.post().uri("/v1/auth/signup")
                 .header(HttpHeaders.ACCEPT, "text/csv")
                 .contentType(MediaType.APPLICATION_JSON).content(credentials(EMAIL, PASSWORD)).exchange();

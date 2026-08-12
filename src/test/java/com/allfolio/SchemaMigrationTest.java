@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Phase 1 Step 2 — V1__init.sql / V2__indexes.sql 검증.
+ * docs/ROADMAP.md Task 002 — V1__init.sql / V2__indexes.sql 검증.
  * Testcontainers PG18에서 실제 마이그레이션을 실행하고 스키마를 정합성을 확인한다.
  */
 class SchemaMigrationTest extends AbstractIntegrationTest {

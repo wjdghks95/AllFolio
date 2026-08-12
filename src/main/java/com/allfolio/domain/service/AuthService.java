@@ -15,7 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Locale;
 
 /**
- * 회원가입·로그인. Phase 1 범위이며 Refresh Token은 Phase 2로 유예한다 (PHASE1_PLAN.md Step 3).
+ * 회원가입·로그인 (docs/ROADMAP.md Task 003). Refresh Token은 Task 019로 유예한다.
  */
 @Service
 public class AuthService {
@@ -46,7 +46,7 @@ public class AuthService {
 
     /**
      * 존재하지 않는 이메일이면 BCrypt 검증 없이 즉시 실패하므로 응답 시간에 차이가 생긴다.
-     * 타이밍 공격 대응(더미 해시 비교)은 Phase 1에서 유예한다.
+     * 타이밍 공격 대응(더미 해시 비교)은 향후 과제로 유예한다(ROADMAP 미배정).
      */
     @Transactional(readOnly = true)
     public TokenResponse login(LoginRequest request) {

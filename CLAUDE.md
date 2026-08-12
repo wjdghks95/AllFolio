@@ -53,11 +53,21 @@ curl http://localhost:8080/actuator/prometheus
 ./gradlew idea
 ```
 
+### 프론트엔드 실행 (Task 004부터)
+
+```bash
+cd frontend
+npm install
+npm run dev   # Vite 개발 서버, 기본 포트 5173
+```
+
+Vite 개발 서버는 `/v1/*` 요청을 `localhost:8080`(Spring Boot)으로 프록시합니다. 브라우저에서 같은 출처로 보이므로 개발 중에는 CORS 설정이 필요 없습니다. 백엔드(`./gradlew bootRun`)와 프론트(`npm run dev`)를 동시에 띄운 상태에서 `http://localhost:5173`으로 접속해 개발합니다.
+
 ---
 
 ## 아키텍처 개요
 
-AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. 현재는 **Phase 1 (자산 CRUD + 시뮬레이터)** 진행 중이며, Step 1~3(프로젝트 스캐폴딩·DB 스키마·JWT 인증)은 완료됐고 Step 4(자산 CRUD + 포트폴리오 홈)부터 진행합니다. 진행 상황은 [`docs/PHASE1_PLAN.md`](docs/PHASE1_PLAN.md) 상단 표 참조.
+AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. 현재는 **Phase 1 (애플리케이션 골격 구축)** 진행 중이며, Task 001~003(백엔드 스캐폴딩·DB 스키마·JWT 인증)은 완료됐고 Task 004(프론트 라우팅 골격)·005(도메인 타입 정의)·006(API 계약 확정)부터 진행합니다. 진행 상황은 [`docs/ROADMAP.md`](docs/ROADMAP.md) 「개발 단계」 절 참조.
 
 ### 핵심 기술 스택
 
@@ -67,29 +77,33 @@ AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. 현재�
 | **DB** | PostgreSQL 18, Flyway (마이그레이션), NUMERIC(28,8) (금융 정밀도) |
 | **동시성** | Virtual Threads (`spring.threads.virtual.enabled=true`) |
 | **Observability** | Prometheus 메트릭, 구조화 로깅 (Logstash) |
-| **보안** | Spring Security, JWT (Phase 1 Step 3) |
+| **보안** | Spring Security, JWT (Task 003) |
+| **프론트엔드** | React + Vite + TypeScript (SPA), Capacitor (하이브리드 앱) — `frontend/` |
 
 ### 계층 구조
 
-프로젝트는 표준 엔터프라이즈 구조를 따릅니다:
+백엔드는 표준 엔터프라이즈 구조를, 프론트엔드는 별도 디렉터리를 따릅니다:
 
 ```
-web/         REST 컨트롤러 + dto/ (요청·응답 객체)
-domain/      엔티티 + service/ (비즈니스 로직) + repository/ + exception/
-infra/       security/ (JWT 발급·검증 필터)
-config/      Spring 빈 설정, 보안 정책
+src/main/java/com/allfolio/
+  web/         REST 컨트롤러 + dto/ (요청·응답 객체)
+  domain/      엔티티 + service/ (비즈니스 로직) + repository/ + exception/
+  infra/       security/ (JWT 발급·검증 필터)
+  config/      Spring 빈 설정, 보안 정책
+
+frontend/      React + Vite + TypeScript (Task 004부터)
 ```
 
 ### Phase 기반 로드맵
 
 | Phase | 초점 | 기술 |
 |---|---|---|
-| **Phase 1** (현재) | 자산 CRUD + In-Memory 시뮬레이터 | BigDecimal, Flyway, JWT 기본 |
-| **Phase 2** | 외부 시세 API 연동 + Redis 캐시 | Upbit/KIS API, Redis, Throttling |
-| **Phase 3** | SSE 실시간 스트리밍 + 평단가 합성 | Virtual Threads, SSE, 시세 틱 스트리밍 |
-| **Phase 4** | 대용량 부하 및 하이브리드 앱 | FCM/APNs, k6 벤치마크 |
+| **Phase 1** (현재) | 애플리케이션 골격 구축 (백엔드 인증·프론트 라우팅·API 계약) | Spring Security, JWT, React, Vite |
+| **Phase 2** | UI/UX 완성(더미 데이터) + 백엔드 자산 CRUD·시뮬레이터 (병렬 트랙) | React 컴포넌트, BigDecimal, In-Memory 시뮬레이터 |
+| **Phase 3** | 실데이터 연동 + 외부 시세 API + Redis 캐시 | Upbit/KIS API, Redis, Throttling |
+| **Phase 4** | SSE 실시간 스트리밍·하이브리드 앱·대용량 부하 | Virtual Threads, SSE, FCM/APNs, k6, Capacitor |
 
-자세한 내용은 [`docs/PHASE1_PLAN.md`](docs/PHASE1_PLAN.md)와 [`docs/PRD.md`](docs/PRD.md) 참조.
+이 표의 Phase 번호는 `docs/ROADMAP.md`의 신규 체계를 따릅니다(기존 "Phase 2 = 외부 시세"였던 이전 체계와 다름 — 대응표는 ROADMAP.md 참조). 자세한 내용은 [`docs/ROADMAP.md`](docs/ROADMAP.md)와 [`docs/PRD.md`](docs/PRD.md) 참조.
 
 ---
 
@@ -168,7 +182,7 @@ grep -r "double " src/main/java --include="*.java" | grep -v "Double\|//.*double
 ### 포트폴리오 (Portfolio)
 
 - 사용자의 모든 자산 집계 + KRW 기준 비중 계산
-- Phase 2부터 외부 시세 API와 연동 → 평가 손익 추가
+- Phase 3(포트폴리오 평가금액·비중·손익, ROADMAP Task 023)부터 평가 손익 추가
 
 ### 시뮬레이션
 
@@ -183,7 +197,7 @@ grep -r "double " src/main/java --include="*.java" | grep -v "Double\|//.*double
 ### Virtual Threads 활성화
 
 `application.yml`에서 `spring.threads.virtual.enabled: true`로 설정되어 있습니다.
-- SSE 스트리밍(Phase 3)에서 1,000+ 동시 커넥션 지원
+- SSE 스트리밍(Phase 4, ROADMAP Task 025·028)에서 1,000+ 동시 커넥션 지원
 - Thread 풀 기반 설정(`ThreadPoolTaskExecutor` 등) 제거 시 주의
 
 ### JPA Open-in-View 비활성화
@@ -198,6 +212,6 @@ spring.jpa.open-in-view: false
 
 ## 참고 문서
 
-- **[PRD](docs/PRD.md)** — 화면·기능 중심 MVP 명세(F001~F010), 데이터 모델. API 규격·에러 포맷·성능 KPI·리스크는 다루지 않음
-- **[Phase 1 계획](docs/PHASE1_PLAN.md)** — 현재 Phase의 Step별 작업, API 규격·에러 포맷·성능 KPI·리스크의 원본(single source of truth), 완료 기준, 주요 산출물
+- **[PRD](docs/PRD.md)** — 화면·기능 중심 MVP 명세(F001~F010), 화면 경로, 클라이언트 스택, 데이터 모델. API 규격·에러 포맷·성능 KPI·리스크는 다루지 않음
+- **[개발 로드맵](docs/ROADMAP.md)** — Phase/Task별 진행 상황, API 규격·에러 포맷·성능 KPI·리스크의 원본(single source of truth), 착수 전 결정 사항, Phase 번호 대응표
 - **[Spring Boot 레퍼런스](https://spring.io/projects/spring-boot)** — 프레임워크 문서

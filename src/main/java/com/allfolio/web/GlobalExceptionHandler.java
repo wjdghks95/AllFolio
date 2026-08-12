@@ -26,10 +26,10 @@ import org.jspecify.annotations.Nullable;
 import java.util.stream.Collectors;
 
 /**
- * 에러 포맷 단일화 지점. 응답은 항상 {code, message, timestamp} 3필드 (PHASE1_PLAN.md Step 3 「에러 응답 포맷」).
+ * 에러 포맷 단일화 지점. 응답은 항상 {code, message, timestamp} 3필드 (docs/ROADMAP.md Task 003 「에러 응답 포맷」).
  *
  * <p>ResponseEntityExceptionHandler를 상속해 Spring MVC가 판정한 프로토콜 수준 상태코드
- * (405/415/406/404 등)를 보존한 채 본문만 에러 응답 포맷(PHASE1_PLAN.md Step 3)으로 바꾼다. 상속하지 않고 Exception 폴백만
+ * (405/415/406/404 등)를 보존한 채 본문만 에러 응답 포맷(docs/ROADMAP.md Task 003)으로 바꾼다. 상속하지 않고 Exception 폴백만
  * 두면 ExceptionHandlerExceptionResolver가 DefaultHandlerExceptionResolver보다 먼저 동작해
  * 프로토콜 예외까지 전부 500으로 뒤바뀐다.
  *
@@ -68,7 +68,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
-     * 매핑되지 않은 경로. 도메인 404(Step 4의 ASSET_NOT_FOUND)와 구분되는 프로토콜 수준 404다.
+     * 매핑되지 않은 경로. 도메인 404(Task 006에서 정의된 ASSET_NOT_FOUND)와 구분되는 프로토콜 수준 404다.
      */
     @Override
     protected ResponseEntity<Object> handleNoResourceFoundException(NoResourceFoundException ex,
@@ -85,7 +85,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
      * 포기해 406 응답이 빈 본문으로 나간다. 그러면 "항상 3필드" 계약이 깨진다.
      * AbstractMessageConverterMethodProcessor.writeWithMessageConverters는 응답에 concrete
      * Content-Type이 미리 설정돼 있으면 Accept 협상 자체를 건너뛰고 그 타입으로 직렬화하므로,
-     * 이 한 줄로 클라이언트 Accept와 무관하게 JSON 본문(PHASE1_PLAN.md Step 3 「에러 응답 포맷」)이 보장된다.
+     * 이 한 줄로 클라이언트 Accept와 무관하게 JSON 본문(docs/ROADMAP.md Task 003 「에러 응답 포맷」)이 보장된다.
      *
      * <p>인자로 받은 headers를 직접 수정하지 않고 복사본을 쓰는 이유: 상위 handleException은
      * ErrorResponse 계열 예외(MethodArgumentNotValid 등)에 대해 예외 객체 자신의 getHeaders()를
