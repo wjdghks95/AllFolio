@@ -1,13 +1,3 @@
 {
-  "mcpServers": {
-    "shrimp-task-manager": {
-      "command": "node",
-      "args": ["/Users/macbookpro/my-workspace/claude/mcp-shrimp-task-manager/dist/index.js"],
-      "env": {
-        "DATA_DIR": "/Users/macbookpro/my-workspace/claude/AllFolio/shrimp_data",
-        "TEMPLATES_USE": "korean",
-        "ENABLE_GUI": "false"
-      }
-    }
-  }
+  "mcpServers": {}
 }
