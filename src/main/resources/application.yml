@@ -1,6 +1,10 @@
 spring:
   application:
     name: allfolio
+  autoconfigure:
+    # JWT 기반 무상태 인증이므로 인메모리 UserDetailsService가 필요 없다.
+    # 제외하지 않으면 부팅 시 랜덤 생성 비밀번호가 로그에 남는다.
+    exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
   threads:
     virtual:
       enabled: true
@@ -16,6 +20,12 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
+
+allfolio:
+  jwt:
+    # 하드코딩 금지 (PHASE1_PLAN.md Step 3) — 환경변수 주입. 미설정 시 부팅 실패시켜 조용한 약한 키 사용을 막는다.
+    secret: ${ALLFOLIO_JWT_SECRET:}
+    access-token-ttl: 15m
 
 management:
   endpoints:

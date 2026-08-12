@@ -45,6 +45,10 @@ dependencies {
     // Testcontainers 버전은 Spring Boot 4.1 BOM이 관리하는 2.x를 그대로 사용한다.
     // (구 1.x를 별도 BOM으로 고정하면 Docker Engine 29+와 API 버전 협상이 깨진다 — Step 2에서 실측 확인)
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // Spring Boot 4부터 @SpringBootTest가 MockMvc를 더 이상 자동 제공하지 않는다.
+    // @AutoConfigureMockMvc가 org.springframework.boot.webmvc.test.autoconfigure 패키지로 이동했고
+    // starter-test에는 포함되지 않으므로 별도 스타터가 필요하다 (Step 3에서 실측 확인).
+    testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers-postgresql")
