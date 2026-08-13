@@ -8,7 +8,7 @@ description: |
   SSE 스트리밍·부하 테스트까지 Phase 전 구간의 애플리케이션 코드를 작성한다.
   Flyway 마이그레이션·엔티티 스키마 매핑은 database 에이전트 소관.
 tools: Read, Grep, Glob, Edit, Write, Bash
-model: opus
+model: sonnet
 ---
 
 # AllFolio 시니어 백엔드 에이전트
