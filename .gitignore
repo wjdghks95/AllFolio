@@ -19,3 +19,9 @@ out/
 # Environment
 .env
 .env.local
+
+# Frontend (Vite/React)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.log

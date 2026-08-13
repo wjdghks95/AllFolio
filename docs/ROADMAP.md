@@ -97,13 +97,14 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - 인증은 제품 기능이 아니라 보안 필터 체인과 에러 포맷 계약을 세우는 인프라라 골격 단계에 둔다.
   - ⚠️ 남은 갭: Refresh Token 부재로 15분마다 재로그인 필요 → Task 019에서 해소
 
-- **Task 004: 프론트엔드 프로젝트 셋업 및 라우팅 골격** — 우선순위
-  - `frontend/`에 React + Vite + TypeScript 초기화
-  - 5개 라우트(`/login`, `/signup`, `/portfolio`, `/assets/new`, `/assets/:id`)의 빈 페이지 파일
-  - 공통 레이아웃·헤더, 인증 가드 골격 (비로그인 접근 시 `/login` 리디렉션)
-  - Vite dev server 프록시 설정 (`/v1/*` → `localhost:8080`)
-  - `.gitignore`에 `node_modules` 추가
-  - 화면 내용 없이 이동 흐름만 완성해 사용자 여정을 먼저 체험한다.
+- **Task 004: 프론트엔드 프로젝트 셋업 및 라우팅 골격** ✅ — 완료
+  - ✅ `frontend/` React + Vite + TypeScript 초기화 (react-router v8, Tailwind CSS v4)
+  - ✅ 5개 라우트(`/login`, `/signup`, `/portfolio`, `/assets/new`, `/assets/:id`)의 빈 페이지 파일
+  - ✅ `AppLayout`(헤더 O, 인증 라우트용) / `AuthLayout`(헤더 X, 로그인·회원가입용) 2계층 레이아웃 분리
+  - ✅ `AuthProvider` + `AuthContext` + `useAuth` 훅 파일 분리 구조 (`authContext.ts` / `AuthProvider.tsx` / `useAuth.ts` / `tokenStorage.ts`)
+  - ✅ `RequireAuth` 인증 가드 (비로그인 접근 시 `state.from`에 이전 경로 캡처 후 `/login` 리디렉션), 토큰 localStorage 저장
+  - ✅ Vite dev server 프록시 설정 (`/v1/*` → `localhost:8080`)
+  - ✅ 루트 `.gitignore`에 `frontend/node_modules/`, `frontend/dist/`, `frontend/.vite/` 추가
 
 - **Task 005: 백엔드 도메인 엔티티·리포지토리·DTO 타입 정의** — 우선순위
   - `Asset`/`Holding`(`@Version`)/`Transaction` 엔티티
