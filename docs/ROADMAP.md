@@ -338,4 +338,4 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 - F005b·F007(실시간 차트)·외부 API 연동의 상세 기술 명세는 본 저장소에 문서로 남아있지 않다. 필요 시 `git show cf24471:docs/PRD.md`로 구 PRD v1.2.0(업비트/KIS WebSocket 연동, SSE 이벤트 스키마, 환율 API, `price_snapshots` 파티셔닝 포함)을 열람해 참고할 것
 
 **Task 004 착수 시**
-- 프론트엔드 전담 에이전트는 아직 없다(코드 구현을 담당하는 세 에이전트 `senior-backend`·`database`·`code-reviewer`는 모두 백엔드 전용). 필요 여부는 Task 004 착수 시 판단한다.
+- 프론트엔드는 `senior-frontend` 에이전트가 담당한다(컴포넌트·라우팅·상태·API 클라이언트·컴포넌트 테스트). Task 020의 Playwright MCP E2E는 착수 시점에 별도 QA 에이전트를 신설한다.
