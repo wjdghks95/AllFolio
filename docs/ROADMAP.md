@@ -106,11 +106,11 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ Vite dev server 프록시 설정 (`/v1/*` → `localhost:8080`)
   - ✅ 루트 `.gitignore`에 `frontend/node_modules/`, `frontend/dist/`, `frontend/.vite/` 추가
 
-- **Task 005: 백엔드 도메인 엔티티·리포지토리·DTO 타입 정의** — 우선순위
-  - `Asset`/`Holding`(`@Version`)/`Transaction` 엔티티
-  - `AssetRepository`/`HoldingRepository`
-  - 요청·응답 DTO
-  - 비즈니스 로직 없이 타입만. `ddl-auto: validate`라 엔티티-스키마 불일치 시 부팅이 실패하므로, 매핑 정합성을 로직과 분리해 먼저 확인하는 편이 원인 추적이 쉽다.
+- **Task 005: 백엔드 도메인 엔티티·리포지토리·DTO 타입 정의** ✅ — 완료
+  - ✅ `Asset`/`Holding`(`@Version`)/`Transaction` 엔티티
+  - ✅ `AssetRepository`(소유권 격리 쿼리 `findByIdAndUser_Id` 포함)/`HoldingRepository`
+  - ✅ 요청·응답 DTO 5종 (`CreateAssetRequest`/`UpdateHoldingRequest`/`AssetResponse`/`SimulateAvgPriceRequest`/`SimulateAvgPriceResponse`)
+  - ✅ 금융 필드 전부 `BigDecimal` + `NUMERIC(28,8)` 매핑, 응답 금액 String 직렬화, `double`/`float` 0건 (code-reviewer 검증)
 
 - **Task 006: API 계약 확정 및 미결정 사항 4건 해소** — 우선순위
   - 신규 엔드포인트 7종 규격 확정 (자산 5종·포트폴리오·시뮬레이터, 아래 「API 규격」 절 — 인증 2종은 Task 003에서 이미 구현)
@@ -118,6 +118,9 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - 프론트용 TypeScript 타입 및 더미 응답 픽스처 작성
   - 아래 「착수 전 결정 사항」 4건 확정
   - 이 Task가 Phase 2 병렬 트랙의 출발점이다. 미결정 사항 중 `transactions` 기록 여부는 과거 매매 시점 데이터를 사후 소급 생성할 수 없어 Task 012 착수 전 반드시 확정해야 한다.
+  - **Task 005 리뷰 후속 조치 (착수 전 반영)**
+    - `CreateAssetRequest.currency` 검증을 `@Size(min=3, max=3)` 또는 `@Pattern("^[A-Z]{3}$")`로 강화 — 현재 `@Size(max=3)`만 있어 `"K"` 통과 (`web/dto/CreateAssetRequest.java:25`)
+    - 응답 DTO enum 직렬화 정책 API 규격에 명시 — `AssetResponse.assetType`이 `AssetType` enum 그대로 노출됨. 문자열(`"STOCK"`) 직렬화를 계약으로 확정하고 TypeScript 타입도 동일하게 반영 (`web/dto/AssetResponse.java:14`)
 
 ### Phase 2: UI/UX 완성 + 백엔드 도메인 구현 (병렬 2트랙)
 
@@ -150,6 +153,9 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - 5개 엔드포인트, 유저 소유권 격리(타 유저 자산은 403이 아닌 **404** — ID 유출 방지)
   - 자산 생성 시 Holding 동시 생성 (단일 트랜잭션)
   - 자산 등록 로직은 「착수 전 결정 사항」 #3(종목 중복 등록)에 종속
+  - **Task 005 리뷰 후속 조치 (착수 전 반영)**
+    - `AssetRepository.findAllByUser_Id`를 커서 페이지네이션 시그니처로 대체 — Task 006 확정 기준 `limit` 기본 20/max 100, `cursor` 파라미터에 맞춰 재정의 (`domain/repository/AssetRepository.java:12`)
+    - `AssetResponse.from(Asset, Holding)` 팩토리의 엔티티 매핑 로직을 `AssetService`(또는 별도 매퍼)로 이동 — `spring.jpa.open-in-view: false` 환경에서 트랜잭션 밖 Lazy 접근 위험 제거. DTO는 순수 값 파라미터만 받도록 축소 (`web/dto/AssetResponse.java:21-32`)
 
 - **Task 013: 포트폴리오 홈 API 구현 (F005a)**
   - `GET /v1/portfolio`, 취득원가(`avg_price × quantity`) 기준
