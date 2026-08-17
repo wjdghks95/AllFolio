@@ -112,15 +112,17 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ 요청·응답 DTO 5종 (`CreateAssetRequest`/`UpdateHoldingRequest`/`AssetResponse`/`SimulateAvgPriceRequest`/`SimulateAvgPriceResponse`)
   - ✅ 금융 필드 전부 `BigDecimal` + `NUMERIC(28,8)` 매핑, 응답 금액 String 직렬화, `double`/`float` 0건 (code-reviewer 검증)
 
-- **Task 006: API 계약 확정 및 미결정 사항 4건 해소** — 우선순위
-  - 신규 엔드포인트 7종 규격 확정 (자산 5종·포트폴리오·시뮬레이터, 아래 「API 규격」 절 — 인증 2종은 Task 003에서 이미 구현)
-  - `ASSET_NOT_FOUND`·`HOLDING_CONFLICT` 에러 코드 추가
-  - 프론트용 TypeScript 타입 및 더미 응답 픽스처 작성
-  - 아래 「착수 전 결정 사항」 4건 확정
-  - 이 Task가 Phase 2 병렬 트랙의 출발점이다. 미결정 사항 중 `transactions` 기록 여부는 과거 매매 시점 데이터를 사후 소급 생성할 수 없어 Task 012 착수 전 반드시 확정해야 한다.
-  - **Task 005 리뷰 후속 조치 (착수 전 반영)**
-    - `CreateAssetRequest.currency` 검증을 `@Size(min=3, max=3)` 또는 `@Pattern("^[A-Z]{3}$")`로 강화 — 현재 `@Size(max=3)`만 있어 `"K"` 통과 (`web/dto/CreateAssetRequest.java:25`)
-    - 응답 DTO enum 직렬화 정책 API 규격에 명시 — `AssetResponse.assetType`이 `AssetType` enum 그대로 노출됨. 문자열(`"STOCK"`) 직렬화를 계약으로 확정하고 TypeScript 타입도 동일하게 반영 (`web/dto/AssetResponse.java:14`)
+- **Task 006: API 계약 확정 및 미결정 사항 4건 해소** ✅ — 완료
+  - ✅ 신규 엔드포인트 7종 규격 확정 (자산 5종·포트폴리오·시뮬레이터, 아래 「API 규격」 절 — 인증 2종은 Task 003에서 이미 구현)
+  - ✅ `ASSET_NOT_FOUND`·`HOLDING_CONFLICT` 에러 코드 추가
+  - ✅ 프론트용 TypeScript 타입(`frontend/src/api/types.ts`) 및 더미 응답 픽스처(`frontend/src/api/fixtures.ts`) 작성
+  - ✅ 아래 「확정된 설계 결정」 4건 확정 (구 「착수 전 결정 사항」)
+  - ✅ `PUT /v1/assets/{id}/holdings` 요청·응답에 낙관적 잠금 `version` 필드 추가 — 구 계약은 `HOLDING_CONFLICT` 409를 약속했지만 요청 본문에 `version`이 없어 실제로는 발생할 수 없는 결함이었음
+  - ✅ `ApiContractSerializationTest`(`@JsonTest`)로 직렬화 계약(enum 문자열화, 금액 문자열화, `null` 필드 보존, 시뮬레이터 골든 케이스) 고정
+  - ✅ 이 Task가 Phase 2 병렬 트랙의 출발점이다. 컨트롤러 구현(Task 012·013·015)은 이 Task 범위 밖이며, 여기서는 DTO·에러 코드·직렬화 형태만 확정한다.
+  - **Task 005 리뷰 후속 조치 (반영 완료)**
+    - ✅ `CreateAssetRequest.currency` 검증을 `@Pattern("^[A-Z]{3}$")`로 강화 (`web/dto/CreateAssetRequest.java`)
+    - ✅ 응답 DTO enum 직렬화 정책 확정 — `AssetResponse.assetType`은 `"STOCK"` 문자열로 직렬화(Jackson 기본 동작)되며 `ApiContractSerializationTest`로 고정. TypeScript `AssetType`도 동일한 문자열 유니온으로 반영
 
 ### Phase 2: UI/UX 완성 + 백엔드 도메인 구현 (병렬 2트랙)
 
@@ -141,21 +143,26 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 - **Task 010: 자산 등록 화면 구현 (F001)**
   - 유형(STOCK/COIN/CASH)·티커·통화·수량·평단가 입력
-  - CASH 선택 시 평단가란 처리는 Task 006 결정 #1에 종속
+  - CASH 선택 시 평단가 입력란을 숨긴다 — 서버가 `avgPrice=1`을 고정 삽입하므로 프론트는 요청 본문에서 `avgPrice`를 생략(`null`)하면 된다 (Task 006 결정 #1)
 
 - **Task 011: 자산 상세 화면 구현 (F002·F003·F004·F006·F007)**
   - 상세 정보, 차트 영역(정적 더미), 물타기 시뮬레이터 폼, 수정 폼, 삭제 확인 팝업
-  - 삭제 확인 팝업 문구는 「착수 전 결정 사항」 #4(삭제 시 이력 소실)에 종속
+  - 삭제 확인 팝업에 "보유 정보와 거래 이력이 함께 삭제되며 복구할 수 없습니다" 경고 문구 포함 (Task 006 결정 #4)
+  - 수정 폼은 상세 조회 응답의 `version` 값을 화면에 노출하지 않고 폼 상태로 들고 있다가 `PUT` 요청에 그대로 실어 보낸다. 409 `HOLDING_CONFLICT` 수신 시 "다른 곳에서 이미 수정되었습니다. 새로고침 후 다시 시도하세요" 표시
 
 **2-B. 백엔드 도메인 로직**
 
 - **Task 012: 자산 CRUD API 구현 (F001~F004)**
   - 5개 엔드포인트, 유저 소유권 격리(타 유저 자산은 403이 아닌 **404** — ID 유출 방지)
-  - 자산 생성 시 Holding 동시 생성 (단일 트랜잭션)
-  - 자산 등록 로직은 「착수 전 결정 사항」 #3(종목 중복 등록)에 종속
+  - 자산 생성 시 Holding + `transactions`(BUY 1건) 동시 생성 (단일 트랜잭션, Task 006 결정 #2). 보유 수정(F003)은 `transactions`를 기록하지 않는다
+  - 종목 중복 등록은 허용한다 — `(user_id, ticker)` UNIQUE 제약을 추가하지 않는다 (Task 006 결정 #3)
+  - CASH 자산 생성 시 요청의 `avgPrice`가 `null`이어도 서버가 `avgPrice=1`을 강제 삽입 (Task 006 결정 #1)
   - **Task 005 리뷰 후속 조치 (착수 전 반영)**
     - `AssetRepository.findAllByUser_Id`를 커서 페이지네이션 시그니처로 대체 — Task 006 확정 기준 `limit` 기본 20/max 100, `cursor` 파라미터에 맞춰 재정의 (`domain/repository/AssetRepository.java:12`)
     - `AssetResponse.from(Asset, Holding)` 팩토리의 엔티티 매핑 로직을 `AssetService`(또는 별도 매퍼)로 이동 — `spring.jpa.open-in-view: false` 환경에서 트랜잭션 밖 Lazy 접근 위험 제거. DTO는 순수 값 파라미터만 받도록 축소 (`web/dto/AssetResponse.java:21-32`)
+  - **Task 006 리뷰 후속 조치 (착수 전 반영)**
+    - `ApiContractSerializationTest`에 `AvgPriceRequiredUnlessCash` 검증 테스트, `SimulateAvgPriceResponse.currentWeight/expectedWeight`의 null 키 보존 테스트, `AssetListResponse`/`PortfolioResponse` 직렬화 테스트, 요청 방향(`"60000"` 문자열 → `BigDecimal`) 역직렬화 테스트 보강 — Task 010 폼이 문자열로 POST하므로 역직렬화 검증 공백이 가장 큰 잔여 리스크
+    - `GlobalExceptionHandler.handleDataIntegrityViolation`의 제약 판별을 원인 메시지 문자열 매칭(`contains("uk_users_email")`)에서 `ConstraintViolationException.getConstraintName()` 기반으로 전환 — 이 Task에서 `holdings`의 `uk_holdings_asset_id` 등 제약이 늘어나면 메시지 포맷 의존이 취약해진다
 
 - **Task 013: 포트폴리오 홈 API 구현 (F005a)**
   - `GET /v1/portfolio`, 취득원가(`avg_price × quantity`) 기준
@@ -204,7 +211,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - 비중 스케일 2, HALF_UP
 
 - **Task 024: 거래 이력(Transactions) API**
-  - Task 006 결정 #2 결과에 종속
+  - Task 006 결정 #2에 따라 자산 등록 시 `BUY` 1건만 자동 기록되므로(보유 수정은 미기록), 이 Task는 (a) 누적된 이력 조회 API와 (b) 사용자가 실제 매매·배당을 직접 입력하는 API를 함께 구현한다
 
 ### Phase 4: 고급 기능 및 최적화
 
@@ -232,24 +239,90 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 ## API 규격
 
+이 절이 확정한 것은 요청·응답 DTO의 최종 형태와 에러 코드다. **엔드포인트 자체(컨트롤러)의 실제 구현은 Task 012·013·015 소관**이며, Task 006 시점에는 아직 존재하지 않는다. 직렬화 형태(enum 문자열화, 금액 문자열화, `null` 필드 보존)는 `ApiContractSerializationTest`(`@JsonTest`)로 고정돼 있다.
+
 | Method | Path | Status | 비고 |
 |---|---|---|---|
 | `POST` | `/v1/auth/signup` | 201 / 409 | 가입 성공 시 JWT 자동 발급, 이메일 중복 시 `EMAIL_ALREADY_EXISTS` (F010, Task 003) |
 | `POST` | `/v1/auth/login` | 200 / 401 | 실패 시 `INVALID_CREDENTIALS` (F010, Task 003) |
-| `POST` | `/v1/assets` | 201 | `AssetType`, `currency`, `quantity`, `avgPrice` |
-| `GET` | `/v1/assets` | 200 | 커서 페이지네이션 (`limit` 기본 20/max 100, `cursor`) |
+| `POST` | `/v1/assets` | 201 | 자산+Holding+거래이력(BUY) 단일 트랜잭션 생성 |
+| `GET` | `/v1/assets` | 200 | 커서 페이지네이션 (`limit` 기본 20/max 100, `cursor`), 최신 등록 순 |
 | `GET` | `/v1/assets/{id}` | 200 / 404 | 타 유저 접근 시 404 (ID 유출 방지) |
-| `PUT` | `/v1/assets/{id}/holdings` | 200 / 409 | Optimistic Lock 충돌 시 `HOLDING_CONFLICT` |
-| `DELETE` | `/v1/assets/{id}` | 204 | |
+| `PUT` | `/v1/assets/{id}/holdings` | 200 / 409 | 낙관적 잠금 `version` 필수, 충돌 시 `HOLDING_CONFLICT` |
+| `DELETE` | `/v1/assets/{id}` | 204 / 404 | `ON DELETE CASCADE`로 holdings·transactions 함께 삭제 |
 | `GET` | `/v1/portfolio` | 200 | Task 013 범위(F005a)는 취득원가만, `evaluationKrw`·`unrealizedPnl`·`weight`는 `null` |
 | `POST` | `/v1/simulate/avg-price` | 200 | DB 저장 없음 |
 
 **Bean Validation 규칙**
 - `ticker`: 1~20자, 공백 불가
+- `currency`: 정확히 3자 대문자 (`^[A-Z]{3}$`)
 - `quantity`: `≥ 0`, `NUMERIC(28,8)` 범위
-- `avgPrice`: `> 0` (CASH 자산 처리는 「착수 전 결정 사항」 #1 참조)
+- `avgPrice`(`POST /v1/assets`): STOCK/COIN은 `> 0` 필수, CASH는 `null` 허용(서버가 `1`로 강제 삽입) — `AvgPriceRequiredUnlessCash` 클래스 레벨 제약으로 검증 (Task 006 결정 #1)
+- `avgPrice`(`PUT /v1/assets/{id}/holdings`): 대상 자산이 CASH면 요청값을 무시하고 `1`을 유지, 그 외 자산에서 `null`이면 `POST`와 동일하게 400 `VALIDATION_ERROR`(대상 자산의 assetType은 서버가 경로 `{id}`로 조회해 판단하므로 `CreateAssetRequest`처럼 클래스 레벨 제약으로는 표현할 수 없다 — Task 012 서비스 로직에서 검증)
+- `version`(`PUT /v1/assets/{id}/holdings`): 필수, 상세 조회 응답의 값을 그대로 반환
 
-**금액·수량은 JSON에서 문자열로 직렬화** (부동소수 손실 방지)
+**금액·수량은 JSON에서 문자열로 직렬화** (부동소수 손실 방지). `assetType` 등 enum은 대문자 문자열로 직렬화(`"STOCK"`).
+
+### `POST /v1/assets` 요청 예시
+
+```json
+// STOCK
+{ "ticker": "005930", "name": "삼성전자", "assetType": "STOCK",
+  "currency": "KRW", "quantity": "10", "avgPrice": "60000" }
+
+// CASH — avgPrice 생략(null), 서버가 1로 채움
+{ "ticker": "KRW", "name": "원화 예수금", "assetType": "CASH",
+  "currency": "KRW", "quantity": "1500000", "avgPrice": null }
+```
+
+응답 본문은 두 경우 모두 `AssetResponse`(아래 `GET /v1/assets/{id}` 응답과 동일 형태).
+
+### `GET /v1/assets/{id}` 응답 예시
+
+```json
+{
+  "id": "0198f2a1-...", "ticker": "005930", "name": "삼성전자",
+  "assetType": "STOCK", "currency": "KRW",
+  "quantity": "10", "avgPrice": "60000",
+  "version": 0, "updatedAt": "2026-08-17T09:00:00Z"
+}
+```
+
+### `GET /v1/assets` 응답 예시
+
+```json
+{ "items": [ /* 위 AssetResponse[] */ ], "nextCursor": "0198f2a1-..." }
+```
+
+`nextCursor`는 불투명 문자열로 취급한다(클라이언트가 값을 해석하지 않는다). 마지막 페이지면 `null`.
+
+### `PUT /v1/assets/{id}/holdings` 요청 예시
+
+```json
+{ "quantity": "15", "avgPrice": "58000", "version": 0 }
+```
+
+응답 본문은 갱신된 `AssetResponse`(`version`이 1 증가한 값 포함) — 클라이언트가 다음 수정에 쓸 새 `version`을 이 응답에서 얻는다. 대상 자산이 CASH면 요청의 `avgPrice`는 무시되고 `1`이 유지된다.
+
+### `GET /v1/portfolio` 응답 예시
+
+```json
+{
+  "items": [
+    { "assetId": "0198...", "ticker": "005930", "name": "삼성전자",
+      "assetType": "STOCK", "currency": "KRW",
+      "quantity": "10", "avgPrice": "60000", "cost": "600000",
+      "evaluationKrw": null, "unrealizedPnl": null, "weight": null }
+  ],
+  "totalCostByCurrency": { "KRW": "600000" },
+  "totalEvaluationKrw": null,
+  "totalUnrealizedPnl": null
+}
+```
+
+`totalCostByCurrency`는 `items`에 담긴 모든 자산의 취득원가를 통화별로 합산한 값이다(위 예시는 자산 1건뿐이라 KRW 값이 그 자산의 `cost`와 같다). 자산이 둘 이상이거나 USD 자산이 섞이면 통화별 키가 함께 늘어난다 — 예시는 `frontend/src/api/fixtures.ts`의 `portfolioFixture` 참고.
+
+`totalCostByCurrency`가 통화별 Map인 이유: 취득원가 합계를 단일 `totalCostKrw`로 두면 USD 자산이 섞였을 때 환율 없이는 정확한 값을 낼 수 없다. Task 023(환율 연동) 전까지 거짓 숫자를 내보내지 않기 위해 통화별로 나눠 담는다.
 
 ### 시뮬레이터 응답 예시
 
@@ -283,7 +356,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 **구현된 코드 (Task 003)**: `EMAIL_ALREADY_EXISTS`(409), `INVALID_CREDENTIALS`(401, user enumeration 방지를 위해 미가입 이메일과 비밀번호 불일치를 동일 코드로 응답), `UNAUTHORIZED`(401), `VALIDATION_ERROR`(400), `NOT_FOUND`(404), `METHOD_NOT_ALLOWED`(405), `UNSUPPORTED_MEDIA_TYPE`(415), `NOT_ACCEPTABLE`(406), `CLIENT_ERROR`(4xx 포괄), `INTERNAL_ERROR`(500)
 
-**Task 006에서 추가**: `ASSET_NOT_FOUND`, `HOLDING_CONFLICT`
+**구현된 코드 (Task 006)**: `ASSET_NOT_FOUND`(404, 존재하지 않거나 타 유저 소유 — 403 대신 404로 ID 유출 방지), `HOLDING_CONFLICT`(409, 낙관적 잠금 `version` 불일치. `ObjectOptimisticLockingFailureException` 캐치), `CONFLICT`(409, `uk_users_email` 외의 데이터 무결성 제약 위반 — 매칭되는 도메인 에러 코드가 없을 때의 일반 폴백)
 
 ---
 
@@ -307,14 +380,14 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 ---
 
-## 착수 전 결정 사항 (Task 006에서 확정)
+## 확정된 설계 결정 (Task 006, 구 「착수 전 결정 사항」)
 
-| # | 쟁점 | 확인된 사실 | 결정 필요 |
+| # | 쟁점 | 확인된 사실 | 확정 |
 |---|---|---|---|
-| 1 | CASH 자산 등록 | `holdings`에 `CHECK (avg_price > 0)` — 현금에는 평단가 개념이 없어 `0`을 넣으면 INSERT 실패 | 화면에서 평단가 입력란 숨기고 서버가 `1` 고정 삽입 / CHECK 제약 완화 중 택1 |
-| 2 | `transactions` 기록 여부 | F001(자산 등록)·F003(자산 수정) 어디에도 `transactions` INSERT 경로가 정의돼 있지 않음 | **필수 — 과거 매매 시점 데이터는 사후 소급 생성이 불가능**하므로 Task 012 코딩 전 결정. 미기록 시 Task 024(거래 이력 API)를 만들 데이터 자체가 없다 |
-| 3 | 종목 중복 등록 | `assets`에 `(user_id, ticker)` UNIQUE 없음 — 같은 종목을 여러 번 등록 가능 | 중복 차단 시 `V3__unique_asset_ticker.sql` 추가 필요 |
-| 4 | 자산 삭제 시 이력 소실 | `holdings`·`transactions`의 FK가 `ON DELETE CASCADE` — 자산 삭제(F004) 시 거래 이력도 함께 사라짐 | 삭제 확인 팝업 문구에 이력 소실 경고 포함 여부 |
+| 1 | CASH 자산 등록 | `holdings`에 `CHECK (avg_price > 0)` — 현금에는 평단가 개념이 없어 `0`을 넣으면 INSERT 실패 | 화면에서 평단가 입력란을 숨기고, `CreateAssetRequest.avgPrice`는 CASH일 때 `null`을 허용한다. 서버는 `assetType == CASH`면 `avgPrice=1`을 강제 삽입한다(`AvgPriceRequiredUnlessCash` 클래스 레벨 검증, Task 012에서 구현). CHECK 제약은 그대로 둔다 — 완화하면 STOCK/COIN의 0 평단가 오입력까지 함께 통과하게 된다 |
+| 2 | `transactions` 기록 여부 | F001(자산 등록)·F003(자산 수정) 어디에도 `transactions` INSERT 경로가 정의돼 있지 않음 | 자산 **등록 시에만** `BUY` 1건을 자산·Holding과 같은 트랜잭션으로 기록한다(Task 012). 보유 **수정**(F003)은 기록하지 않는다 — 수정은 실매매가 아닌 오류 정정일 수도 있어, 수정을 그대로 거래로 남기면 이력이 실제 매매와 달라진다. Task 024가 사용자 직접 거래 입력 API로 이 갭을 메운다 |
+| 3 | 종목 중복 등록 | `assets`에 `(user_id, ticker)` UNIQUE 없음 — 같은 종목을 여러 번 등록 가능 | **허용한다.** UNIQUE 제약을 추가하지 않으므로 이 Task에 Flyway 마이그레이션이 없다. 포트폴리오 화면은 같은 티커가 여러 줄로 나타날 수 있음을 전제로 설계한다(Task 009) |
+| 4 | 자산 삭제 시 이력 소실 | `holdings`·`transactions`의 FK가 `ON DELETE CASCADE` — 자산 삭제(F004) 시 거래 이력도 함께 사라짐 | 하드 삭제를 유지한다(소프트 삭제로 전환하지 않음). Task 011의 삭제 확인 팝업에 "보유 정보와 거래 이력이 함께 삭제되며 복구할 수 없습니다" 경고 문구를 포함해 최소 완화한다 |
 
 ---
 
@@ -323,12 +396,9 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 | 리스크 | 완화 |
 |---|---|
 | BigDecimal 스케일 규칙 누락 | 위 「금융 정밀도 규칙」 표를 `BigDecimalPrecisionTest`로 상수화, 모든 서비스 로직에 재사용 |
-| Optimistic Lock 고빈도 충돌 | 유저 수 적은 초기 단계이므로 단순 `@Version`으로 충분. 클라이언트 재시도 지침을 API 응답에 포함 |
-| CASH 자산의 `avg_price` CHECK 제약 충돌 | 「착수 전 결정 사항」 #1 참조 |
-| `transactions` 미기록 시 이력 소급 불가 | 「착수 전 결정 사항」 #2 참조 — 코딩 전 확정 필수 |
-| 종목 중복 등록으로 인한 데이터 정합성 저하 | 「착수 전 결정 사항」 #3 참조 — 중복 차단 시 Task 012 착수 전 `V3__unique_asset_ticker.sql` 필요 |
-| 자산 삭제 시 거래 이력 소실 (`ON DELETE CASCADE`) | 「착수 전 결정 사항」 #4 참조 — Task 011 삭제 확인 팝업 문구로 최소 완화 |
-| 프론트-백엔드 API 계약 어긋남 | Task 006에서 TypeScript 타입과 더미 픽스처를 계약의 단일 출처로 삼아 양쪽이 참조 |
+| Optimistic Lock 고빈도 충돌 | 유저 수 적은 초기 단계이므로 단순 `@Version`으로 충분. 충돌 시 `HOLDING_CONFLICT` 409 응답으로 클라이언트가 재조회 후 재시도 |
+| 프론트-백엔드 API 계약 어긋남 | Task 006에서 TypeScript 타입(`frontend/src/api/types.ts`)과 더미 픽스처(`frontend/src/api/fixtures.ts`)를 계약의 단일 출처로 삼아 양쪽이 참조. 백엔드는 `ApiContractSerializationTest`로 직렬화 형태를 고정 |
+| 종목 중복 등록 허용에 따른 포트폴리오 집계 복잡도 | 「확정된 설계 결정」 #3 참조 — 티커별 합산이 아닌 자산(행) 단위 집계로 설계해 복잡도를 피한다 |
 
 **해소된 리스크 (Task 002에서 실측 확인 완료)**
 - Spring Boot 4.1.0 + Java 25 호환성 — 정상 동작 확인

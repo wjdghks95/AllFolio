@@ -12,8 +12,8 @@
 
 ## Project Phase Status
 
-- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격)
-- **우선순위**: Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정)
+- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정)
+- **우선순위**: Task 007(공통 컴포넌트·디자인 시스템) / Task 012(자산 CRUD API) — Phase 2 병렬 2트랙
 - 상세 Task 명세 → `docs/ROADMAP.md`
 
 ---
@@ -125,22 +125,22 @@ domain.service → infra (허용: JwtIssuer 등)
 | `POST` | `/v1/auth/signup` | 201 / 409 |
 | `POST` | `/v1/auth/login` | 200 / 401 |
 
-### 예정 엔드포인트 (Task 005~006)
+### 계약 확정, 구현 예정 (Task 006에서 DTO·에러코드 확정 / Task 012·013·015에서 컨트롤러 구현)
 
 | Method | Path | 비고 |
 |---|---|---|
-| `POST` | `/v1/assets` | 201 |
+| `POST` | `/v1/assets` | 201, CASH는 `avgPrice` 생략 시 서버가 `1` 고정 삽입 |
 | `GET` | `/v1/assets` | 커서 페이지네이션 (`limit` 기본 20/max 100, `cursor`) |
 | `GET` | `/v1/assets/{id}` | 타 유저 접근 시 404 |
-| `PUT` | `/v1/assets/{id}/holdings` | Optimistic Lock 충돌 시 `HOLDING_CONFLICT` 409 |
+| `PUT` | `/v1/assets/{id}/holdings` | 요청에 `version` 필수, 충돌 시 `HOLDING_CONFLICT` 409 |
 | `DELETE` | `/v1/assets/{id}` | 204 |
 | `GET` | `/v1/portfolio` | Phase 2에서 `evaluationKrw`·`unrealizedPnl`·`weight`는 `null` |
 | `POST` | `/v1/simulate/avg-price` | DB 저장 없음, P99 ≤ 5ms |
 
 ### 에러 코드 목록
 
-- **구현됨**: `EMAIL_ALREADY_EXISTS`(409), `INVALID_CREDENTIALS`(401), `UNAUTHORIZED`(401), `VALIDATION_ERROR`(400), `NOT_FOUND`(404), `METHOD_NOT_ALLOWED`(405), `UNSUPPORTED_MEDIA_TYPE`(415), `NOT_ACCEPTABLE`(406), `CLIENT_ERROR`(4xx), `INTERNAL_ERROR`(500)
-- **Task 006에서 추가**: `ASSET_NOT_FOUND`, `HOLDING_CONFLICT`
+- **구현됨 (Task 003)**: `EMAIL_ALREADY_EXISTS`(409), `INVALID_CREDENTIALS`(401), `UNAUTHORIZED`(401), `VALIDATION_ERROR`(400), `NOT_FOUND`(404), `METHOD_NOT_ALLOWED`(405), `UNSUPPORTED_MEDIA_TYPE`(415), `NOT_ACCEPTABLE`(406), `CLIENT_ERROR`(4xx), `INTERNAL_ERROR`(500)
+- **구현됨 (Task 006)**: `ASSET_NOT_FOUND`(404, 타 유저 소유 자산도 동일 코드), `HOLDING_CONFLICT`(409, 낙관적 잠금 충돌), `CONFLICT`(409, 매칭되는 도메인 코드가 없는 데이터 무결성 제약 위반 폴백)
 
 ---
 
@@ -153,9 +153,16 @@ frontend/src/
   pages/          라우트별 페이지 컴포넌트 (LoginPage, SignupPage, PortfolioPage, AssetNewPage, AssetDetailPage)
   layouts/        AppLayout (헤더 O, 인증 라우트용), AuthLayout (헤더 X)
   auth/           authContext.ts, AuthProvider.tsx, useAuth.ts, tokenStorage.ts, RequireAuth.tsx
+  api/            types.ts(계약 단일 출처), fixtures.ts(더미 응답 — Task 018에서 제거 예정)
   router.tsx      라우팅 정의 (react-router v8)
   main.tsx        진입점
 ```
+
+### 타입·더미 데이터 규칙 (Task 006)
+
+- API 요청·응답 타입은 `frontend/src/api/types.ts`가 단일 출처 — 필드 추가/변경 시 `docs/ROADMAP.md` 「API 규격」도 함께 갱신
+- `tsconfig.app.json`의 `erasableSyntaxOnly` 때문에 `enum` 키워드 금지 — `as const` 배열 + 인덱스 유니온 패턴 사용 (`types.ts`의 `ASSET_TYPES`, `ERROR_CODES` 참고)
+- Task 007~011은 실제 fetch 대신 `frontend/src/api/fixtures.ts`의 더미 응답을 사용
 
 ### 라우팅 규칙
 

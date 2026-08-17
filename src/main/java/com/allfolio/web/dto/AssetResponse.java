@@ -15,6 +15,7 @@ public record AssetResponse(
         String currency,
         String quantity,
         String avgPrice,
+        int version,
         Instant updatedAt
 ) {
 
@@ -27,6 +28,7 @@ public record AssetResponse(
                 asset.getCurrency(),
                 holding.getQuantity().toPlainString(),
                 holding.getAvgPrice().toPlainString(),
+                holding.getVersion(),
                 holding.getUpdatedAt()
         );
     }

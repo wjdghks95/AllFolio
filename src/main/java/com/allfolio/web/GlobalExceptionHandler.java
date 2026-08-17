@@ -1,11 +1,13 @@
 package com.allfolio.web;
 
+import com.allfolio.domain.exception.AssetNotFoundException;
 import com.allfolio.domain.exception.EmailAlreadyExistsException;
 import com.allfolio.domain.exception.InvalidCredentialsException;
 import com.allfolio.web.dto.ErrorResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -14,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
+import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -43,10 +46,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    /**
+     * getFieldErrors()만 모으면 클래스 레벨 제약({@link com.allfolio.web.dto.AvgPriceRequiredUnlessCash}
+     * 등)의 위반이 통째로 사라진다 — 그 위반은 FieldError가 아니라 global(Object) error로 담기기
+     * 때문이다(docs/ROADMAP.md Task 006 code-reviewer 지적). getAllErrors()로 두 종류를 함께 모은다.
+     */
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex,
             HttpHeaders headers, HttpStatusCode status, WebRequest request) {
-        String message = ex.getBindingResult().getFieldErrors().stream()
+        String message = ex.getBindingResult().getAllErrors().stream()
                 .map(this::describe)
                 .collect(Collectors.joining(", "));
         return handleExceptionInternal(ex, message, headers, status, request);
@@ -115,16 +123,24 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
-     * 현재 유니크 제약은 uk_users_email 하나뿐이라 EMAIL_ALREADY_EXISTS로 단정할 수 있다.
-     * TODO Step 4에서 holdings의 uk_holdings_asset_id 등 다른 제약 위반이 들어오므로
-     *      제약명(ConstraintViolationException.getConstraintName())으로 코드를 세분화해야 한다.
+     * 제약명(원인 체인의 메시지에 담긴 제약 이름)으로 분기한다. uk_users_email 위반만
+     * EMAIL_ALREADY_EXISTS로 단정할 수 있고, holdings의 uk_holdings_asset_id 등 그 외
+     * 제약 위반은 매칭되는 도메인 에러 코드가 없으므로 일반 409 CONFLICT로 폴백한다
+     * (docs/ROADMAP.md Task 006). 결정 #3(종목 중복 등록 허용)에 따라 assets에는 새
+     * UNIQUE 제약이 없어 ASSET_ALREADY_EXISTS 코드는 만들지 않는다.
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(DataIntegrityViolationException e) {
         log.warn("데이터 무결성 제약 위반", e);
+        String causeMessage = e.getMostSpecificCause().getMessage();
+        if (causeMessage != null && causeMessage.contains("uk_users_email")) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(ErrorResponse.of("EMAIL_ALREADY_EXISTS", "이미 가입된 이메일입니다."));
+        }
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(ErrorResponse.of("EMAIL_ALREADY_EXISTS", "이미 가입된 이메일입니다."));
+                .body(ErrorResponse.of("CONFLICT", "데이터 정합성 제약을 위반했습니다."));
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)
@@ -132,6 +148,28 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of("INVALID_CREDENTIALS", e.getMessage()));
+    }
+
+    /** 자산이 없을 때와 남의 자산일 때 모두 같은 응답 — 403이면 "그 ID는 존재한다"는 사실이 새어 나간다. */
+    @ExceptionHandler(AssetNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleAssetNotFound(AssetNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("ASSET_NOT_FOUND", e.getMessage()));
+    }
+
+    /**
+     * JPA가 @Version 불일치를 감지했을 때 던지는 예외. 충돌은 서버 잘못이 아니라 클라이언트가
+     * 재시도하면 되는 상황이므로 500이 아닌 409로 응답한다. 하위 타입인
+     * ObjectOptimisticLockingFailureException이 아닌 상위 타입으로 캐치한다 —
+     * Spring Data의 delete/save 경로가 상황에 따라 상위 타입만 던질 수 있어, 하위 타입만
+     * 잡으면 그 경우 Exception 폴백으로 떨어져 500이 나간다(code-reviewer 지적).
+     */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleOptimisticLockingFailure(OptimisticLockingFailureException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("HOLDING_CONFLICT", "다른 요청이 먼저 이 항목을 수정했습니다."));
     }
 
     /** 필터 체인에서 던져진 뒤 RestAuthenticationEntryPoint가 위임해 온다. */
@@ -170,7 +208,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return "서버 내부 오류가 발생했습니다.";
     }
 
-    private String describe(FieldError error) {
-        return error.getField() + ": " + error.getDefaultMessage();
+    private String describe(ObjectError error) {
+        if (error instanceof FieldError fieldError) {
+            return fieldError.getField() + ": " + fieldError.getDefaultMessage();
+        }
+        return error.getDefaultMessage();
     }
 }

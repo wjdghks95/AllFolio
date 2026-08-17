@@ -67,7 +67,7 @@ Vite 개발 서버는 `/v1/*` 요청을 `localhost:8080`(Spring Boot)으로 프�
 
 ## 아키텍처 개요
 
-AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. 현재는 **Phase 1 (애플리케이션 골격 구축)** 진행 중이며, Task 001~003(백엔드 스캐폴딩·DB 스키마·JWT 인증)은 완료됐고 Task 004(프론트 라우팅 골격)·005(도메인 타입 정의)·006(API 계약 확정)부터 진행합니다. 진행 상황은 [`docs/ROADMAP.md`](docs/ROADMAP.md) 「개발 단계」 절 참조.
+AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. Phase 1(애플리케이션 골격 구축, Task 001~006)이 완료됐고, 현재는 **Phase 2 (UI/UX 완성 + 백엔드 도메인 구현, 병렬 2트랙)** 진행 중입니다 — 프론트는 Task 007(공통 컴포넌트)부터, 백엔드는 Task 012(자산 CRUD API)부터 시작합니다. 진행 상황은 [`docs/ROADMAP.md`](docs/ROADMAP.md) 「개발 단계」 절 참조.
 
 ### 핵심 기술 스택
 
@@ -178,6 +178,7 @@ grep -r "double " src/main/java --include="*.java" | grep -v "Double\|//.*double
 - 종목당 1개 `Holding` (stock/crypto/cash)
 - 평단가(`avg_price`), 수량(`quantity`)을 `BigDecimal`로 추적
 - 시뮬레이터 입력: 추가 매수 가격 × 수량 → 신규 평단가 계산
+- **CASH 자산의 `avg_price`는 항상 `1`** (Task 006 결정). 현금에는 평단가 개념이 없지만 `holdings.avg_price`에 `CHECK (avg_price > 0)` 제약이 있어 `0`을 넣을 수 없다. `1`을 고정값으로 써서 "평가금액 = quantity × avg_price" 계산식을 CASH에도 그대로 적용할 수 있게 한다(문자 그대로 "1원짜리 단위 × 보유량"). 등록 화면에서는 CASH 선택 시 평단가 입력란을 숨긴다
 
 ### 포트폴리오 (Portfolio)
 
