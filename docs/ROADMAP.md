@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-08-12
+**최종 수정:** 2026-08-19
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~4와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -74,9 +74,9 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 ## 개발 단계
 
-### Phase 1: 애플리케이션 골격 구축
+### Phase 1: 애플리케이션 골격 구축 ✅ 완료 (2026-08-17)
 
-양쪽 트랙(프론트/백엔드)이 서로를 기다리지 않고 출발할 수 있는 상태를 만드는 단계.
+양쪽 트랙(프론트/백엔드)이 서로를 기다리지 않고 출발할 수 있는 상태를 만드는 단계. Task 001~006 전체 완료로 Phase 1을 종료하고, 이제 Phase 2(2-A 프론트 UI, 2-B 백엔드 도메인) 병렬 트랙에 착수한다.
 
 - **Task 001: 백엔드 프로젝트 스캐폴딩 및 실행 환경 구축** ✅ — 완료
   - ✅ Gradle Kotlin DSL, Spring Boot 4.1.0, Java 25 toolchain
@@ -124,7 +124,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - ✅ `CreateAssetRequest.currency` 검증을 `@Pattern("^[A-Z]{3}$")`로 강화 (`web/dto/CreateAssetRequest.java`)
     - ✅ 응답 DTO enum 직렬화 정책 확정 — `AssetResponse.assetType`은 `"STOCK"` 문자열로 직렬화(Jackson 기본 동작)되며 `ApiContractSerializationTest`로 고정. TypeScript `AssetType`도 동일한 문자열 유니온으로 반영
 
-### Phase 2: UI/UX 완성 + 백엔드 도메인 구현 (병렬 2트랙)
+### Phase 2: UI/UX 완성 + 백엔드 도메인 구현 (병렬 2트랙) 🔵 진행 중
 
 두 트랙 모두 Task 006(API 계약)을 선행 조건으로 한다.
 
