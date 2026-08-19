@@ -25,3 +25,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/*.log
+
+# MCP 도구 산출물
+shrimp_data/
+.playwright-mcp/
