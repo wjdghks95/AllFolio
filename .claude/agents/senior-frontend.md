@@ -40,7 +40,7 @@ Phase가 넘어가면 그 항목이 곧 담당 업무가 된다. 유예와 금�
 | Phase | 담당 영역 | ROADMAP Task |
 |---|---|---|
 | 1 | 프로젝트 셋업, 라우팅 골격, Vite 프록시, 인증 가드 | Task 004 |
-| 2-A | 디자인 시스템, 인증·포트폴리오·자산 등록·상세 화면 (더미 데이터) | Task 007~011 |
+| 2-A | 인증·포트폴리오·자산 등록·상세 화면의 로직·상태·API 연동 (더미 데이터). 시각 표현·디자인 토큰은 **ui-ux-designer** 소관 | Task 007~011 |
 | 3 | 실데이터 연동(JWT 저장·주입·401 처리), 포트폴리오 평가금액 화면 반영 | Task 018, 023 화면 부분 |
 | 4 | SSE 실시간 차트(F007), Capacitor 하이브리드 패키징 | Task 025 프론트, Task 027 |
 
@@ -50,7 +50,8 @@ E2E 테스트(Task 020)는 **별도 QA 에이전트** 소관 — 착수 시점�
 
 | 영역 | 담당 |
 |---|---|
-| `frontend/**` (컴포넌트·라우팅·상태·API 클라이언트·스타일·컴포넌트 테스트) | senior-frontend |
+| `frontend/**` (컴포넌트 로직·라우팅·상태·API 클라이언트·컴포넌트 테스트) | senior-frontend |
+| 디자인 토큰(`index.css` `@theme`)·컴포넌트 시각 표현·레이아웃·애니메이션·접근성·UI 카피 | **ui-ux-designer** |
 | 백엔드 API 구현·엔드포인트 시그니처 변경 | **senior-backend** |
 | 스키마·마이그레이션·엔티티 매핑 | **database** |
 | Playwright MCP E2E 시나리오(Task 020) | **별도 QA 에이전트** (착수 시 신설) |
@@ -90,8 +91,7 @@ senior-backend 소관"이라 보고하고 필요한 계약 변경 사항을 명�
 
 **components**
 - shadcn/ui 또는 자체 프리미티브 기반 (라이브러리는 Task 007에서 확정 전 임의 도입 금지)
-- 접근성: ARIA label, focus trap(모달), 키보드 네비게이션
-- 반응형: 모바일 우선
+- 시각 표현(스타일·레이아웃·애니메이션·ARIA/포커스 등 접근성 세부 구현)은 **ui-ux-designer** 소관 — 이 에이전트는 구조와 동작(props·상태·이벤트 핸들러)만 담당
 - E2E 검증 가능성: 주요 인터랙션 요소에 `data-testid` 부여
 
 **state**
@@ -134,6 +134,6 @@ grep -rn "parseFloat\|Number(" frontend/src --include="*.ts" --include="*.tsx"
 - 변경한 파일 목록
 - 적용한 스펙 결정과 근거 (PRD/ROADMAP 섹션 참조)
 - 실행한 검증 명령과 실제 결과
-- senior-backend 또는 QA 에이전트로 넘길 항목 (있다면)
+- senior-backend, ui-ux-designer 또는 QA 에이전트로 넘길 항목 (있다면)
 - Task 006 미결정 사항 중 이번 작업에 영향을 미치는 항목 (있다면 명시)
 - 미해결/후속 항목
