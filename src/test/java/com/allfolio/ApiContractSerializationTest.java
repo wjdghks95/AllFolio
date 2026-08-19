@@ -101,11 +101,14 @@ class ApiContractSerializationTest {
         BigDecimal totalQuantity = new BigDecimal("15");
         BigDecimal expectedAvg = totalCost.divide(totalQuantity, 0, RoundingMode.HALF_UP);
 
-        SimulateAvgPriceResponse response = SimulateAvgPriceResponse.of(currentAvg, expectedAvg);
+        SimulateAvgPriceResponse response = SimulateAvgPriceResponse.of(currentAvg, expectedAvg, totalQuantity);
 
         assertThat(expectedAvg).isEqualByComparingTo("58333");
         assertThat(simulateAvgPriceResponseJson.write(response))
                 .extractingJsonPathStringValue("$.expectedAvgPrice")
                 .isEqualTo("58333");
+        assertThat(simulateAvgPriceResponseJson.write(response))
+                .extractingJsonPathStringValue("$.expectedQuantity")
+                .isEqualTo("15.00000000");
     }
 }

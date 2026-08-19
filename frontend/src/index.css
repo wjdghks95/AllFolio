@@ -1,1 +1,89 @@
 @import "tailwindcss";
+
+/*
+ * AllFolio 디자인 토큰 — "격자지 위의 잉크(Ink on graph paper)"
+ * Tailwind v4는 CSS-first이므로 tailwind.config.js 없이 이 @theme 블록이 토큰의 단일 출처다.
+ * 색·타이포·라운딩의 선택 근거는 docs/DESIGN.md 참조.
+ */
+@theme {
+  /* --- 무채 램프 (종이와 잉크) --- */
+  --color-grid: #eff2f1; /* 앱 배경. 청록기 도는 회색 = 모눈종이 */
+  --color-surface: #ffffff; /* 카드·입력 표면 */
+  --color-rule: #d3dad8; /* 경계선·격자선 */
+  --color-ink-soft: #56636b; /* 보조 텍스트·라벨 */
+  --color-ink: #11161a; /* 본문·제목·primary 액션 */
+
+  /* --- 손익 축 (한국 증권 관례: 상승 빨강 / 하락 파랑) --- */
+  --color-gain: #d92e22;
+  --color-loss: #1552d6;
+
+  /* --- 시스템 상태 축 (손익 축과 hue를 분리해 의미 충돌을 막는다) --- */
+  --color-alarm: #7a2e52; /* error·danger */
+  --color-affirm: #2f6b4f; /* success */
+
+  /* --- 타이포 3역할 --- */
+  --font-sans: "IBM Plex Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  --font-mono: "IBM Plex Mono", "IBM Plex Sans KR", ui-monospace, SFMono-Regular, monospace;
+
+  /* --- 라운딩 2단계 --- */
+  --radius-control: 6px;
+  --radius-card: 10px;
+}
+
+/* 차트 플롯 영역용 격자. 배경의 격자지 텍스처와 같은 24px 모듈을 쓰되 조금 더 진하게 보인다. */
+@utility plot-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--color-ink) 7%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-ink) 7%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-grid);
+    /* 시그니처의 세계관(차트 격자) 을 배경에 아주 얇게 심는다. 24px 모듈 = 간격 스케일의 배수. */
+    background-image:
+      linear-gradient(to right, color-mix(in srgb, var(--color-ink) 4%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, var(--color-ink) 4%, transparent) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-attachment: fixed;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    /* 한국어는 어절 단위로 끊어야 읽힌다 — 좁은 화면에서 낱말이 쪼개지는 것을 막는다.
+       끊을 곳이 없는 긴 문자열(티커·URL)은 overflow-wrap이 받아낸다. */
+    word-break: keep-all;
+    overflow-wrap: break-word;
+  }
+
+  /* 금액·수량은 자리수가 세로로 정렬돼야 비교가 된다. */
+  .font-mono,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-ink) 14%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -10,7 +10,7 @@ export type AssetType = (typeof ASSET_TYPES)[number];
 
 // 금액·수량 필드는 NUMERIC(28,8)이라 JS number(IEEE 754 배정도)가 정밀도를
 // 담지 못한다. 백엔드가 항상 JSON 문자열로 내려주므로 이 타입도 string으로
-// 고정한다. parseFloat/Number() 변환 금지 — decimal.js 등 십진 라이브러리로 처리.
+// 고정한다. parseFloat/Number() 변환 금지 — big.js 등 십진 라이브러리로 처리.
 export type Money = string;
 
 export interface Asset {
@@ -88,6 +88,8 @@ export interface SimulateAvgPriceRequest {
 export interface SimulateAvgPriceResponse {
   currentAvgPrice: Money;
   expectedAvgPrice: Money;
+  // 추가 매수 반영 후 총 보유 수량 (통화/자산 종류와 무관하게 항상 8자리 scale).
+  expectedQuantity: Money;
   // 포트폴리오 내 비중(%). 분모인 전체 평가금액이 외부 시세 필요라 Phase 2에서는 null.
   currentWeight: Money | null;
   expectedWeight: Money | null;

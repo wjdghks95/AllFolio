@@ -3,7 +3,9 @@
 ## Agent Routing
 
 - **백엔드 애플리케이션 계층** (`web/`, `domain/`, `infra/`, `config/`, 테스트) → `senior-backend` 에이전트
-- **프론트엔드** (`frontend/src/`) → `senior-frontend` 에이전트
+- **프론트엔드 구조·동작** (`frontend/src/`의 컴포넌트 props·상태·핸들러, 라우팅, API 클라이언트, `lib/` 로직, 컴포넌트 테스트) → `senior-frontend` 에이전트
+- **프론트엔드 시각 레이어** (`frontend/src/index.css`의 `@theme` 디자인 토큰, 각 컴포넌트의 className·마크업·ARIA/포커스 등 접근성 세부 구현, UI 카피, `docs/DESIGN.md`) → `ui-ux-designer` 에이전트
+  - 경계: senior-frontend는 컴포넌트의 "구조와 동작"(무엇을 렌더링하고 어떻게 반응하는가)까지만 담당하고, 그 구조에 입히는 시각 표현은 ui-ux-designer 소관이다. 컴포넌트 파일 최상단에 `// 구조·동작: senior-frontend / className·마크업·문구: ui-ux-designer` 주석으로 경계를 명시한다
 - **DB 계층** (`src/main/resources/db/migration/V*.sql`, JPA 엔티티 스키마 매핑) → `database` 에이전트
 - **코드 리뷰** (읽기 전용 검증) → `code-reviewer` 에이전트
 - Flyway 마이그레이션 추가 + 대응 JPA 엔티티 변경은 `database` 에이전트가 동시에 처리
@@ -12,8 +14,8 @@
 
 ## Project Phase Status
 
-- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정)
-- **우선순위**: Task 007(공통 컴포넌트·디자인 시스템) / Task 012(자산 CRUD API) — Phase 2 병렬 2트랙
+- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정), Task 007(공통 컴포넌트·디자인 시스템)
+- **우선순위**: Task 008(인증 화면) / Task 012(자산 CRUD API) — Phase 2 병렬 2트랙
 - 상세 Task 명세 → `docs/ROADMAP.md`
 
 ---
@@ -150,10 +152,13 @@ domain.service → infra (허용: JwtIssuer 등)
 
 ```
 frontend/src/
-  pages/          라우트별 페이지 컴포넌트 (LoginPage, SignupPage, PortfolioPage, AssetNewPage, AssetDetailPage)
+  pages/          라우트별 페이지 컴포넌트 (LoginPage, SignupPage, PortfolioPage, AssetNewPage, AssetDetailPage, DevUiPage — Task 018에서 제거 예정)
   layouts/        AppLayout (헤더 O, 인증 라우트용), AuthLayout (헤더 X)
   auth/           authContext.ts, AuthProvider.tsx, useAuth.ts, tokenStorage.ts, RequireAuth.tsx
   api/            types.ts(계약 단일 출처), fixtures.ts(더미 응답 — Task 018에서 제거 예정)
+  components/     공통 컴포넌트(Button/Field/TextField/Alert/Card/ConfirmDialog) + 각 `*.test.tsx`. 신규 공통 컴포넌트 중 직접 DOM 루트를 렌더링하는 컴포넌트는 이 디렉터리에 배치하고 `testId` prop을 반드시 노출(렌더-프롭 래퍼처럼 자체 DOM 루트가 없는 경우는 예외 — 예: `Field`는 label/error/hint만 렌더링하고 실제 입력 요소는 `children` 콜백이 만들어 소비자인 `TextField`가 자기 `testId`를 직접 부착한다)
+  lib/            금융 정밀도·검증·문구 유틸(big.ts/money.ts/validation.ts/messages.ts/simulate.ts) + 각 `*.test.ts`. UI 관심사 없는 순수 함수만 배치
+  test/           Vitest 전역 설정(setup.ts) — 환경은 `happy-dom` (jsdom은 `<dialog>.showModal()` 미구현으로 사용 금지, jsdom#3294)
   router.tsx      라우팅 정의 (react-router v8)
   main.tsx        진입점
 ```
@@ -179,7 +184,15 @@ frontend/src/
 ### 금액 렌더링
 
 - API에서 금액은 문자열로 수신 (`"60000"`) — `parseFloat`/`Number()` 변환 금지
-- 화면 표시 시 포맷터 함수 사용 (Task 007에서 구현 예정)
+- 화면 표시 시 `frontend/src/lib/money.ts`의 포맷터 함수 사용 (`formatAmount`/`formatQuantity`/`formatWeight`/`formatSignedAmount` 등, `big.js` 기반 HALF_UP 반올림)
+- `toFixed(` 호출은 `frontend/src/lib/big.ts` 1곳(표시 포맷터 내부)만 허용 — 그 외 위치에서 `toFixed(` 호출 금지(네이티브 `toFixed`는 HALF_EVEN 계열이라 「금융 정밀도 규칙」의 HALF_UP과 다른 결과를 낼 수 있음). 검증: `cd frontend && grep -rn "toFixed(" src --include="*.ts" --include="*.tsx" | grep -v '^src/lib/big.ts:'` → 0건이어야 함(테스트 파일에서 네이티브 `toFixed`의 오차를 예시로 보여주는 경우는 예외)
+- `TextField`에 `type="number"` 사용 금지 — 네이티브 number input의 `valueAsNumber`가 `double`(IEEE 754)을 경유해 `NUMERIC(28,8)` 정밀도를 깨뜨린다. 숫자 입력은 `type="text"` + `inputMode="decimal"` + `lib/validation.ts`의 문자열 기반 검증으로 처리
+
+### `data-testid` 네이밍 규칙
+
+- 형식: kebab-case `'<화면>-<요소>[-<수식어>]'` (예: `login-email-input`, `asset-new-submit`, `confirm-delete-cancel`)
+- 공통 컴포넌트(Button/TextField/ConfirmDialog 등)는 `testId` prop을 그대로 최상위 엘리먼트에 부착만 한다 — 컴포넌트가 내부적으로 접미사를 붙이는 등 자체 생성 로직을 갖지 않는다(단, `ConfirmDialog`처럼 여러 자식 버튼이 있는 복합 컴포넌트는 전달받은 `testId`에 `-cancel`/`-confirm` 등 고정 접미사를 붙여 하위 요소에 배분하는 것은 허용)
+- 실제 `data-testid` 값은 각 페이지(`pages/`)에서 화면·요소 이름을 조합해 호출부에서 결정한다
 
 ### Vite 개발 프록시
 
@@ -226,3 +239,5 @@ frontend/src/
 - `localStorage.getItem('allfolio_token')` 직접 호출 (`tokenStorage.ts` 통해 접근)
 - 시뮬레이터 API에서 DB Write 발생
 - `BigDecimal.equals()`로 금융 값 비교 (`.compareTo()` 사용)
+- `frontend/src/lib/big.ts` 외 위치에서 `toFixed(` 호출
+- 프론트 `TextField`에 `type="number"` 사용 (`valueAsNumber`가 `double` 경유로 정밀도 손실)

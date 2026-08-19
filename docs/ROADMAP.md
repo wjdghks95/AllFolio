@@ -130,10 +130,15 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 **2-A. 프론트엔드 UI (더미 데이터로 완성)**
 
-- **Task 007: 공통 컴포넌트 및 디자인 시스템 구축**
-  - 버튼·입력·폼 검증·카드·모달·토스트
-  - 반응형 기준
-  - 금액 표기 포맷터 (문자열로 받은 금액을 정밀도 손실 없이 렌더링)
+- **Task 007: 공통 컴포넌트 및 디자인 시스템 구축** ✅ — 완료
+  - ✅ 금융 정밀도 유틸(`frontend/src/lib/big.ts`/`money.ts`/`validation.ts`/`simulate.ts`) — `big.js`(십진 연산 라이브러리) 채택. 「금융 정밀도 규칙」의 스케일·HALF_UP을 상수로 매핑, `toFixed()`는 `money.ts`의 표시 포맷터 내부 1곳(`big.ts`)에서만 호출
+  - ✅ 공통 컴포넌트 6종(Button/Field/TextField/Alert/Card/ConfirmDialog) — 구조·props·상태·핸들러·`data-testid`는 senior-frontend, 시각 표현(className·마크업·ARIA·포커스 링, `src/index.css` `@theme` 토큰)은 ui-ux-designer(`docs/DESIGN.md` 참고)
+  - ✅ 문구 매핑(`frontend/src/lib/messages.ts`) — 검증/에러 코드 → 한국어 문구. 키 구조는 senior-frontend가 코드 타입에서 고정, 문구 자체는 ui-ux-designer가 최종본으로 확정
+  - ✅ 테스트 인프라 — Vitest + `@testing-library/react`. DOM 환경은 `jsdom` 대신 `happy-dom` 채택: `ConfirmDialog`가 네이티브 `<dialog>`의 `showModal()`을 쓰는데 jsdom이 이를 구현하지 않아(jsdom#3294) 테스트가 깨짐. `happy-dom`은 `showModal()`을 지원해 이 문제가 없다
+  - ✅ 토스트 컴포넌트는 만들지 않는다 — 별도 Toast 대신 "라우터 state로 결과 전달(`navigate(path, { state: { flash } })`) + 이동 대상 페이지에서 기존 `Alert` 컴포넌트로 렌더링" 패턴으로 대체. 근거: 자동 소멸 타이머·큐잉·스택 쌓임 등 Toast 특유의 상태 관리가 이 앱의 화면 흐름(등록/수정/삭제 후 항상 다른 화면으로 이동)에는 불필요한 복잡도이고, `Alert`가 이미 톤·아이콘·`data-testid`를 갖추고 있어 재사용 가능. 실제 적용은 Task 008~011에서 각 폼 제출 흐름에 붙인다
+  - ✅ `/dev/ui` 컴포넌트 쇼케이스 라우트(`frontend/src/pages/DevUiPage.tsx`) — `import.meta.env.DEV`로만 라우터에 등록해 프로덕션 빌드에서 제외. **Task 018(실 API 연동 착수) 시점에 라우트·페이지 파일 함께 제거 예정**
+  - 반응형 기준: ui-ux-designer 소관, `docs/DESIGN.md` 참고
+  - 정밀도 grep 검증 규칙: `grep -rn "parseFloat\|Number(\|toFixed(" frontend/src`에서 `src/lib/big.ts` 1곳(표시 포맷터 내부)을 제외하면 0건이어야 한다(테스트 파일에서 네이티브 `toFixed`의 오차를 예시로 대조하는 경우는 예외 — 예: `money.test.ts`의 `(1.005).toFixed(2)` 대조). `TextField`는 `type="number"`/`valueAsNumber`를 쓰지 않는다(`valueAsNumber`가 `double`을 경유해 정밀도 규칙을 깨기 때문)
 
 - **Task 008: 인증 화면 구현 (F010)**
   - 로그인·회원가입 폼, 입력 형식 검증, 에러 메시지 표시
@@ -176,6 +181,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 - **Task 015: 물타기 시뮬레이터 구현 (F006)**
   - `POST /v1/simulate/avg-price`, In-Memory 가중평균, DB 쓰기 없음
+  - 응답에 `expectedQuantity` 필드(scale 8) 포함 필수
   - P99 ≤ 5ms
 
 - **Task 016: 금융 정밀도 및 도메인 통합 테스트**
@@ -191,6 +197,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 - **Task 018: 프론트–백엔드 실데이터 연동**
   - 더미 데이터를 실제 API 호출로 교체
   - JWT 저장·주입, 401 처리, 로딩·에러 상태
+  - Task 007에서 추가한 `/dev/ui` 컴포넌트 쇼케이스 라우트·`DevUiPage.tsx` 제거 (더미 데이터 단계 전용 도구였으므로)
 
 - **Task 019: 인증 강화 — Refresh Token 및 로그아웃 (F010)**
   - Task 003의 남은 갭 해소. 실시간 차트(F007)를 띄워두는 사용 패턴과 15분 만료가 충돌하므로 연동 직후 처리
@@ -226,6 +233,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 - **Task 027: Capacitor 하이브리드 앱 패키징**
   - Vite `dist/`를 WebView에 탑재
   - 앱은 `capacitor://` 출처에서 도는 별도 origin이라 개발 중 프록시로 우회하던 CORS 설정이 여기서 실제로 필요해진다.
+  - 웹폰트(IBM Plex) self-host 전환 검토 — `frontend/index.html`이 Google Fonts CDN에서 로드해, 오프라인/제한된 네트워크 환경에서 로드 실패 시 `--font-sans` 폴백으로 떨어질 수 있음
 
 - **Task 028: 부하 검증 및 성능 튜닝**
   - Virtual Thread 1,000+ 동시 SSE 커넥션, k6 벤치마크
@@ -330,13 +338,14 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 {
   "currentAvgPrice": "60000",
   "expectedAvgPrice": "58333",
+  "expectedQuantity": "15.00000000",
   "currentWeight": null,
   "expectedWeight": null,
   "calculatedAt": "2026-08-05T10:00:00.003Z"
 }
 ```
 
-**골든 케이스**: 기존 평단 60,000원 × 10주 + 추가 55,000원 × 5주 → `(600,000 + 275,000) / 15 = 58,333.33...` → HALF_UP, scale 0 → **58,333원**
+**골든 케이스**: 기존 평단 60,000원 × 10주 + 추가 55,000원 × 5주 → `(600,000 + 275,000) / 15 = 58,333.33...` → HALF_UP, scale 0 → **58,333원**. `expectedQuantity`는 추가 매수 반영 후 총 보유 수량(10 + 5 = 15)이며, 통화/자산 종류와 무관하게 항상 8자리 scale로 내려온다. 백엔드 Task 015(시뮬레이터 API) 구현 시 이 필드를 포함해야 한다.
 
 `currentWeight`/`expectedWeight`는 포트폴리오 내 비중(%)이다. 분모가 전체 포트폴리오 평가금액인데, 평가금액은 외부 시세가 있어야 계산되므로(F005b) Phase 1~2에서는 `null`이고 Task 023(외부 시세 연동 후) 이후 채워진다.
 

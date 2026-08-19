@@ -164,6 +164,7 @@ export const portfolioFixture: PortfolioResponse = {
 export const simulateAvgPriceFixture: SimulateAvgPriceResponse = {
   currentAvgPrice: '60000',
   expectedAvgPrice: '58333',
+  expectedQuantity: '15.00000000',
   currentWeight: null,
   expectedWeight: null,
   calculatedAt: '2026-08-17T09:30:00Z',
