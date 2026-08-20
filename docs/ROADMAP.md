@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-08-19
+**최종 수정:** 2026-08-20
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~4와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -140,8 +140,13 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - 반응형 기준: ui-ux-designer 소관, `docs/DESIGN.md` 참고
   - 정밀도 grep 검증 규칙: `grep -rn "parseFloat\|Number(\|toFixed(" frontend/src`에서 `src/lib/big.ts` 1곳(표시 포맷터 내부)을 제외하면 0건이어야 한다(테스트 파일에서 네이티브 `toFixed`의 오차를 예시로 대조하는 경우는 예외 — 예: `money.test.ts`의 `(1.005).toFixed(2)` 대조). `TextField`는 `type="number"`/`valueAsNumber`를 쓰지 않는다(`valueAsNumber`가 `double`을 경유해 정밀도 규칙을 깨기 때문)
 
-- **Task 008: 인증 화면 구현 (F010)**
-  - 로그인·회원가입 폼, 입력 형식 검증, 에러 메시지 표시
+- **Task 008: 인증 화면 구현 (F010)** ✅ — 완료
+  - ✅ `frontend/src/api/authApi.ts` — 더미 데이터가 아닌 실 백엔드(`POST /v1/auth/signup`·`POST /v1/auth/login`, Task 003에서 이미 완성)를 fetch로 직접 호출. 다른 2-A 화면과 달리 이 화면만 처음부터 실 API를 쓴다 — 인증 백엔드에는 외부 시세 같은 미해결 의존성이 없어 더미로 흉내 낼 이유가 없기 때문. `ApiError`는 `code`만 담고, 문구는 화면이 `messageForErrorCode()`로 렌더링 시점에 조회
+  - ✅ `LoginPage.tsx`/`SignupPage.tsx` — 이메일·비밀번호 폼(`lib/validation.ts`로 클라이언트 검증), 성공 시 `AuthProvider.login()` 후 이동(로그인은 `location.state.from` 우선, 회원가입은 자동 로그인 후 `/portfolio`), 실패 시 `Alert`로 에러 문구 표시. `<form noValidate>`로 브라우저 네이티브 검증 팝업이 커스텀 에러 UI를 가리는 문제 방지
+  - ✅ 로그인 비밀번호는 `validatePassword()`(8자 강제)를 쓰지 않고 빈 값만 검사한다 — 백엔드 `LoginRequest`가 의도적으로 길이 제약을 두지 않기 때문(정책 변경 전 가입자 로그인 차단 방지, 400/401 응답 차이로 비밀번호 정책이 유추되는 것도 방지). 회원가입은 `validatePassword()`를 그대로 사용(8자 이상 + UTF-8 72바이트 이하)
+  - ✅ `LoginPage.test.tsx`/`SignupPage.test.tsx` — Vitest + Testing Library, 6개 케이스(검증 실패·성공·서버 에러·기본 리다이렉트), `fetch` 모킹
+  - ✅ 시각·카피 다듬기(ui-ux-designer) — `docs/DESIGN.md` §6-1 "인증 화면 골격" 신설(워드마크 → h1 → 한 줄 설명(회원가입만) → 폼 → 실선 구분선 → 반대편 화면 링크)
+  - ✅ code-reviewer 독립 검증 2회(구현 직후 Minor 4건 발견·수정, 재검증에서 뮤테이션 테스트로 수정 사항 실측 확인) — Blocker 0건
 
 - **Task 009: 포트폴리오 홈 화면 구현 (F005)**
   - 자산 목록, 평가금액·비중·손익 칼럼, 전체 합계, "자산 등록" 버튼
