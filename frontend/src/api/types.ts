@@ -64,7 +64,8 @@ export interface PortfolioItem {
   // 취득원가 (avgPrice × quantity)
   cost: Money;
   // evaluationKrw/unrealizedPnl/weight는 외부 시세 연동 전(Phase 2)에는 항상 null.
-  // Task 023(Phase 3)에서 채워진다.
+  // Task 023(Phase 3)에서 채워진다. 필드명(Krw)은 evaluationKrw만 달고 있지만, unrealizedPnl도
+  // 항상 KRW 환산액이다(ROADMAP 「API 규격」/PRD F005 — 원자산 통화가 아니다).
   evaluationKrw: Money | null;
   unrealizedPnl: Money | null;
   weight: Money | null;

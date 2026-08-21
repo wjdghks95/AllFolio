@@ -54,6 +54,14 @@ describe('formatQuantity', () => {
   it('뒤쪽 0을 제거한다', () => {
     expect(formatQuantity('10.00000000')).toBe('10')
   })
+
+  it('정수부를 천 단위로 그룹핑한다', () => {
+    expect(formatQuantity('1500000')).toBe('1,500,000')
+  })
+
+  it('그룹핑 후에도 소수부는 그대로 유지한다', () => {
+    expect(formatQuantity('0.05123456')).toBe('0.05123456')
+  })
 })
 
 describe('formatWeight', () => {

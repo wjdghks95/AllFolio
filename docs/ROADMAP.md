@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-08-20
+**최종 수정:** 2026-08-21
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~4와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -148,8 +148,19 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ 시각·카피 다듬기(ui-ux-designer) — `docs/DESIGN.md` §6-1 "인증 화면 골격" 신설(워드마크 → h1 → 한 줄 설명(회원가입만) → 폼 → 실선 구분선 → 반대편 화면 링크)
   - ✅ code-reviewer 독립 검증 2회(구현 직후 Minor 4건 발견·수정, 재검증에서 뮤테이션 테스트로 수정 사항 실측 확인) — Blocker 0건
 
-- **Task 009: 포트폴리오 홈 화면 구현 (F005)**
-  - 자산 목록, 평가금액·비중·손익 칼럼, 전체 합계, "자산 등록" 버튼
+- **Task 009: 포트폴리오 홈 화면 구현 (F005)** ✅ — 완료 (화면 명칭이 구현 중 "포트폴리오"에서 **"총 자산"**으로 바뀜)
+  - ✅ `frontend/src/pages/PortfolioPage.tsx` — `frontend/src/api/fixtures.ts`의 `portfolioFixture`(더미 데이터)를 정적 렌더링. 백엔드 포트폴리오 API(Task 013)가 아직 없어 2-A 원칙대로 더미로 완성, 실 연동은 Task 018
+  - ✅ 사용자 피드백에 따라 1차 구현 후 5차례 재개편(사용자가 다른 증권 앱 스크린샷을 보여주며 방향 논의 → 라이트 테마 유지하되 패턴만 채택하기로 합의, 이후 화면 콘셉트를 "총 자산"으로 전면 재정의) — 최종 화면 구성:
+    - `<h1>` "총 자산", "자산 등록" 버튼은 특정 그룹에 속하지 않는 페이지 레벨 액션(h1과 같은 줄)
+    - 합계 카드는 통화별(KRW/USD) 취득원가 병기 대신 `totalEvaluationKrw` 단일 KRW 히어로 숫자 + 평가손익. 값이 `null`(Phase 2)이면 "시세 연동 전" 상태 표식으로 축소해 빈 값과 렌더 오류를 구분
+    - 자산 목록을 **투자 자산**(STOCK/COIN, `portfolio-investment-list`)과 **현금 자산**(CASH, `portfolio-cash-list`) 두 그룹으로 분리(0건 그룹은 렌더하지 않음)
+    - 목록 행을 6필드(수량·평단가·취득원가·평가금액·평가손익·비중)에서 **3필드(평가금액·손익·수량)**로 축소 — 평단가·취득원가·비중은 행 클릭 시 이동하는 자산 상세 화면(Task 011)으로 이관
+    - 종목별 원형 이니셜 아바타 도입(로고 이미지 없음, 무채 배지 — 다크 테마·도넛 차트·세그먼트 토글·행별 일간수익은 명시적으로 채택하지 않음. 근거는 `docs/DESIGN.md` §8 폐기안)
+  - ✅ `frontend/src/lib/money.ts` 버그 수정 — `formatQuantity`에 천 단위 그룹핑 추가(`groupThousands` 공용 헬퍼로 `formatAmount`와 공유), `evaluationKrw`·`unrealizedPnl`을 원자산 통화/유형이 아닌 **항상 KRW 스케일**로 표시하도록 통일(COIN 자산에서 소수 8자리로 잘못 찍히던 버그 2건 — 하나는 구현 중 자체 발견, 하나는 code-reviewer 재검증 중 발견). 위 「API 규격」 절에 `unrealizedPnl`도 KRW 환산액이라는 계약을 명시해둠
+  - ✅ `frontend/src/pages/PortfolioPage.test.tsx` — 9개 케이스(항목 렌더·그룹 분리·null 표시·요약·네비게이션 2종·제목 고정·3필드 고정·`vi.doMock`으로 `portfolioFixture`를 대체해 KRW 스케일 회귀를 실측하는 테스트)
+  - ✅ 시각·카피 다듬기(ui-ux-designer, 반복 4회) — `docs/DESIGN.md` §6-2 "목록 화면 골격" 신설·재개정(현재 버전 1.4.0). 이 앱 최초의 데이터 목록 화면이라 행 구분·컬럼 헤더 유무·반응형 접힘·히어로 숫자의 빈 값 처리 등을 여기서 새로 정했다
+  - ✅ code-reviewer 독립 검증 2회 — 1차 Minor 4건 발견·수정, 2차(5단계 개편 이력 전체 대조 + 뮤테이션 테스트)에서 Major 1건(`unrealizedPnl` 통화 기준 불일치)·Minor 4건 발견, 전부 수정 완료. Blocker 0건
+  - ⚠️ 남은 갭: `totalCostByCurrency`(통화별 취득원가 Map, API 계약에는 여전히 존재·`PortfolioResponse` 유지)가 이 화면에서는 더 이상 표시되지 않는다 — 필드 자체를 계약에서 뺄지는 Task 013 착수 시 재검토
 
 - **Task 010: 자산 등록 화면 구현 (F001)**
   - 유형(STOCK/COIN/CASH)·티커·통화·수량·평단가 입력
@@ -159,6 +170,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - 상세 정보, 차트 영역(정적 더미), 물타기 시뮬레이터 폼, 수정 폼, 삭제 확인 팝업
   - 삭제 확인 팝업에 "보유 정보와 거래 이력이 함께 삭제되며 복구할 수 없습니다" 경고 문구 포함 (Task 006 결정 #4)
   - 수정 폼은 상세 조회 응답의 `version` 값을 화면에 노출하지 않고 폼 상태로 들고 있다가 `PUT` 요청에 그대로 실어 보낸다. 409 `HOLDING_CONFLICT` 수신 시 "다른 곳에서 이미 수정되었습니다. 새로고침 후 다시 시도하세요" 표시
+  - **착수 전 확인 필요 (Task 009 재개편 후속)**: 평단가·취득원가·비중(%)이 Task 009에서 총 자산 목록 행 대신 이 화면에서 보여주기로 결정됐다. 그런데 `GET /v1/assets/{id}`(`AssetResponse`, 위 「API 규격」 절)에는 `quantity`/`avgPrice`만 있고 `cost`·`evaluationKrw`·`unrealizedPnl`·`weight`는 없다 — 그 필드들은 `PortfolioItem`에만 있는 **포트폴리오 전체 맥락값**이다. 취득원가(`cost`)는 `avgPrice × quantity`로 프론트에서 바로 계산할 수 있어 문제없지만, **비중(weight)은 전체 포트폴리오 평가금액이 분모라 단일 자산 조회만으로는 계산할 수 없다.** 착수 전에 (a) 상세 진입 시 `GET /v1/portfolio`를 다시 불러 해당 항목을 찾을지, (b) 목록에서 클릭한 `PortfolioItem`을 라우터 state로 넘길지, (c) `AssetResponse`에 `weight` 필드를 추가할지 중 하나를 정해야 한다
 
 **2-B. 백엔드 도메인 로직**
 
@@ -337,6 +349,8 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 `totalCostByCurrency`가 통화별 Map인 이유: 취득원가 합계를 단일 `totalCostKrw`로 두면 USD 자산이 섞였을 때 환율 없이는 정확한 값을 낼 수 없다. Task 023(환율 연동) 전까지 거짓 숫자를 내보내지 않기 위해 통화별로 나눠 담는다.
 
+`evaluationKrw`뿐 아니라 `unrealizedPnl`(`PortfolioItem`·`totalUnrealizedPnl` 둘 다)도 **항상 KRW 환산액**이다 — 원자산 통화(`currency`)가 아니다. PRD F005가 "전체 자산을 KRW 기준으로 환산해 평가금액·비중(%)·미실현 손익 표시"라고 명시하므로, 세 값(평가금액·비중·손익) 모두 같은 환산 기준을 따른다. `evaluationKrw`만 필드명에 `Krw`가 붙어 있어 헷갈리기 쉬우니, Task 023 구현 시 `unrealizedPnl`도 동일하게 KRW 스케일(정수)로 계산해야 한다.
+
 ### 시뮬레이터 응답 예시
 
 ```json
@@ -400,7 +414,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 |---|---|---|---|
 | 1 | CASH 자산 등록 | `holdings`에 `CHECK (avg_price > 0)` — 현금에는 평단가 개념이 없어 `0`을 넣으면 INSERT 실패 | 화면에서 평단가 입력란을 숨기고, `CreateAssetRequest.avgPrice`는 CASH일 때 `null`을 허용한다. 서버는 `assetType == CASH`면 `avgPrice=1`을 강제 삽입한다(`AvgPriceRequiredUnlessCash` 클래스 레벨 검증, Task 012에서 구현). CHECK 제약은 그대로 둔다 — 완화하면 STOCK/COIN의 0 평단가 오입력까지 함께 통과하게 된다 |
 | 2 | `transactions` 기록 여부 | F001(자산 등록)·F003(자산 수정) 어디에도 `transactions` INSERT 경로가 정의돼 있지 않음 | 자산 **등록 시에만** `BUY` 1건을 자산·Holding과 같은 트랜잭션으로 기록한다(Task 012). 보유 **수정**(F003)은 기록하지 않는다 — 수정은 실매매가 아닌 오류 정정일 수도 있어, 수정을 그대로 거래로 남기면 이력이 실제 매매와 달라진다. Task 024가 사용자 직접 거래 입력 API로 이 갭을 메운다 |
-| 3 | 종목 중복 등록 | `assets`에 `(user_id, ticker)` UNIQUE 없음 — 같은 종목을 여러 번 등록 가능 | **허용한다.** UNIQUE 제약을 추가하지 않으므로 이 Task에 Flyway 마이그레이션이 없다. 포트폴리오 화면은 같은 티커가 여러 줄로 나타날 수 있음을 전제로 설계한다(Task 009) |
+| 3 | 종목 중복 등록 | `assets`에 `(user_id, ticker)` UNIQUE 없음 — 같은 종목을 여러 번 등록 가능 | **허용한다.** UNIQUE 제약을 추가하지 않으므로 이 Task에 Flyway 마이그레이션이 없다. 총 자산 화면(구 포트폴리오 화면)은 같은 티커가 여러 줄로 나타날 수 있음을 전제로 설계한다(Task 009, 투자/현금 자산 그룹 안에서도 별도 행 유지) |
 | 4 | 자산 삭제 시 이력 소실 | `holdings`·`transactions`의 FK가 `ON DELETE CASCADE` — 자산 삭제(F004) 시 거래 이력도 함께 사라짐 | 하드 삭제를 유지한다(소프트 삭제로 전환하지 않음). Task 011의 삭제 확인 팝업에 "보유 정보와 거래 이력이 함께 삭제되며 복구할 수 없습니다" 경고 문구를 포함해 최소 완화한다 |
 
 ---

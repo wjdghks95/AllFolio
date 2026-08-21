@@ -19,28 +19,34 @@ export function scaleFor(opts: { currency: string; assetType?: AssetType }): num
   return SCALE.FALLBACK
 }
 
+// Intl.NumberFormat의 문자열 입력(ES2023 V3)에 기대지 않고 정규식으로 직접 그룹핑한다 —
+// 구형 엔진(Task 027 Capacitor 구형 WebView 등)에서 문자열 입력이 조용히 ToNumber로
+// 폴백되면 NUMERIC(28,8) 정밀도가 깨질 수 있다. 입력은 항상 부호 없는 십진 문자열이다.
+function groupThousands(unsignedDecimal: string): string {
+  const [intPart, fracPart] = unsignedDecimal.split('.')
+  const groupedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return fracPart !== undefined ? `${groupedInt}.${fracPart}` : groupedInt
+}
+
 export function formatAmount(
   value: Money | null,
   opts: { currency: string; assetType?: AssetType },
 ): string {
   if (value === null) return NULL_DISPLAY
   const scale = scaleFor(opts)
-  // Intl.NumberFormat의 문자열 입력(ES2023 V3)에 기대지 않고 정규식으로 직접 그룹핑한다 —
-  // 구형 엔진(Task 027 Capacitor 구형 WebView 등)에서 문자열 입력이 조용히 ToNumber로
-  // 폴백되면 NUMERIC(28,8) 정밀도가 깨질 수 있다. toScaledString이 이미 정확한 소수
-  // 자릿수를 만들어주므로 minimumFractionDigits 같은 옵션은 필요 없다.
+  // toScaledString이 이미 정확한 소수 자릿수를 만들어주므로 minimumFractionDigits 같은
+  // 옵션은 필요 없다.
   const scaled = toScaledString(Dec(value), scale)
   const negative = scaled.startsWith('-')
-  const unsigned = negative ? scaled.slice(1) : scaled
-  const [intPart, fracPart] = unsigned.split('.')
-  const groupedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  const grouped = fracPart !== undefined ? `${groupedInt}.${fracPart}` : groupedInt
+  const grouped = groupThousands(negative ? scaled.slice(1) : scaled)
   return negative ? `-${grouped}` : grouped
 }
 
 export function formatQuantity(value: Money): string {
   const scaled = toScaledString(Dec(value), SCALE.QUANTITY)
-  return scaled.includes('.') ? scaled.replace(/0+$/, '').replace(/\.$/, '') : scaled
+  const trimmed = scaled.includes('.') ? scaled.replace(/0+$/, '').replace(/\.$/, '') : scaled
+  // 수량은 검증 단계(lib/validation.ts)에서 항상 0 이상만 허용하므로 부호 처리가 필요 없다.
+  return groupThousands(trimmed)
 }
 
 export function formatWeight(value: Money | null): string {
