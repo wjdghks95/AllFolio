@@ -98,8 +98,8 @@ frontend/      React + Vite + TypeScript (Task 004부터)
 
 | Phase | 초점 | 기술 |
 |---|---|---|
-| **Phase 1** (현재) | 애플리케이션 골격 구축 (백엔드 인증·프론트 라우팅·API 계약) | Spring Security, JWT, React, Vite |
-| **Phase 2** | UI/UX 완성(더미 데이터) + 백엔드 자산 CRUD·시뮬레이터 (병렬 트랙) | React 컴포넌트, BigDecimal, In-Memory 시뮬레이터 |
+| **Phase 1** | 애플리케이션 골격 구축 (백엔드 인증·프론트 라우팅·API 계약) | Spring Security, JWT, React, Vite |
+| **Phase 2** (현재) | UI/UX 완성(더미 데이터) + 백엔드 자산 CRUD·시뮬레이터 (병렬 트랙) | React 컴포넌트, BigDecimal, In-Memory 시뮬레이터 |
 | **Phase 3** | 실데이터 연동 + 외부 시세 API + Redis 캐시 | Upbit/KIS API, Redis, Throttling |
 | **Phase 4** | SSE 실시간 스트리밍·하이브리드 앱·대용량 부하 | Virtual Threads, SSE, FCM/APNs, k6, Capacitor |
 
@@ -215,4 +215,5 @@ spring.jpa.open-in-view: false
 
 - **[PRD](docs/PRD.md)** — 화면·기능 중심 MVP 명세(F001~F010), 화면 경로, 클라이언트 스택, 데이터 모델. API 규격·에러 포맷·성능 KPI·리스크는 다루지 않음
 - **[개발 로드맵](docs/ROADMAP.md)** — Phase/Task별 진행 상황, API 규격·에러 포맷·성능 KPI·리스크의 원본(single source of truth), 착수 전 결정 사항, Phase 번호 대응표
+- **[디자인 시스템](docs/DESIGN.md)** — 팔레트·타이포·간격 등 디자인 토큰, 화면 골격 규약, 컴포넌트 시각 규약의 단일 출처
 - **[Spring Boot 레퍼런스](https://spring.io/projects/spring-boot)** — 프레임워크 문서
