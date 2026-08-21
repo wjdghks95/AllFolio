@@ -156,7 +156,7 @@ frontend/src/
   layouts/        AppLayout (헤더 O, 인증 라우트용), AuthLayout (헤더 X)
   auth/           authContext.ts, AuthProvider.tsx, useAuth.ts, tokenStorage.ts, RequireAuth.tsx
   api/            types.ts(계약 단일 출처), fixtures.ts(더미 응답 — Task 018에서 제거 예정)
-  components/     공통 컴포넌트(Button/Field/TextField/Alert/Card/ConfirmDialog) + 각 `*.test.tsx`. 신규 공통 컴포넌트 중 직접 DOM 루트를 렌더링하는 컴포넌트는 이 디렉터리에 배치하고 `testId` prop을 반드시 노출(렌더-프롭 래퍼처럼 자체 DOM 루트가 없는 경우는 예외 — 예: `Field`는 label/error/hint만 렌더링하고 실제 입력 요소는 `children` 콜백이 만들어 소비자인 `TextField`가 자기 `testId`를 직접 부착한다)
+  components/     공통 컴포넌트(Button/Field/TextField/Alert/Card/ConfirmDialog/SegmentToggle) + 각 `*.test.tsx`. 신규 공통 컴포넌트 중 직접 DOM 루트를 렌더링하는 컴포넌트는 이 디렉터리에 배치하고 `testId` prop을 반드시 노출(렌더-프롭 래퍼처럼 자체 DOM 루트가 없는 경우는 예외 — 예: `Field`는 label/error/hint만 렌더링하고 실제 입력 요소는 `children` 콜백이 만들어 소비자인 `TextField`가 자기 `testId`를 직접 부착한다)
   lib/            금융 정밀도·검증·문구 유틸(big.ts/money.ts/validation.ts/messages.ts/simulate.ts) + 각 `*.test.ts`. UI 관심사 없는 순수 함수만 배치
   test/           Vitest 전역 설정(setup.ts) — 환경은 `happy-dom` (jsdom은 `<dialog>.showModal()` 미구현으로 사용 금지, jsdom#3294)
   router.tsx      라우팅 정의 (react-router v8)

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PortfolioPage from './PortfolioPage';
 
@@ -103,6 +103,79 @@ describe('PortfolioPage', () => {
     expect(row.textContent).not.toContain('평단가');
     expect(row.textContent).not.toContain('취득원가');
     expect(row.textContent).not.toContain('비중');
+  });
+
+  it('history state에 flash가 있으면 배너가 뜨고, 화면에 계속 남아 있는다', () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/portfolio',
+            state: { flash: { tone: 'success', message: '자산이 등록되었습니다.' } },
+          },
+        ]}
+      >
+        <Routes>
+          <Route path="/portfolio" element={<PortfolioPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // flash는 첫 렌더 시점에 로컬 state로 한 번만 캡처되므로, 뒤이어 history state를
+    // 비우는 effect가 실행돼도 화면의 배너는 사라지지 않는다(자동 소멸 타이머 없음, Task 007 결정).
+    expect(screen.getByTestId('portfolio-flash').textContent).toBe('자산이 등록되었습니다.');
+  });
+
+  it('flash 없이 진입하면 안내 배너를 보여주지 않는다', () => {
+    renderPortfolioPage();
+
+    expect(screen.queryByTestId('portfolio-flash')).toBeNull();
+  });
+
+  it('flash를 실은 채 진입한 뒤 다른 라우트로 나갔다가 뒤로가기로 돌아오면 배너가 다시 뜨지 않는다', async () => {
+    // 정리 effect는 navigate(..., { replace: true })로 flash가 실린 history 엔트리 자체를
+    // 빈 state로 바꿔치기한다. useNavigate를 목킹하지 않고 실제 라우트 이동 + 브라우저
+    // 뒤로가기(navigate(-1))로 왕복해야, 이 replace가 실제로 일어났는지를 검증할 수 있다
+    // (Link로 앞으로만 이동하면 애초에 이전 state를 다시 읽지 않아 이 버그를 못 잡는다).
+    function AssetDetailProbe() {
+      const navigate = useNavigate();
+      return (
+        <div data-testid="asset-detail-page">
+          <button type="button" onClick={() => navigate(-1)}>
+            뒤로가기
+          </button>
+        </div>
+      );
+    }
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/portfolio',
+            state: { flash: { tone: 'success', message: '자산이 등록되었습니다.' } },
+          },
+        ]}
+      >
+        <Routes>
+          <Route path="/portfolio" element={<PortfolioPage />} />
+          <Route path="/assets/:id" element={<AssetDetailProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId('portfolio-flash')).toBeTruthy();
+
+    // 다른 라우트로 이동한 뒤(같은 세션) 뒤로가기로 /portfolio 엔트리에 되돌아온다(재마운트).
+    fireEvent.click(
+      screen.getByTestId('portfolio-item-0198f2a1-0001-7c3a-8f21-000000000001'),
+    );
+    await waitFor(() => expect(screen.getByTestId('asset-detail-page')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('뒤로가기'));
+    await waitFor(() => expect(screen.getByTestId('portfolio-add-asset-button')).toBeTruthy());
+
+    expect(screen.queryByTestId('portfolio-flash')).toBeNull();
   });
 });
 

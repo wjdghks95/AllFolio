@@ -1,10 +1,21 @@
 // 구조·동작: senior-frontend / 시각 표현·문구: ui-ux-designer
-import { Link, useNavigate } from 'react-router';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router';
 import type { PortfolioItem } from '../api/types';
 import { portfolioFixture } from '../api/fixtures';
+import Alert, { type AlertProps } from '../components/Alert';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import { formatAmount, formatQuantity, formatSignedAmount } from '../lib/money';
+
+// 자산 등록 등 다른 화면에서 이동해 올 때 history state로 전달하는 1회성 안내 배너
+// (Task 007에서 정한 토스트 대체 패턴: navigate(path, { state: { flash } }) + Alert 렌더).
+// export하여 flash를 실어 보내는 화면(AssetNewPage 등)이 이 타입을 그대로 써서
+// tone 등의 오타를 컴파일 타임에 잡을 수 있게 한다.
+export interface Flash {
+  tone: AlertProps['tone'];
+  message: string;
+}
 
 const TONE_CLASS: Record<'gain' | 'loss' | 'flat' | 'unknown', string> = {
   gain: 'text-gain',
@@ -186,7 +197,31 @@ function PortfolioItemGroup({
 
 export default function PortfolioPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { items, totalEvaluationKrw, totalUnrealizedPnl } = portfolioFixture;
+
+  // location.state는 아래 effect가 navigate로 곧장 비워버리므로, 배너에 쓸 값은 첫 렌더
+  // 시점에 한 번만 떠서 로컬 state로 들고 있는다. location.state를 매 렌더 다시 읽으면
+  // state가 비워지자마자(같은 틱 안에서) 배너도 함께 사라져 사용자가 읽을 새도 없이
+  // 사라진다 — Task 007 결정("자동 소멸 타이머 없는 배너")과 어긋난다.
+  const [flash] = useState<Flash | null>(
+    () => (location.state as { flash?: Flash } | null)?.flash ?? null,
+  );
+
+  // history state는 1회성으로 비운다 — 뒤로가기로 돌아오거나 화면이 재마운트돼도
+  // 같은 안내가 다시 뜨지 않게 한다(화면에 남는 배너 자체는 위 flash 로컬 state가 계속 들고 있는다).
+  // navigate(..., { replace: true })로 state를 비운 뒤에는 location.pathname/location.search
+  // 문자열 값 자체가 바뀌지 않으므로, exhaustive-deps를 그대로 채워도 effect가 다시 돌지 않는다.
+  useEffect(() => {
+    if (!flash) return;
+    navigate(location.pathname + location.search, { replace: true, state: {} });
+  }, [flash, navigate, location.pathname, location.search]);
+
+  const flashAlert = flash ? (
+    <Alert tone={flash.tone} testId="portfolio-flash">
+      {flash.message}
+    </Alert>
+  ) : null;
 
   const totalPnl = formatSignedAmount(totalUnrealizedPnl, { currency: 'KRW' });
 
@@ -202,6 +237,7 @@ export default function PortfolioPage() {
   if (items.length === 0) {
     return (
       <div>
+        {flashAlert ? <div className="mb-6">{flashAlert}</div> : null}
         <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">총 자산</h1>
 
         <div className="mt-6">
@@ -231,6 +267,12 @@ export default function PortfolioPage() {
 
   return (
     <div>
+      {/* 안내 배너는 본문 맨 위, 제목 줄 위에 둔다. 제목 아래에 끼우면 위 16px·아래 24px로
+          여백이 비슷해져 합계 카드와 한 덩어리로 뭉치고, 배너가 있는 방문과 없는 방문에서
+          제목 아래 리듬(제목 → mt-6 합계 → mt-10 장부)이 달라진다. 배너는 화면 전체에 대한
+          알림이므로 본문의 첫 줄이 제자리다 (docs/DESIGN.md §6-3). */}
+      {flashAlert ? <div className="mb-6">{flashAlert}</div> : null}
+
       {/* "자산 등록"은 투자 자산/현금 자산 어느 한쪽의 액션이 아니라 화면 전체의 액션이라
           페이지 제목과 같은 줄에 세운다. 합계 카드와 첫 장부 사이에 혼자 놓으면 위아래 여백이
           똑같이 벌어져 "버튼만 있는 세 번째 섹션"으로 읽힌다 (docs/DESIGN.md §6-2). */}

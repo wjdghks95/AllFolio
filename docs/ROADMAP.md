@@ -162,9 +162,16 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ code-reviewer 독립 검증 2회 — 1차 Minor 4건 발견·수정, 2차(5단계 개편 이력 전체 대조 + 뮤테이션 테스트)에서 Major 1건(`unrealizedPnl` 통화 기준 불일치)·Minor 4건 발견, 전부 수정 완료. Blocker 0건
   - ⚠️ 남은 갭: `totalCostByCurrency`(통화별 취득원가 Map, API 계약에는 여전히 존재·`PortfolioResponse` 유지)가 이 화면에서는 더 이상 표시되지 않는다 — 필드 자체를 계약에서 뺄지는 Task 013 착수 시 재검토
 
-- **Task 010: 자산 등록 화면 구현 (F001)**
-  - 유형(STOCK/COIN/CASH)·티커·통화·수량·평단가 입력
-  - CASH 선택 시 평단가 입력란을 숨긴다 — 서버가 `avgPrice=1`을 고정 삽입하므로 프론트는 요청 본문에서 `avgPrice`를 생략(`null`)하면 된다 (Task 006 결정 #1)
+- **Task 010: 자산 등록 화면 구현 (F001)** ✅ — 완료 (2026-08-21)
+  - ✅ `frontend/src/pages/AssetNewPage.tsx` — 유형(STOCK/COIN/CASH)·티커·종목명·통화·수량·평단가 6필드 폼. `lib/validation.ts`의 기존 검증 함수(Task 007에서 이미 구현)를 그대로 연결, 신규 검증 로직 없음
+  - ✅ `frontend/src/components/SegmentToggle.tsx`(구 `AssetTypeToggle.tsx`, code-reviewer 지적 반영 시 일반화) — 고정 소수 선택지 세그먼트 토글(세 칸이 테두리를 공유, 선택 상태는 색+굵기 이중 신호). 자산 유형(3지선다)·통화(2지선다) 두 필드가 이 컴포넌트를 공유한다. CASH 선택 시 평단가 입력란이 렌더 트리에서 사라지고 값도 `null`로 리셋 — 서버가 `avgPrice=1`을 고정 삽입하므로 프론트는 요청 본문에서 `avgPrice`를 생략(`null`)하면 된다 (Task 006 결정 #1)
+  - ✅ 백엔드 자산 등록 API(Task 012)가 아직 없어 실 API 호출 없이 클라이언트 검증만 통과하면 성공으로 간주 — 제출 성공 시 `navigate('/portfolio', { state: { flash } })`로 이동, `PortfolioPage`가 `Alert`로 렌더링. Task 007이 정한 "토스트 대신 라우터 state로 결과 전달" 패턴의 첫 실제 적용 사례
+  - ✅ 구현 중 발견한 버그 수정: `PortfolioPage`의 flash 배너가 `location.state`를 매 렌더 다시 읽는 구조라 마운트 직후(사실상 한 프레임 만에) 사라지던 결함을 `useState` 지연 초기화로 마운트 시점 1회 캡처하도록 고쳐, 자동 소멸 타이머 없이 화면에 남아 있게 함(Task 007 결정과 정합)
+  - ✅ `AssetNewPage.test.tsx`(신규 5케이스) + `PortfolioPage.test.tsx`(flash 관련 2케이스 추가, 기존 10케이스 유지) — `useNavigate` 목킹 대신 `MemoryRouter` + 더미 라우트로 실제 이동을 검증하는 기존 컨벤션(`LoginPage.test.tsx`) 그대로 따름
+  - ✅ 시각·카피 다듬기(ui-ux-designer) — `docs/DESIGN.md` §6-3 "폼 화면 골격" 신설(v1.5.0): 폼 폭 448px 제한, 필드를 "자산 정보"/"보유 정보" 2묶음으로 분할, 조건부 필드(CASH 평단가)는 빈자리 대신 안내 밴드로 대체, flash 배너는 `h1` 위 본문 최상단에 배치
+  - ✅ code-reviewer 독립 검증 후속 수정(Major 1건 + Minor 6건, 2026-08-21) — 통화 필드를 PRD F001 "KRW/USD 선택"에 맞춰 자유 입력(`TextField`)에서 `SegmentToggle` 기반 2지선다로 수정(Major). `AssetTypeToggle`을 제네릭 `SegmentToggle`로 일반화해 자산 유형·통화 두 필드가 공유. CASH↔STOCK 전환 시 평단가뿐 아니라 평단가 에러도 함께 리셋, `PortfolioPage`의 `Flash` 타입을 export해 `AssetNewPage`가 재사용, history 정리 effect의 `navigate` 호출에 `location.search` 보존. `AssetNewPage.test.tsx`·`PortfolioPage.test.tsx`에 회귀 케이스 각 1건 추가
+  - ✅ code-reviewer 최종 통짜 재검증 후속 수정(Minor 11건, 2026-08-21) — `SegmentToggle`의 `data-testid` 접미사를 `option.value` 자동 파생(대문자 섞임)에서 호출부가 명시하는 kebab-case `testIdSuffix`로 변경, `SegmentToggle.test.tsx` 신규(3케이스), `ariaLabel`을 `aria-labelledby` 연결(`ariaLabelledBy` prop)로 교체, 도달 불가능한 `validateCurrency` 분기 제거, history 정리 effect의 `deps`를 exhaustive하게 채우고 근거가 부정확했던 oxlint 억제 주석 제거(실측 결과 억제 없이도 재실행 문제 없음 확인 — 앞 항목의 "억제 주석 유지" 판단을 이번에 재검토해 뒤집음). `AssetNewPage.test.tsx`에 CASH↔STOCK 왕복 시 평단가 에러 미재노출 케이스 추가(총 7케이스), 테스트 헬퍼명 `fillValidStockFields`→`fillCommonFields`
+  - ⚠️ **후속 과제 (백로그, 사용자 요청 2026-08-21)**: 티커·종목명 입력을 자유 텍스트가 아닌 **검색(자동완성)** 방식으로 바꾸고 싶다는 요청이 있었으나, 데이터 출처에 따라 구현 범위가 크게 달라져(프론트 내장 정적 목록 vs 신규 백엔드 검색 API vs 외부 시세 API 연동) 착수를 보류했다. 외부 시세 연동은 이미 Phase 3 Task 021 범위이므로, 착수 시점에 (a) 프론트 정적 목록으로 우선 자동완성만 붙일지 (b) Task 021과 묶어 실 검색으로 바로 갈지부터 정해야 한다
 
 - **Task 011: 자산 상세 화면 구현 (F002·F003·F004·F006·F007)**
   - 상세 정보, 차트 영역(정적 더미), 물타기 시뮬레이터 폼, 수정 폼, 삭제 확인 팝업
