@@ -33,7 +33,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_ACCEPTABLE: '지원하지 않는 응답 형식입니다.',
   CLIENT_ERROR: '요청을 처리하지 못했습니다. 입력값을 확인하고 다시 시도하세요.',
   INTERNAL_ERROR: '서버에 문제가 생겼습니다. 잠시 후 다시 시도하세요.',
-  ASSET_NOT_FOUND: '삭제되었거나 없는 자산입니다. 포트폴리오에서 다시 선택하세요.',
+  ASSET_NOT_FOUND: '삭제되었거나 없는 자산입니다. 총 자산 화면에서 다시 선택하세요.',
   HOLDING_CONFLICT: '다른 곳에서 이미 수정되었습니다. 새로고침 후 다시 시도하세요.',
   CONFLICT: '지금 상태에서는 처리할 수 없습니다. 새로고침 후 다시 시도하세요.',
 }
