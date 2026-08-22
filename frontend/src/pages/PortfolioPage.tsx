@@ -33,13 +33,6 @@ const TONE_MARK: Record<'gain' | 'loss' | 'flat' | 'unknown', string> = {
   unknown: '',
 };
 
-// 화면에는 사용자가 쓰는 말을 내보낸다 — 서버 enum(STOCK/COIN/CASH)을 그대로 보여주지 않는다.
-const ASSET_TYPE_LABEL: Record<string, string> = {
-  STOCK: '주식',
-  COIN: '코인',
-  CASH: '현금',
-};
-
 // 로고 이미지는 쓰지 않는다(외부 이미지 호스팅·시세 API 연동 없음). 대신 티커를 등폭 이니셜로 새긴다.
 // 국내 종목 코드처럼 숫자로 시작하는 티커는 앞 두 글자가 "00"이 되어 종목을 구분하지 못하므로,
 // 그때만 이름의 첫 글자를 쓴다 (005930 → 삼 / BTC → BT / AAPL → AA).
@@ -47,12 +40,11 @@ function initials(ticker: string, name: string): string {
   return /^[A-Za-z]/.test(ticker) ? ticker.slice(0, 2).toUpperCase() : name.slice(0, 1);
 }
 
-// 목록 행의 수치 한 칸.
-// 좁은 화면: 라벨 왼쪽 / 값 오른쪽 한 줄. 넓은 화면: 라벨 위 / 값 아래 3열.
-// 어느 쪽이든 값은 오른쪽 기준선에 붙어, 자리수가 행을 가로질러 세로로 맞는다 (docs/DESIGN.md §3).
-// 좁은 화면에서 2열로 쪼개지 않는 이유는 COIN(소수 8자리) 값이 칸 폭을 넘겨 숫자 중간에서
-// 줄바꿈되기 때문이다 — 금액은 어떤 폭에서도 한 줄로 읽혀야 한다.
-function Cell({
+// 목록 행의 수치 한 칸 — 라벨과 값이 **항상 같은 줄에** 붙어 다닌다.
+// 컬럼 헤더가 없는 목록이라(docs/DESIGN.md §6-2) 값은 자기 라벨을 달고 다녀야 하고,
+// 라벨을 값 위에 쌓으면 한 행이 4줄이 된다. 값은 통째로 `whitespace-nowrap` —
+// COIN(소수 8자리) 금액이 어떤 폭에서도 숫자 중간에서 잘리면 안 된다.
+function Metric({
   label,
   value,
   mark = '',
@@ -64,29 +56,31 @@ function Cell({
   valueClass?: string;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 sm:block sm:text-right">
-      <dt className="shrink-0 text-[11px] leading-5 text-ink-soft sm:leading-4">{label}</dt>
-      <dd
-        className={`font-mono text-[13px] leading-5 font-medium whitespace-nowrap sm:mt-0.5 ${valueClass}`}
-      >
+    <span className="inline-flex shrink-0 items-baseline gap-1.5 whitespace-nowrap">
+      <span className="text-[11px] leading-5 text-ink-soft">{label}</span>
+      <span className={`font-mono text-[13px] leading-5 font-medium ${valueClass}`}>
         {mark ? (
           <span aria-hidden="true" className="mr-0.5 text-[10px]">
             {mark}
           </span>
         ) : null}
         {value}
-      </dd>
-    </div>
+      </span>
+    </span>
   );
 }
 
-// 한 자산 행. 투자 자산 목록·현금 자산 목록이 이 렌더링을 그대로 공유한다 —
-// 두 목록으로 나뉘어도 이니셜 배지·3필드 Cell·이동 표식 등 행 자체의 모양은 달라지지 않는다.
+// 한 자산 행. 투자 자산 목록·현금 자산 목록이 이 렌더링을 그대로 공유한다.
+//
+// 2×2 배치: 이름+티커 / 평가금액 (윗줄) · 수량 / 손익 (아랫줄).
+// 왼쪽 열은 "무엇을 얼마나 갖고 있나"(신원·수량), 오른쪽 열은 "그게 지금 얼마인가"(금액)다.
+// 두 금액은 오른쪽 기준선에 붙어 행을 가로질러 자리수가 세로로 맞는다 (docs/DESIGN.md §3).
 function PortfolioItemRow({ item }: { item: PortfolioItem }) {
   // unrealizedPnl은 evaluationKrw와 마찬가지로 항상 KRW 환산액이다(PRD F005 "전체 자산을
   // KRW 기준으로 환산해 평가금액·비중·손익 표시"). item.currency/assetType을 넘기면 원자산
   // 통화·스케일로 잘못 찍힌다 — evaluationKrw에서 이미 한 번 겪은 버그와 같은 유형이다.
   const pnl = formatSignedAmount(item.unrealizedPnl, { currency: 'KRW' });
+
   return (
     <li>
       <Link
@@ -103,43 +97,45 @@ function PortfolioItemRow({ item }: { item: PortfolioItem }) {
           {initials(item.ticker, item.name)}
         </span>
 
-        <div className="min-w-0 flex-1 sm:flex sm:items-start sm:gap-6">
-          <div className="min-w-0 sm:flex-1">
-            <p className="text-[15px] font-semibold tracking-tight text-ink">{item.name}</p>
-            <p className="mt-0.5 text-[11px] leading-4 text-ink-soft">
-              <span className="font-mono tracking-[0.1em]">{item.ticker}</span>
-              <span aria-hidden="true" className="mx-1.5">
-                ·
+        <div className="min-w-0 flex-1">
+          {/* 윗줄: 이름·티커 ↔ 평가금액.
+              티커는 이름과 같은 줄에 둔다 — 15px 반굵기 잉크 옆의 11px 등폭 ink-soft라
+              크기·자면·색 세 축이 갈려 이름과 섞이지 않는다. 자산 유형(주식/코인/현금)·통화는
+              행마다 반복하지 않는다 — 유형은 구획 이름이, 통화는 자산 상세(Task 011)가 말한다. */}
+          <div className="flex items-baseline justify-between gap-3">
+            {/* 이름과 티커는 flex 두 칸으로 두고 `flex-wrap`으로 접는다. 한 문단 안에 인라인으로
+                이어 붙이면 폭이 모자랄 때 티커가 `0059 / 30`처럼 토큰 한가운데서 끊긴다(375px 실측)
+                — 티커는 통째로 하나의 표식이라 쪼개지면 뜻을 잃는다.
+                접히더라도 티커 줄은 왼쪽 기준선에 그대로 붙는다(들여쓰기 없음). */}
+            <p className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+              <span className="min-w-0 text-[15px] leading-5 font-semibold tracking-tight text-ink">
+                {item.name}
               </span>
-              {ASSET_TYPE_LABEL[item.assetType] ?? item.assetType}
-              <span aria-hidden="true" className="mx-1.5">
-                ·
+              <span className="font-mono text-[11px] leading-5 font-medium tracking-[0.1em] whitespace-nowrap text-ink-soft">
+                {item.ticker}
               </span>
-              <span className="font-mono tracking-[0.1em]">{item.currency}</span>
             </p>
-          </div>
-
-          {/* 목록 행은 요약 3필드만 보여준다 — 나머지(평단가·취득원가·비중 등)는
-              행 클릭으로 이동하는 자산 상세 화면(Task 011)에서 전부 보여준다.
-              넓은 화면에서 이 블록은 폭을 고정해 오른쪽에 붙인다(`flex-1` 아님) —
-              3등분하면 칸마다 빈자리가 흩어져 행이 성글게 보인다 (docs/DESIGN.md §6-2). */}
-          <dl className="mt-3 grid gap-y-1 sm:mt-0 sm:w-96 sm:shrink-0 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-2.5">
             {/* evaluationKrw는 필드명 그대로 항상 KRW 환산액이라, 원자산 통화/유형과
                 무관하게 KRW 스케일(정수)로 표시한다 — item.currency/assetType을 넘기면
                 COIN 등에서 소수 8자리로 잘못 찍힌다 (docs/DESIGN.md §9 후속 과제였음). */}
-            <Cell
+            <Metric
               label="평가금액"
               value={formatAmount(item.evaluationKrw, { currency: 'KRW' })}
               valueClass="text-ink-soft"
             />
-            <Cell
+          </div>
+
+          {/* 아랫줄: 수량 ↔ 손익. 목록 행은 이 4개만 보여준다 —
+              나머지(평단가·취득원가·비중)는 행을 눌러 들어가는 자산 상세(Task 011)가 맡는다. */}
+          <div className="mt-1.5 flex items-baseline justify-between gap-3">
+            <Metric label="수량" value={formatQuantity(item.quantity)} />
+            <Metric
               label="손익"
               value={pnl.text}
               mark={TONE_MARK[pnl.tone]}
               valueClass={TONE_CLASS[pnl.tone]}
             />
-            <Cell label="수량" value={formatQuantity(item.quantity)} />
-          </dl>
+          </div>
         </div>
 
         {/* 이동 표식은 이름 줄 오른쪽 끝에 둔다 — 세로 가운데에 두면
@@ -152,45 +148,73 @@ function PortfolioItemRow({ item }: { item: PortfolioItem }) {
   );
 }
 
-// 투자 자산/현금 자산 그룹 하나(제목 머리글 + 목록). 항목이 0건이면 아무것도 렌더하지 않는다 —
-// 그룹 헤더만 남겨두고 빈 목록을 보여주지 않는다.
+// 장부 한 장 안의 구획. `label`이 있으면 구획 이름(주식/코인)을 머리에 단다.
+// 현금처럼 구획이 하나뿐인 장부는 `label: null`로 두어 이름을 붙이지 않는다 —
+// 장부 제목("현금")이 이미 같은 말을 한다.
+interface ItemSection {
+  label: string | null;
+  items: PortfolioItem[];
+}
+
+// 투자/현금 그룹 하나(제목 + 구획별 목록). 항목이 0건이면 아무것도 렌더하지 않는다 —
+// 그룹 제목만 남겨두고 빈 목록을 보여주지 않는다.
 //
-// 그룹 제목은 격자지 배경 위에 떠 있는 h2가 아니라 **장부 한 장의 머리글**로 둔다
-// (합계 카드와 같은 규격: 실선 머리글 + 14px 반굵기). 그래야 "총 자산" 아래에
-// 합계 / 투자 자산 / 현금 자산 세 장이 나란히 놓인 한 벌로 읽힌다 (docs/DESIGN.md §6-2).
+// 그룹 제목은 장부 표면 **밖**, 카드 바로 위에 둔다. 예전에 같은 자리에 18px h2를 세웠다가
+// 두 그룹이 똑같이 반복돼 "같은 목록이 두 번"으로 보인 적이 있어(§8), 이번에는 세 가지를 바꿨다.
+//  (1) 크기를 카드 제목(`합계`, 14px)보다 한 단 낮춰(13px) "하위 분류 라벨"로 읽히게 한다.
+//  (2) 제목→카드 8px, 카드→다음 제목 24px. 붙는 쪽이 자기 카드라 제목이 카드에 딸린 표찰로 읽힌다.
+//  (3) 이름을 한 단어(`투자`/`현금`)로 줄여, 반복되는 것은 형태가 아니라 분류라는 것이 먼저 보인다.
 function PortfolioItemGroup({
   title,
-  items,
+  sections,
   testId,
 }: {
   title: string;
-  items: PortfolioItem[];
+  sections: ItemSection[];
   testId: string;
 }) {
-  if (items.length === 0) return null;
+  const filled = sections.filter((section) => section.items.length > 0);
+  const count = filled.reduce((sum, section) => sum + section.items.length, 0);
+  if (count === 0) return null;
 
   return (
-    <section
-      aria-label={title}
-      className="overflow-hidden rounded-card border border-rule bg-surface"
-    >
-      <div className="flex items-baseline gap-2.5 border-b border-rule px-5 py-3.5">
-        <h2 className="text-sm font-semibold tracking-tight text-ink">{title}</h2>
-        {/* 건수는 제목 옆에 붙인다. 오른쪽 끝으로 보내면 바로 아래 `수량`·`›`와 미세 라벨이
-            세로로 겹쳐 쌓이고, 700px 떨어진 자리에서 홀로 뜬다. 맨숫자 "4"는 값으로 오독되므로
-            단위를 붙이고, 수치는 등폭으로 적는다(§3). */}
+    <section aria-label={title}>
+      {/* 건수는 제목 옆에 붙인다. 오른쪽 끝으로 보내면 바로 아래 미세 라벨·`›`와
+          세로로 겹쳐 쌓이고, 700px 떨어진 자리에서 홀로 뜬다. 맨숫자 "4"는 값으로 오독되므로
+          단위를 붙이고, 수치는 등폭으로 적는다(§3). */}
+      <div className="flex items-baseline gap-2 pb-2">
+        <h2 className="text-[13px] font-semibold tracking-tight text-ink">{title}</h2>
         <p className="text-[12px] leading-4 text-ink-soft">
-          <span className="font-mono">{items.length}</span>건
+          <span className="font-mono">{count}</span>건
         </p>
       </div>
 
-      {/* 행마다 카드를 두지 않고 한 장의 장부 안에서 실선으로만 나눈다 —
-          반복되는 테두리가 사라져야 열의 자리수가 세로로 이어져 보인다. */}
-      <ul data-testid={testId} className="divide-y divide-rule">
-        {items.map((item) => (
-          <PortfolioItemRow key={item.assetId} item={item} />
+      {/* 행마다 카드를 두지 않고 한 장의 장부 안에 담는다 — 반복되는 테두리가 사라져야
+          열의 자리수가 세로로 이어져 보인다.
+          선은 어디에도 긋지 않는다(구획 이름 아래도 포함). 자산 5건이면 실선이 4줄 그어지는데,
+          정작 읽어야 할 두 기준선(왼쪽 수량·오른쪽 금액)을 가로줄이 계속 끊는다. 행의 경계는
+          32px 여백과 각 행 왼쪽의 이니셜 배지가 말하고, 누를 수 있는 범위는 `hover:bg-grid`가
+          말한다. 구획(주식/코인) 사이의 경계는 구획 이름 위 여백(`pt-4`)만으로 충분하다 —
+          밴드(`bg-grid`)·점선 모두 쓰지 않는다(점선은 시그니처 전용, §5). */}
+      <div
+        data-testid={testId}
+        className="overflow-hidden rounded-card border border-rule bg-surface"
+      >
+        {filled.map((section) => (
+          <div key={section.label ?? title}>
+            {section.label ? (
+              <h3 className="px-5 pt-4 pb-2 text-[12px] leading-4 font-medium text-ink-soft">
+                {section.label}
+              </h3>
+            ) : null}
+            <ul>
+              {section.items.map((item) => (
+                <PortfolioItemRow key={item.assetId} item={item} />
+              ))}
+            </ul>
+          </div>
         ))}
-      </ul>
+      </div>
     </section>
   );
 }
@@ -229,10 +253,15 @@ export default function PortfolioPage() {
   // 42px짜리 "—" 하나만 떠 있으면 값이 없는 것이 아니라 화면이 깨진 것으로 읽힌다 (docs/DESIGN.md §6-2).
   const hasTotalEvaluation = totalEvaluationKrw !== null;
 
-  const investmentItems = items.filter(
-    (item) => item.assetType === 'STOCK' || item.assetType === 'COIN',
-  );
-  const cashItems = items.filter((item) => item.assetType === 'CASH');
+  // 투자 자산 장부는 주식·코인 두 구획으로 나눈다. 두 장의 장부로 쪼개지 않는 이유는
+  // 둘 다 "시세로 평가되는 자산"이라 현금과의 경계(§6-2)만큼 성격이 갈리지 않기 때문이다.
+  const investmentSections: ItemSection[] = [
+    { label: '주식', items: items.filter((item) => item.assetType === 'STOCK') },
+    { label: '코인', items: items.filter((item) => item.assetType === 'COIN') },
+  ];
+  const cashSections: ItemSection[] = [
+    { label: null, items: items.filter((item) => item.assetType === 'CASH') },
+  ];
 
   if (items.length === 0) {
     return (
@@ -337,11 +366,11 @@ export default function PortfolioPage() {
           "따로 반복되는 목록 둘"이 아니라 "한 벌"로 읽히게 한다 (docs/DESIGN.md §6-2). */}
       <div className="mt-10 space-y-4">
         <PortfolioItemGroup
-          title="투자 자산"
-          items={investmentItems}
+          title="투자"
+          sections={investmentSections}
           testId="portfolio-investment-list"
         />
-        <PortfolioItemGroup title="현금 자산" items={cashItems} testId="portfolio-cash-list" />
+        <PortfolioItemGroup title="현금" sections={cashSections} testId="portfolio-cash-list" />
       </div>
     </div>
   );
