@@ -209,8 +209,9 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
     void protectedEndpointWithValidTokenPassesAuthentication() {
         String token = accessTokenOf(signup(EMAIL, PASSWORD));
 
-        // /v1/assets 컨트롤러는 Step 4에서 생긴다. 401이 아닌 404라는 것이 곧 인증 통과의 증거다.
-        assertThat(authorizedGet("/v1/assets", "Bearer " + token))
+        // 존재하지 않는 경로를 쓴다 — 401이 아닌(프로토콜 수준) 404라는 것이 곧 인증 통과의 증거다.
+        // /v1/assets는 Task 012에서 실제 컨트롤러가 생겨 이제 200을 반환하므로 이 목적에 더 이상 못 쓴다.
+        assertThat(authorizedGet("/v1/nonexistent", "Bearer " + token))
                 .hasStatus(HttpStatus.NOT_FOUND);
     }
 

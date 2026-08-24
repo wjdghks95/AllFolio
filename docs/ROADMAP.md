@@ -190,17 +190,29 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 **2-B. 백엔드 도메인 로직**
 
-- **Task 012: 자산 CRUD API 구현 (F001~F004)**
-  - 5개 엔드포인트, 유저 소유권 격리(타 유저 자산은 403이 아닌 **404** — ID 유출 방지)
-  - 자산 생성 시 Holding + `transactions`(BUY 1건) 동시 생성 (단일 트랜잭션, Task 006 결정 #2). 보유 수정(F003)은 `transactions`를 기록하지 않는다
-  - 종목 중복 등록은 허용한다 — `(user_id, ticker)` UNIQUE 제약을 추가하지 않는다 (Task 006 결정 #3)
-  - CASH 자산 생성 시 요청의 `avgPrice`가 `null`이어도 서버가 `avgPrice=1`을 강제 삽입 (Task 006 결정 #1)
-  - **Task 005 리뷰 후속 조치 (착수 전 반영)**
-    - `AssetRepository.findAllByUser_Id`를 커서 페이지네이션 시그니처로 대체 — Task 006 확정 기준 `limit` 기본 20/max 100, `cursor` 파라미터에 맞춰 재정의 (`domain/repository/AssetRepository.java:12`)
-    - `AssetResponse.from(Asset, Holding)` 팩토리의 엔티티 매핑 로직을 `AssetService`(또는 별도 매퍼)로 이동 — `spring.jpa.open-in-view: false` 환경에서 트랜잭션 밖 Lazy 접근 위험 제거. DTO는 순수 값 파라미터만 받도록 축소 (`web/dto/AssetResponse.java:21-32`)
-  - **Task 006 리뷰 후속 조치 (착수 전 반영)**
-    - `ApiContractSerializationTest`에 `AvgPriceRequiredUnlessCash` 검증 테스트, `SimulateAvgPriceResponse.currentWeight/expectedWeight`의 null 키 보존 테스트, `AssetListResponse`/`PortfolioResponse` 직렬화 테스트, 요청 방향(`"60000"` 문자열 → `BigDecimal`) 역직렬화 테스트 보강 — Task 010 폼이 문자열로 POST하므로 역직렬화 검증 공백이 가장 큰 잔여 리스크
-    - `GlobalExceptionHandler.handleDataIntegrityViolation`의 제약 판별을 원인 메시지 문자열 매칭(`contains("uk_users_email")`)에서 `ConstraintViolationException.getConstraintName()` 기반으로 전환 — 이 Task에서 `holdings`의 `uk_holdings_asset_id` 등 제약이 늘어나면 메시지 포맷 의존이 취약해진다
+- **Task 012: 자산 CRUD API 구현 (F001~F004)** ✅ — 완료 (2026-08-24)
+  - ✅ 5개 엔드포인트(`POST /v1/assets`·`GET /v1/assets`·`GET /v1/assets/{id}`·`PUT /v1/assets/{id}/holdings`·`DELETE /v1/assets/{id}`) 구현. `AssetController`(`Authentication.getName()`→`UUID` 파싱)+`AssetService`(생성자 주입, 메서드 단위 `@Transactional`) 2계층으로 구성
+  - ✅ 유저 소유권 격리 — `findByIdAndUser_Id`로 조회한 뒤 없으면 `AssetNotFoundException`(404 `ASSET_NOT_FOUND`). 조회·수정·삭제 3개 엔드포인트 전부 동일하게 적용, 타 유저 소유 자산은 403이 아닌 404로 응답해 ID 유출을 막는다
+  - ✅ 자산 생성 시 `Asset`+`Holding`+`Transaction`(BUY 1건)을 단일 `@Transactional` 메서드에서 함께 저장(Task 006 결정 #2). 보유 수정(PUT)은 `transactions`를 기록하지 않는다
+  - ✅ 종목 중복 등록 허용 — `(user_id, ticker)` UNIQUE 제약 없음, 신규 Flyway 마이그레이션 없이 완료(Task 006 결정 #3)
+  - ✅ CASH 자산은 생성·수정 어느 경로든 요청의 `avgPrice`와 무관하게 항상 `1`로 강제(Task 006 결정 #1)
+  - ✅ 커서 페이지네이션 — `AssetRepository`에 `findByUser_IdOrderByIdDesc`/`findByUser_IdAndIdLessThanOrderByIdDesc` 2종 추가, `limit+1`건 조회로 다음 페이지 존재 여부 판단(별도 COUNT 쿼리 없음). UUID v7의 시간순 단조 증가 특성 덕에 `id DESC` 정렬만으로 최신 등록순이 보장됨. `HoldingRepository.findByAsset_IdIn` 배치 조회로 목록 조회의 N+1 방지
+  - ✅ 낙관적 잠금(Optimistic Lock) 수동 검증 — `PUT`은 같은 트랜잭션에서 방금 읽은 `holding.getVersion()`이 항상 최신값이라 Hibernate 자동 `@Version` 검사만으론 "클라이언트가 과거에 읽은 값" 기준 충돌을 잡지 못한다. `AssetService.updateHolding`이 `holding.getVersion() != request.version()`을 명시 비교해 다르면 `ObjectOptimisticLockingFailureException`을 직접 던져 409 `HOLDING_CONFLICT`로 응답. `holding.update()` 직후 `holdingRepository.flush()`를 호출해 응답의 `version`이 증가된 값으로 나가도록 보장(최초 구현 시 flush 누락으로 응답에 증가 전 값이 나가던 버그를 실제 curl 수동 검증 중 발견해 수정함)
+  - ✅ PUT 대상이 CASH가 아닌데 `avgPrice`가 `null`이면 신규 `AvgPriceRequiredException` → 400 `VALIDATION_ERROR`(신규 에러 코드 추가 없이 기존 코드 재사용, 메시지는 `AvgPriceRequiredUnlessCash` 기본 문구와 동일하게 맞춰 POST/PUT 문구 일치)
+  - ✅ **Task 005 리뷰 후속 조치 (반영 완료)**
+    - `AssetRepository.findAllByUser_Id`를 위 커서 페이지네이션 시그니처 2종으로 대체
+    - `AssetResponse.from(Asset, Holding)` 팩토리 삭제, 엔티티→DTO 매핑 로직을 `AssetService`의 private `toResponse()` 헬퍼로 이동(4개 메서드가 공유). DTO는 순수 값 생성자만 남음
+  - ✅ **Task 006 리뷰 후속 조치 (반영 완료)**
+    - `ApiContractSerializationTest`에 `AvgPriceRequiredUnlessCash` 검증, `SimulateAvgPriceResponse.currentWeight/expectedWeight` null 키 보존, `AssetListResponse`/`PortfolioResponse` 직렬화, 요청 방향(`"60000"` 문자열 → `BigDecimal`) 역직렬화 테스트 5종 추가(기존 5종과 합쳐 총 10케이스)
+    - `GlobalExceptionHandler.handleDataIntegrityViolation`을 원인 메시지 문자열 매칭에서 `org.hibernate.exception.ConstraintViolationException#getConstraintName()` 기반 판별로 전환(Bean Validation의 동명 `jakarta.validation.ConstraintViolationException`과 혼동 주의)
+  - ✅ `AssetIntegrationTest` 신규(Testcontainers, 15케이스) — 5개 엔드포인트 정상/예외 동작 전체 검증. 소유권 격리·낙관적 잠금·CASH 강제 3가지는 코드를 일부러 무력화해 테스트가 실제로 실패를 잡는지 뮤테이션 검증까지 수행(code-reviewer가 Task 009·011에서 "고쳤지만 테스트가 못 잡는" 사례를 발견했던 전례에 따른 절차)
+  - ✅ Task 003 때 "`/v1/assets`가 없어 404가 나면 인증 통과 증거"라는 전제로 작성된 `AuthIntegrationTest`의 플레이스홀더 테스트(`protectedEndpointWithValidTokenPassesAuthentication`)가 이번에 그 경로가 실제 라우트가 되며 깨져, 대상 경로를 존재하지 않는 `/v1/nonexistent`로 교체해 원래 검증 의도를 유지
+  - ✅ senior-backend 에이전트의 독립 재검토(T1~T4 완료 후 1회) — 수정 필요 항목 없음으로 확인
+  - ✅ code-reviewer 에이전트의 독립 검증(T1~T7 전체 완료 후, 실제 서버 기동 + curl/SQL 로그 실측) — Blocker 0건. Major 2건 발견:
+    - **(수정 완료)** `GET /v1/assets`의 `limit`이 `@Min(1)`/`@Max(100)` 범위를 벗어나면 400이 아닌 500이 나가던 결함. 원인: `AssetController`의 클래스 레벨 `@Validated`가 Spring 7의 내장 메서드 파라미터 검증(→`HandlerMethodValidationException`→400)을 끄고 구식 AOP 경로(`jakarta.validation.ConstraintViolationException`)로 전환시키는데, 그 예외가 `GlobalExceptionHandler`에 매핑돼 있지 않아 500 폴백으로 샜다. `@Validated` 제거로 해결(제거해도 `@Min`/`@Max` 검증 자체는 내장 경로로 그대로 동작). `listAssetsWithLimitBelowMinimumReturnsValidationError`/`...AboveMaximumReturnsValidationError` 회귀 테스트 추가
+    - **(보류, 사용자 확인 완료)** 같은 자산인데 `POST`/`PUT` 응답은 요청 스케일 그대로(`"10"`), `GET`(단건·목록)은 DB `NUMERIC(28,8)` 왕복 후 스케일 8 고정(`"10.00000000"`)으로 서로 다르게 직렬화된다. ROADMAP 위 API 예시(`"quantity": "10"`)와 실제 GET 응답이 어긋난다. 수치적으로는 동일한 값이고 프론트가 `big.js`로 재포맷하므로 기능상 즉시 문제는 아니나, 문자열 비교(캐시 키·변경 감지)에는 영향을 줄 수 있다. 처리 방향(GET 스케일로 통일 vs 자산 유형별 「금융 정밀도 규칙」 스케일 적용)은 아직 미정 — 다음 착수 시 결정
+    - Minor 5건(목록 조회 시 Holding 결측 시 무방비 NPE 가능성, `limit`/GET 수치값/목록 소유권 격리/DELETE CASCADE 실제 확인/POST 클래스 레벨 검증의 HTTP 경로 등 테스트 커버리지 공백, `AvgPriceRequiredException` 메시지와 `AvgPriceRequiredUnlessCash` 기본 메시지의 결합을 잡는 테스트 부재, `PortfolioResponse`의 `totalEvaluationKrw`/`totalUnrealizedPnl` null 키 보존 미검증)는 이번엔 보류 — Task 013 착수 전 재검토
+  - ⚠️ 남은 갭 (code-reviewer 검증으로 서술 정정): `AssetService.createAsset()`이 `userRepository.getReferenceById(userId)`로 유저를 프록시 참조한다. JWT는 유효하지만 그 사이 유저 레코드가 삭제된 극단적 동시성 케이스에서는 `assets.user_id` FK 위반으로 `DataIntegrityViolationException` → **409 `CONFLICT`**가 나간다(이전 버전에 적었던 "500 가능성"은 부정확한 추정이었음 — 프록시가 초기화되지 않아 `EntityNotFoundException` 경로를 타지 않는다). 발생 가능성이 낮고 명세에도 없어 이번 Task에서는 손대지 않았다
 
 - **Task 013: 포트폴리오 홈 API 구현 (F005a)**
   - `GET /v1/portfolio`, 취득원가(`avg_price × quantity`) 기준

@@ -1,9 +1,11 @@
 package com.allfolio.web;
 
 import com.allfolio.domain.exception.AssetNotFoundException;
+import com.allfolio.domain.exception.AvgPriceRequiredException;
 import com.allfolio.domain.exception.EmailAlreadyExistsException;
 import com.allfolio.domain.exception.InvalidCredentialsException;
 import com.allfolio.web.dto.ErrorResponse;
+import org.hibernate.exception.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -123,17 +125,24 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
-     * 제약명(원인 체인의 메시지에 담긴 제약 이름)으로 분기한다. uk_users_email 위반만
-     * EMAIL_ALREADY_EXISTS로 단정할 수 있고, holdings의 uk_holdings_asset_id 등 그 외
-     * 제약 위반은 매칭되는 도메인 에러 코드가 없으므로 일반 409 CONFLICT로 폴백한다
-     * (docs/ROADMAP.md Task 006). 결정 #3(종목 중복 등록 허용)에 따라 assets에는 새
-     * UNIQUE 제약이 없어 ASSET_ALREADY_EXISTS 코드는 만들지 않는다.
+     * 제약명(원인 체인의 org.hibernate.exception.ConstraintViolationException#getConstraintName())으로
+     * 분기한다. uk_users_email 위반만 EMAIL_ALREADY_EXISTS로 단정할 수 있고, holdings의
+     * uk_holdings_asset_id 등 그 외 제약 위반은 매칭되는 도메인 에러 코드가 없으므로 일반 409
+     * CONFLICT로 폴백한다 (docs/ROADMAP.md Task 006). 결정 #3(종목 중복 등록 허용)에 따라
+     * assets에는 새 UNIQUE 제약이 없어 ASSET_ALREADY_EXISTS 코드는 만들지 않는다.
+     *
+     * <p>원인 메시지 문자열 매칭(contains) 대신 제약명 기반으로 전환한 이유: 이 Task부터
+     * holdings 쪽 제약이 늘어나는데, 메시지 포맷은 DB 드라이버·로케일에 따라 달라질 수 있어
+     * 문자열 포함 여부보다 제약명이 안정적인 판별 기준이다(docs/ROADMAP.md Task 012).
+     * jakarta.validation.ConstraintViolationException(Bean Validation)과 이름이 같은
+     * org.hibernate.exception.ConstraintViolationException(JDBC 예외 변환 결과)을 혼동하지
+     * 않도록 주의 — getConstraintName()은 후자에만 있다.
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(DataIntegrityViolationException e) {
         log.warn("데이터 무결성 제약 위반", e);
-        String causeMessage = e.getMostSpecificCause().getMessage();
-        if (causeMessage != null && causeMessage.contains("uk_users_email")) {
+        Throwable cause = e.getMostSpecificCause();
+        if (cause instanceof ConstraintViolationException cve && "uk_users_email".equals(cve.getConstraintName())) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(ErrorResponse.of("EMAIL_ALREADY_EXISTS", "이미 가입된 이메일입니다."));
@@ -156,6 +165,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of("ASSET_NOT_FOUND", e.getMessage()));
+    }
+
+    /**
+     * PUT /v1/assets/{id}/holdings 대상이 CASH가 아닌데 avgPrice가 null인 경우.
+     * POST의 AvgPriceRequiredUnlessCash 클래스 레벨 제약과 같은 규칙이라 동일하게 VALIDATION_ERROR로 응답한다.
+     */
+    @ExceptionHandler(AvgPriceRequiredException.class)
+    public ResponseEntity<ErrorResponse> handleAvgPriceRequired(AvgPriceRequiredException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("VALIDATION_ERROR", e.getMessage()));
     }
 
     /**

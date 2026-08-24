@@ -1,12 +1,14 @@
 package com.allfolio.web.dto;
 
-import com.allfolio.domain.Asset;
 import com.allfolio.domain.AssetType;
-import com.allfolio.domain.Holding;
 
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * 엔티티→DTO 값 변환은 AssetService가 담당한다(open-in-view: false 환경에서 트랜잭션 밖 지연
+ * 로딩을 피하기 위함, docs/ROADMAP.md Task 012). 이 레코드는 순수 값만 받는다.
+ */
 public record AssetResponse(
         UUID id,
         String ticker,
@@ -18,18 +20,4 @@ public record AssetResponse(
         int version,
         Instant updatedAt
 ) {
-
-    public static AssetResponse from(Asset asset, Holding holding) {
-        return new AssetResponse(
-                asset.getId(),
-                asset.getTicker(),
-                asset.getName(),
-                asset.getAssetType(),
-                asset.getCurrency(),
-                holding.getQuantity().toPlainString(),
-                holding.getAvgPrice().toPlainString(),
-                holding.getVersion(),
-                holding.getUpdatedAt()
-        );
-    }
 }

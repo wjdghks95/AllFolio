@@ -57,6 +57,16 @@ public class Holding {
         return new Holding(asset, quantity, avgPrice, Instant.now());
     }
 
+    /**
+     * PUT /v1/assets/{id}/holdings 반영 (docs/ROADMAP.md Task 012). version은 건드리지 않는다 —
+     * Hibernate가 flush 시 @Version 필드를 자동으로 1 증가시킨다.
+     */
+    public void update(BigDecimal quantity, BigDecimal avgPrice) {
+        this.quantity = quantity;
+        this.avgPrice = avgPrice;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }

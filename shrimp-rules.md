@@ -14,8 +14,8 @@
 
 ## Project Phase Status
 
-- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정), Task 007(공통 컴포넌트·디자인 시스템)
-- **우선순위**: Task 008(인증 화면) / Task 012(자산 CRUD API) — Phase 2 병렬 2트랙
+- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정), Task 007(공통 컴포넌트·디자인 시스템), Task 012(자산 CRUD API)
+- **우선순위**: Task 013(포트폴리오 홈 API) — Phase 2 백엔드 트랙 다음 단계
 - 상세 Task 명세 → `docs/ROADMAP.md`
 
 ---
@@ -127,22 +127,27 @@ domain.service → infra (허용: JwtIssuer 등)
 | `POST` | `/v1/auth/signup` | 201 / 409 |
 | `POST` | `/v1/auth/login` | 200 / 401 |
 
-### 계약 확정, 구현 예정 (Task 006에서 DTO·에러코드 확정 / Task 012·013·015에서 컨트롤러 구현)
+### 구현된 엔드포인트 (Task 012)
 
 | Method | Path | 비고 |
 |---|---|---|
-| `POST` | `/v1/assets` | 201, CASH는 `avgPrice` 생략 시 서버가 `1` 고정 삽입 |
+| `POST` | `/v1/assets` | 201, CASH는 `avgPrice`를 요청값과 무관하게 서버가 `1` 고정 삽입 |
 | `GET` | `/v1/assets` | 커서 페이지네이션 (`limit` 기본 20/max 100, `cursor`) |
 | `GET` | `/v1/assets/{id}` | 타 유저 접근 시 404 |
-| `PUT` | `/v1/assets/{id}/holdings` | 요청에 `version` 필수, 충돌 시 `HOLDING_CONFLICT` 409 |
+| `PUT` | `/v1/assets/{id}/holdings` | 요청에 `version` 필수, 낙관적 잠금은 서비스에서 수동 비교, 충돌 시 `HOLDING_CONFLICT` 409 |
 | `DELETE` | `/v1/assets/{id}` | 204 |
+
+### 계약 확정, 구현 예정 (Task 006에서 DTO·에러코드 확정 / Task 013·015에서 컨트롤러 구현)
+
+| Method | Path | 비고 |
+|---|---|---|
 | `GET` | `/v1/portfolio` | Phase 2에서 `evaluationKrw`·`unrealizedPnl`·`weight`는 `null` |
 | `POST` | `/v1/simulate/avg-price` | DB 저장 없음, P99 ≤ 5ms |
 
 ### 에러 코드 목록
 
 - **구현됨 (Task 003)**: `EMAIL_ALREADY_EXISTS`(409), `INVALID_CREDENTIALS`(401), `UNAUTHORIZED`(401), `VALIDATION_ERROR`(400), `NOT_FOUND`(404), `METHOD_NOT_ALLOWED`(405), `UNSUPPORTED_MEDIA_TYPE`(415), `NOT_ACCEPTABLE`(406), `CLIENT_ERROR`(4xx), `INTERNAL_ERROR`(500)
-- **구현됨 (Task 006)**: `ASSET_NOT_FOUND`(404, 타 유저 소유 자산도 동일 코드), `HOLDING_CONFLICT`(409, 낙관적 잠금 충돌), `CONFLICT`(409, 매칭되는 도메인 코드가 없는 데이터 무결성 제약 위반 폴백)
+- **구현됨 (Task 006, Task 012에서 실제 사용 시작)**: `ASSET_NOT_FOUND`(404, 타 유저 소유 자산도 동일 코드), `HOLDING_CONFLICT`(409, 낙관적 잠금 충돌), `CONFLICT`(409, 매칭되는 도메인 코드가 없는 데이터 무결성 제약 위반 폴백)
 
 ---
 

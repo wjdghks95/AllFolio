@@ -1,9 +1,15 @@
 package com.allfolio;
 
 import com.allfolio.domain.AssetType;
+import com.allfolio.web.dto.AssetListResponse;
 import com.allfolio.web.dto.AssetResponse;
+import com.allfolio.web.dto.CreateAssetRequest;
 import com.allfolio.web.dto.PortfolioItemResponse;
+import com.allfolio.web.dto.PortfolioResponse;
 import com.allfolio.web.dto.SimulateAvgPriceResponse;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.json.JsonTest;
@@ -12,6 +18,9 @@ import org.springframework.boot.test.json.JacksonTester;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,6 +42,15 @@ class ApiContractSerializationTest {
 
     @Autowired
     private JacksonTester<SimulateAvgPriceResponse> simulateAvgPriceResponseJson;
+
+    @Autowired
+    private JacksonTester<AssetListResponse> assetListResponseJson;
+
+    @Autowired
+    private JacksonTester<PortfolioResponse> portfolioResponseJson;
+
+    @Autowired
+    private JacksonTester<CreateAssetRequest> createAssetRequestJson;
 
     /** assetType이 "STOCK" 문자열로 직렬화되는가 (Task 005 리뷰 후속 조치). */
     @Test
@@ -110,5 +128,79 @@ class ApiContractSerializationTest {
         assertThat(simulateAvgPriceResponseJson.write(response))
                 .extractingJsonPathStringValue("$.expectedQuantity")
                 .isEqualTo("15.00000000");
+    }
+
+    /** CASH는 avgPrice가 null이어도 통과해야 하고, 그 외 자산 유형은 필수여야 한다(Task 006 결정 #1). */
+    @Test
+    void avgPrice는_CASH가_아니면_필수다() {
+        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+
+        CreateAssetRequest cashRequest = new CreateAssetRequest(
+                "KRW-CASH", "현금", AssetType.CASH, "KRW", new BigDecimal("100000"), null);
+        Set<ConstraintViolation<CreateAssetRequest>> cashViolations = validator.validate(cashRequest);
+        assertThat(cashViolations).isEmpty();
+
+        CreateAssetRequest stockRequest = new CreateAssetRequest(
+                "005930", "삼성전자", AssetType.STOCK, "KRW", new BigDecimal("10"), null);
+        Set<ConstraintViolation<CreateAssetRequest>> stockViolations = validator.validate(stockRequest);
+        assertThat(stockViolations).isNotEmpty();
+    }
+
+    /** currentWeight/expectedWeight도 미구현 평가지표와 동일하게 null 값으로 키가 유지돼야 한다. */
+    @Test
+    void 시뮬레이터_응답의_비중_필드는_null_값으로_키가_유지된다() throws Exception {
+        SimulateAvgPriceResponse response = SimulateAvgPriceResponse.of(
+                new BigDecimal("60000"), new BigDecimal("58333"), new BigDecimal("15"));
+
+        var json = simulateAvgPriceResponseJson.write(response);
+        assertThat(json).hasJsonPath("$.currentWeight");
+        assertThat(json).hasJsonPath("$.expectedWeight");
+        assertThat(json).extractingJsonPathValue("$.currentWeight").isNull();
+        assertThat(json).extractingJsonPathValue("$.expectedWeight").isNull();
+    }
+
+    /** items 배열과 nextCursor는 항상 키가 존재해야 하며, nextCursor=null도 키 부재가 아닌 null 값이어야 한다. */
+    @Test
+    void AssetListResponse의_items와_nextCursor가_직렬화된다() throws Exception {
+        AssetResponse item = new AssetResponse(
+                UUID.randomUUID(), "005930", "삼성전자", AssetType.STOCK, "KRW",
+                "10", "60000", 0, Instant.parse("2026-08-05T10:00:00Z"));
+        AssetListResponse response = new AssetListResponse(List.of(item), null);
+
+        var json = assetListResponseJson.write(response);
+        assertThat(json).hasJsonPath("$.items");
+        assertThat(json).extractingJsonPathArrayValue("$.items").hasSize(1);
+        assertThat(json).hasJsonPath("$.nextCursor");
+        assertThat(json).extractingJsonPathValue("$.nextCursor").isNull();
+    }
+
+    /** totalCostByCurrency는 통화 코드를 키로 하는 Map으로 직렬화돼야 한다(Task 006 결정). */
+    @Test
+    void PortfolioResponse의_totalCostByCurrency가_Map으로_직렬화된다() throws Exception {
+        PortfolioResponse response = new PortfolioResponse(
+                List.of(), Map.of("KRW", "600000"), null, null);
+
+        assertThat(portfolioResponseJson.write(response))
+                .extractingJsonPathStringValue("$.totalCostByCurrency.KRW")
+                .isEqualTo("600000");
+    }
+
+    /** 요청 방향 검증: 문자열로 온 quantity/avgPrice가 BigDecimal로 역직렬화돼야 한다. */
+    @Test
+    void CreateAssetRequest는_문자열_금액을_BigDecimal로_역직렬화한다() throws Exception {
+        String json = """
+                {
+                  "ticker": "005930",
+                  "name": "삼성전자",
+                  "assetType": "STOCK",
+                  "currency": "KRW",
+                  "quantity": "10",
+                  "avgPrice": "60000"
+                }
+                """;
+
+        CreateAssetRequest request = createAssetRequestJson.parse(json).getObject();
+        assertThat(request.quantity()).isEqualByComparingTo(new BigDecimal("10"));
+        assertThat(request.avgPrice()).isEqualByComparingTo(new BigDecimal("60000"));
     }
 }
