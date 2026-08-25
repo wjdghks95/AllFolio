@@ -4,21 +4,29 @@ import com.allfolio.domain.User;
 import com.allfolio.domain.exception.EmailAlreadyExistsException;
 import com.allfolio.domain.exception.InvalidCredentialsException;
 import com.allfolio.domain.repository.UserRepository;
+import com.allfolio.infra.logging.LogMarkers;
 import com.allfolio.infra.security.JwtIssuer;
 import com.allfolio.web.dto.LoginRequest;
 import com.allfolio.web.dto.SignupRequest;
 import com.allfolio.web.dto.TokenResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Locale;
+import java.util.UUID;
 
 /**
  * 회원가입·로그인 (docs/ROADMAP.md Task 003). Refresh Token은 Task 019로 유예한다.
  */
 @Service
 public class AuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     /** user enumeration 방지 — 이메일 없음/비밀번호 불일치에 동일 메시지를 쓴다. */
     private static final String INVALID_CREDENTIALS_MESSAGE = "이메일 또는 비밀번호가 올바르지 않습니다.";
@@ -41,6 +49,15 @@ public class AuthService {
         }
 
         User user = userRepository.save(User.of(email, passwordEncoder.encode(request.password())));
+        // INSERT는 uk_users_email 경합 시 커밋 시점에야 실패할 수 있다(동시 가입 레이스) —
+        // 커밋 전에 로그를 남기면 실제로는 실패한 회원가입이 감사 로그엔 "성공"으로 남는다.
+        UUID userId = user.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                log.info(LogMarkers.AUDIT, "회원가입 성공 userId={}", userId);
+            }
+        });
         return issueToken(user);
     }
 
@@ -51,12 +68,17 @@ public class AuthService {
     @Transactional(readOnly = true)
     public TokenResponse login(LoginRequest request) {
         User user = userRepository.findByEmail(normalize(request.email()))
-                .orElseThrow(() -> new InvalidCredentialsException(INVALID_CREDENTIALS_MESSAGE));
+                .orElseThrow(() -> {
+                    log.warn(LogMarkers.AUDIT, "로그인 실패");
+                    return new InvalidCredentialsException(INVALID_CREDENTIALS_MESSAGE);
+                });
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            log.warn(LogMarkers.AUDIT, "로그인 실패");
             throw new InvalidCredentialsException(INVALID_CREDENTIALS_MESSAGE);
         }
 
+        log.info(LogMarkers.AUDIT, "로그인 성공 userId={}", user.getId());
         return issueToken(user);
     }
 

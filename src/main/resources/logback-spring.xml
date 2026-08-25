@@ -1,0 +1,15 @@
+<configuration>
+    <!-- Boot 기본 노이즈 억제 로거(org.apache.catalina.startup.DigesterFactory=ERROR 등)를 그대로 가져온다. -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder"/>
+    </appender>
+
+    <!-- application.yml의 logging.level.*가 부팅 후 이 값을 항상 덮어쓴다(LOGGING_LEVEL_ROOT
+         환경변수도 Spring relaxed binding으로 같은 경로를 타 결과가 같다) — 여기 값은 실효가
+         없으므로 폴백처럼 보이는 플레이스홀더 대신 있는 그대로 리터럴로 둔다. -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

@@ -1,9 +1,11 @@
 package com.allfolio.infra.security;
 
+import com.allfolio.infra.logging.MdcKeys;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -50,5 +52,7 @@ public class JwtFilter extends OncePerRequestFilter {
         var authentication = new UsernamePasswordAuthenticationToken(userId.toString(), null, List.of());
         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
         SecurityContextHolder.getContext().setAuthentication(authentication);
+        // MdcFilter가 체인 전체를 감싸며 요청 종료 시 MDC.clear()하므로 여기서 정리할 필요는 없다.
+        MDC.put(MdcKeys.USER_ID, userId.toString());
     }
 }

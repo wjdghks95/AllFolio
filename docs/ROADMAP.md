@@ -237,11 +237,24 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - KRW/USD 외 통화(예: JPY)로 자산을 등록하면 `scaleFor()`가 스케일 2로 폴백하는데, 이 폴백 규칙이 「금융 정밀도 규칙」 표에 없음
     - 정밀도 스케일 로직이 `PortfolioService.scaleFor`/`SimulateAvgPriceResponse`/프론트 `lib/big.ts` 3곳에 흩어져 있음 — Task 016(금융 정밀도 통합 테스트)에서 상수화 예정(code-reviewer 명시 권고, 이번엔 추상화하지 않음)
 
-- **Task 014: Observability 최소 셋업**
-  - Micrometer 히스토그램 `allfolio_simulation_duration_seconds`
-  - `logback-spring.xml` JSON 인코더 (의존성은 있으나 설정 파일 미존재)
-  - MDC `traceId`/`userId`, `AUDIT` 마커
-  - Task 015의 P99를 측정할 수단이므로 시뮬레이터보다 먼저 둔다.
+- **Task 014: Observability 최소 셋업** ✅ — 완료 (2026-08-25)
+  - ✅ `logback-spring.xml` 신규 작성 — 콘솔 로그를 `LogstashEncoder`로 JSON 출력(의존성은 이미 있었으나 설정 파일이 없어 미사용 상태였음). Boot 기본 노이즈 억제 로거를 `<include resource="org/springframework/boot/logging/logback/defaults.xml"/>`로 가져옴. `<root>` level은 `INFO` 리터럴 — `application.yml`의 `logging.level.*`가 부팅 후 항상 덮어쓰므로(`LOGGING_LEVEL_ROOT` 환경변수도 Spring relaxed binding으로 결국 같은 경로라 마찬가지) 여기 값은 어떤 경로로도 최종 레벨에 영향을 못 준다. 한때 환경변수 폴백(`${LOGGING_LEVEL_ROOT:-INFO}`)으로 바꿔봤으나 실효 없는 죽은 설정임을 2차 code-reviewer가 지적해(CLAUDE.md §2 요청되지 않은 configurability 금지) 리터럴로 되돌림
+  - ✅ `infra/logging` 패키지 신규 — `LogMarkers`(`AUDIT` 마커 상수), `MdcKeys`(`traceId`/`userId` 키 리터럴을 상수로 빼 두 필터가 공유), `MdcFilter`(요청마다 `traceId` 발급, `finally`에서 `MDC.clear()`로 Virtual Thread 재사용 시 누수 방지)
+  - ✅ `AuthService`에 `AUDIT` 로깅 추가 — 회원가입 성공·로그인 성공·로그인 실패(이메일 없음/비밀번호 불일치 사유 구분 없이 동일 메시지, 기존 user enumeration 방지 원칙을 로그에도 유지) 3개 지점. 이메일 등 PII는 로그 인자로 절대 넘기지 않고 `userId`(UUID)만 사용 — 실측(전체 로그에서 이메일 문자열 0건)으로 확인
+  - ✅ `MetricsIntegrationTest` 신규 — `application.yml`의 `management.metrics.distribution.percentiles-histogram.allfolio.simulation.duration: true` 설정이 실제로 프로메테우스 히스토그램 버킷을 만들어내는지, `MeterRegistry`로 직접 샘플을 기록해 검증(Task 015 시뮬레이터가 아직 없어 대체 검증 — 실측으로 `le="0.001"`~`le="+Inf"` 69개 버킷 생성 확인). `le="0.005592405"` 버킷은 있지만 정확히 5ms 경계(`0.005`)에 딱 맞는 버킷은 없어(`0.004194304`→`0.005592405`로 건너뜀) Task 015의 P99 ≤5ms 판정은 `histogram_quantile`의 선형보간에 의존하게 된다 — 정확히 5ms 경계로 끊고 싶으면 Task 015 착수 시 `management.metrics.distribution.slo.allfolio.simulation.duration: 5ms` 추가를 검토(2차 code-reviewer 지적, 이번엔 불필요)
+  - ✅ code-reviewer 독립 검증(실제 서버 기동 + curl 실측, JSON 로그 라인 단위 실측 포함) — Blocker 0건. Major 1건 발견:
+    - **(수정 완료)** `MdcFilter`를 `@Component`로만 등록해뒀더니, 스프링 부트가 일반 필터를 기본 순서(`LOWEST_PRECEDENCE`)로 등록하는 반면 Spring Security 필터 체인은 `SecurityProperties.DEFAULT_FILTER_ORDER = -100`으로 훨씬 이르게 등록돼, `MdcFilter`가 시큐리티 체인 *뒤에서* 실행되고 있었다. 그 결과 `JwtFilter`/`JwtIssuer`의 인증 진단 로그("JWT 파싱 실패" 등)에는 `traceId`가 전혀 붙지 않는 사각지대가 있었다(401 원인 조사 시 다른 로그와 상관관계를 못 지음). `MdcFilter`에 `@Order(Ordered.HIGHEST_PRECEDENCE)`를 추가해 시큐리티 체인보다 먼저 실행되게 하고, `userId`를 채우는 책임을 `MdcFilter`(SecurityContext 읽기)에서 `JwtFilter.authenticate()`(인증 성공 시점에 직접 `MDC.put`)로 이관해 해소. 수정 후 `AuthIntegrationTest --rerun`과 실제 `bootRun` 양쪽에서 `JwtIssuer`의 DEBUG 로그에 `traceId`가 붙는 것을 재확인
+    - Minor 6건 중 3건 추가 반영: `logback-spring.xml`의 Boot 기본 로거 include 누락(위에서 해결), `MetricsIntegrationTest`의 사실상 항상-참에 가까운 약한 assertion을 `allfolio_simulation_duration_seconds_bucket{le="` 단일 패턴으로 강화, `userId`가 MDC에 채워지는지 검증하는 자동 테스트 부재 — `MdcFilterIntegrationTest` 신규(2케이스: 인증된 요청의 `userId`가 JWT subject와 일치, 연속 요청의 `traceId`가 서로 다름)로 해소. 나머지 2건은 보류 — 상세는 아래 「남은 갭」
+  - ✅ 2차 code-reviewer 독립 검증(1차 수정분을 처음부터 다시 독립적으로 재검증, `./gradlew test --rerun-tasks` 71개 테스트 전체 통과 + 실제 `bootRun` 재실측 포함) — Blocker 0건, Major 0건. Minor 6건 발견, 이번에 3건 반영:
+    - **(수정 완료)** 위에서 추가한 `MdcFilterIntegrationTest`의 2케이스는 사실 M-1 회귀를 못 잡는다는 지적 — 뮤테이션 검증(`MdcFilter`의 `@Order`를 실제로 지워봄)으로 실증: 컨트롤러 시점엔 필터 순서가 뒤바뀌어도 이미 `traceId`/`userId`가 채워진 뒤라 두 테스트 모두 그대로 통과했다. `securityChainLogsCarryTraceId` 테스트를 신규 추가 — `JwtIssuer` 로거에 `ListAppender`를 직접 붙여 시큐리티 체인 *내부*(파싱 실패 등 진단 로그)의 `traceId` 존재를 검증한다. 같은 뮤테이션(`@Order` 제거)으로 이번엔 이 테스트가 실제로 실패하는 것을 확인해 검출력을 실증한 뒤 `@Order`를 원복
+    - **(수정 완료)** `AuthService.signup()`이 `userRepository.save()` 직후 곧바로 "회원가입 성공" 로그를 남기는데, `uk_users_email` 경합(동시에 같은 이메일로 가입 시도) 시 INSERT는 트랜잭션 커밋 시점에야 실패할 수 있어, 실제로는 실패한 회원가입이 감사 로그엔 "성공"으로 남을 수 있는 경로였다. `TransactionSynchronizationManager.registerSynchronization`의 `afterCommit()` 콜백으로 로그 시점을 커밋 이후로 이관해 해소(같은 요청 스레드에서 동기 실행되므로 `traceId` MDC는 그대로 유지됨, 실측 확인). 중복 이메일 재현(같은 이메일로 2회 연속 가입 시도 → 첫 번째만 201+AUDIT 로그, 두 번째는 409+로그 없음)으로 정상 동작 확인
+    - **(수정 완료)** `logback-spring.xml`의 `${LOGGING_LEVEL_ROOT:-INFO}` 폴백이 실효 없는 죽은 설정이라는 지적 — 위 항목에서 리터럴 `INFO`로 되돌림
+    - Minor 3건은 보류: 히스토그램 5ms 경계 보간 이슈(위 항목에 서술, Task 015 착수 시 판단), 로그인 실패 로그 주체 미기록(「남은 갭」), `userId` MDC 키가 실제 프로덕션 로그엔 아직 한 번도 안 찍힘(인증 성공 후 경로에 로그 문장이 아직 없을 뿐 결함 아님 — 정보성)
+  - ⚠️ 남은 갭:
+    - 로그인 실패 `AUDIT` 로그가 어떤 계정을 대상으로 한 실패인지 남기지 않는다(user enumeration 방지는 HTTP 응답 계약에 대한 요구이지 서버 내부 로그에 대한 요구는 아니므로 스펙 위반은 아님, code-reviewer도 판단 사항으로만 제시) — 브루트포스 탐지 필요성이 커지면 비밀번호 불일치 경로에 한해 `userId` 기록을 다음 착수 시 재검토
+    - 현재는 동기 필터 체인만 존재해(`grep`으로 `CompletableFuture`/`@Async`/`SseEmitter` 0건 확인) Virtual Thread 환경에서 MDC 누수가 없다. Phase 4 Task 025(SSE)에서 MVC 비동기 처리가 들어오면 `OncePerRequestFilter`가 비동기 디스패치 시작 시점에 체인을 빠져나가며 MDC를 지우므로 emitter 콜백에는 `traceId`가 없다 — 지금 고칠 사안은 아니고 Task 025 착수 시 재검토
+    - `MdcFilter`는 `OncePerRequestFilter`라 컨테이너 ERROR 디스패치(핸들러 없는 404 등)에는 기본적으로 재실행되지 않아 `traceId`가 비어있다 — `SecurityConfig`가 "보안 필터는 ERROR 디스패치에도 적용된다"고 명시한 것과는 비대칭. 실제로는 `GlobalExceptionHandler`가 대부분의 4xx/5xx를 REQUEST 디스패치 중에 처리해 `traceId`가 붙으므로 영향은 미미(2차 code-reviewer 확인) — 지금 고칠 사안은 아님
+    - Task 015(시뮬레이터) 구현 시 `allfolio.simulation.duration` 이름으로 실제 `Timer`를 기록하는 프로덕션 코드(`@Timed` 또는 `Timer.record`)가 필요하다 — 이번엔 `MeterRegistry` 직접 호출로 설정이 살아있음만 검증했다
 
 - **Task 015: 물타기 시뮬레이터 구현 (F006)**
   - `POST /v1/simulate/avg-price`, In-Memory 가중평균, DB 쓰기 없음
