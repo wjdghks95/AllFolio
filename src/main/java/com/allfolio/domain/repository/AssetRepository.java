@@ -12,6 +12,9 @@ public interface AssetRepository extends JpaRepository<Asset, UUID> {
 
     Optional<Asset> findByIdAndUser_Id(UUID id, UUID userId);
 
+    /** GET /v1/portfolio(docs/ROADMAP.md Task 013)용 전체 조회. GET /v1/assets와 동일하게 id DESC(최신 등록순)로 응답 순서를 고정한다. */
+    List<Asset> findByUser_IdOrderByIdDesc(UUID userId);
+
     /** GET /v1/assets 첫 페이지(cursor 없음). id DESC만으로 최신 등록순이 보장된다 — UUID v7이 시간순 단조 증가이기 때문(docs/ROADMAP.md Task 012). */
     List<Asset> findByUser_IdOrderByIdDesc(UUID userId, Pageable pageable);
 

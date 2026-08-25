@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-08-21
+**최종 수정:** 2026-08-25
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~4와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -214,9 +214,28 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - Minor 5건(목록 조회 시 Holding 결측 시 무방비 NPE 가능성, `limit`/GET 수치값/목록 소유권 격리/DELETE CASCADE 실제 확인/POST 클래스 레벨 검증의 HTTP 경로 등 테스트 커버리지 공백, `AvgPriceRequiredException` 메시지와 `AvgPriceRequiredUnlessCash` 기본 메시지의 결합을 잡는 테스트 부재, `PortfolioResponse`의 `totalEvaluationKrw`/`totalUnrealizedPnl` null 키 보존 미검증)는 이번엔 보류 — Task 013 착수 전 재검토
   - ⚠️ 남은 갭 (code-reviewer 검증으로 서술 정정): `AssetService.createAsset()`이 `userRepository.getReferenceById(userId)`로 유저를 프록시 참조한다. JWT는 유효하지만 그 사이 유저 레코드가 삭제된 극단적 동시성 케이스에서는 `assets.user_id` FK 위반으로 `DataIntegrityViolationException` → **409 `CONFLICT`**가 나간다(이전 버전에 적었던 "500 가능성"은 부정확한 추정이었음 — 프록시가 초기화되지 않아 `EntityNotFoundException` 경로를 타지 않는다). 발생 가능성이 낮고 명세에도 없어 이번 Task에서는 손대지 않았다
 
-- **Task 013: 포트폴리오 홈 API 구현 (F005a)**
-  - `GET /v1/portfolio`, 취득원가(`avg_price × quantity`) 기준
-  - 평가금액·비중·손익은 외부 시세가 필요하므로 `null` 반환 (Task 023에서 채움)
+- **Task 013: 포트폴리오 홈 API 구현 (F005a)** ✅ — 완료 (2026-08-25)
+  - ✅ `GET /v1/portfolio` 구현. `PortfolioController`+`PortfolioService` 2계층으로 `AssetService`(CRUD)와 책임 분리 — Task 023(외부 시세 연동)이 `evaluationKrw`/`unrealizedPnl`/`weight`를 채울 때 이 클래스만 건드리면 되도록 경계를 미리 나눔
+  - ✅ `AssetRepository.findByUser_Id` 신규 추가(커서 페이지네이션 없는 전체 조회 — `GET /v1/assets`의 페이지네이션 조회와 목적이 다름), `HoldingRepository.findByAsset_IdIn` 배치 조회로 N+1 방지(Task 012 패턴 재사용, 자산 8건으로 실측해도 쿼리 2회 고정 확인)
+  - ✅ 취득원가(`cost = quantity × avgPrice`)에 자산유형/통화별 정밀도 규칙 적용 — COIN은 통화 무관 8자리, 그 외엔 통화 기준(KRW 0/USD 4), HALF_UP. Task 011이 남겨뒀던 갭("Task 013 착수 시 서버 응답도 이 규칙을 따라야 한다") 해소
+  - ✅ `totalCostByCurrency`(통화별 취득원가 합계) 필드는 사용자 확정 결정으로 유지(제거하지 않음, Task 009가 남긴 재검토 항목 해소)
+  - ✅ `evaluationKrw`/`unrealizedPnl`/`weight`/`totalEvaluationKrw`/`totalUnrealizedPnl` 5개 필드는 항상 `null`(Task 023 범위), 응답 JSON에서 키 자체는 유지됨을 검증
+  - ✅ 소유권 격리 — `findByUser_Id`로 요청자 본인 자산만 조회, 실측(유저 A 8건/B 1건)으로 상대 자산이 안 섞임을 확인
+  - ✅ `quantity`/`avgPrice` 스케일 결정(Task 012가 "다음 착수 시 결정"으로 미뤄둔 항목) — `GET /v1/portfolio`에 한해 `quantity`는 자산유형·통화 무관 항상 8자리(시뮬레이터 `expectedQuantity`와 동일 규칙), `avgPrice`는 `cost`와 동일한 스케일 규칙(COIN 8자리, 그 외 통화 기준)로 정규화. **단 `GET /v1/assets`(Task 012)는 이번에 손대지 않아 여전히 DB `NUMERIC(28,8)` 왕복 스케일(8자리 고정)을 그대로 노출** — 같은 `quantity`/`avgPrice`라도 두 엔드포인트의 표기 스케일 결정 기준이 다르다(아래 「남은 갭」 참고)
+  - ✅ `PortfolioIntegrationTest` 신규(Testcontainers, 5케이스) — 빈 포트폴리오, 자산유형·통화 조합별 원가 집계(동일 티커 중복 등록 허용 검증 겸용), 미구현 평가지표 5개 필드의 null 키 보존, 소유권 격리, 무인증 401
+  - ✅ code-reviewer 독립 검증(실제 서버 기동+curl 실측, N+1 실측 포함) — Blocker 0건. Major 4건 발견:
+    - **(수정 완료)** `totalCostByCurrency` 합계에 통화 스케일이 적용되지 않아 항목별 `cost`와 표기가 어긋나던 결함(예: KRW 합계가 소수 2자리로 나감) — `stripTrailingZeros()` 대신 `scaleForCurrency(currency)` 기반 명시 반올림(HALF_UP)으로 수정
+    - **(수정 완료)** 위 결함을 테스트가 못 잡던 문제 — 합계 검증을 `BigDecimal.compareTo`에서 정확한 문자열 비교로 강화, 뮤테이션 테스트(고의로 `stripTrailingZeros()` 버전으로 되돌려 테스트가 실패하는지 확인)로 검출력 실증
+    - **(수정 완료)** `quantity`/`avgPrice` DB 왕복 스케일 노출(Task 012 이월 항목) — 위 결정대로 `GET /v1/portfolio`에 한해 정규화 적용
+    - **(별도 태스크로 분리)** `./gradlew test` 전체 스위트 실행 시 간헐적 실패 — 원인은 이번 Task 로직이 아니라 `AbstractIntegrationTest`의 Testcontainers `static @Container` 공유 구조(통합 테스트 클래스가 4개로 늘며 처음 노출된 기존 인프라 결함). 각 클래스 단독 실행은 항상 통과. 별도 태스크로 트래킹
+    - Minor 7건 중 `holding == null` 방어 코드(Asset+Holding이 항상 단일 트랜잭션에서 생성돼 도달 불가능, CLAUDE.md 「불가능한 시나리오 에러 처리 금지」) 제거 반영. 나머지는 보류 — 상세는 아래 「남은 갭」
+  - ✅ code-reviewer 2차 독립 검증(M1~M4 수정분 재검증, 실제 서버 기동+curl 실측·N+1 재실측·`AbstractIntegrationTest` Singleton Container 전환 부작용 점검 포함) — Blocker 0건. `./gradlew test --rerun` 4회 연속 66개 테스트 전부 통과 재확인. 신규 Major 1건 발견:
+    - **(문서로 해결)** `avgPrice`가 M4로 반올림되면서 `cost`(반올림 전 원본 정밀도로 계산)와 `quantity × 응답의 avgPrice`가 반올림 오차만큼 어긋나게 됨 — 코드는 그대로 두고 위 「`GET /v1/portfolio` 응답 예시」 절에 예외로 명문화(사용자 결정: 화면 표시값엔 영향 없고 코드 수정 비용 대비 실익이 낮다고 판단)
+    - Minor 2건 추가 발견: (a) `quantity`/`avgPrice`가 테스트로 전혀 검증되지 않아 위 Major를 테스트가 못 잡았음 — `PortfolioIntegrationTest`에 항목별 스케일 단언과 소수 평단가 회귀 케이스 추가로 해결. (b) `items` 배열 순서가 문서에 정의돼 있지 않던 문제 — `AssetRepository.findByUser_Id`를 `findByUser_IdOrderByIdDesc`(단일 인자 오버로드)로 바꿔 `GET /v1/assets`와 동일하게 id DESC(최신 등록순) 보장으로 해결
+  - ⚠️ 남은 갭:
+    - `GET /v1/assets`(Task 012)와 `GET /v1/portfolio`(Task 013)의 `quantity`/`avgPrice` 스케일 표기 기준이 서로 다르다(위 서술) — 두 엔드포인트를 통일할지는 다음 착수 시 재검토
+    - KRW/USD 외 통화(예: JPY)로 자산을 등록하면 `scaleFor()`가 스케일 2로 폴백하는데, 이 폴백 규칙이 「금융 정밀도 규칙」 표에 없음
+    - 정밀도 스케일 로직이 `PortfolioService.scaleFor`/`SimulateAvgPriceResponse`/프론트 `lib/big.ts` 3곳에 흩어져 있음 — Task 016(금융 정밀도 통합 테스트)에서 상수화 예정(code-reviewer 명시 권고, 이번엔 추상화하지 않음)
 
 - **Task 014: Observability 최소 셋업**
   - Micrometer 히스토그램 `allfolio_simulation_duration_seconds`
@@ -364,7 +383,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   "items": [
     { "assetId": "0198...", "ticker": "005930", "name": "삼성전자",
       "assetType": "STOCK", "currency": "KRW",
-      "quantity": "10", "avgPrice": "60000", "cost": "600000",
+      "quantity": "10.00000000", "avgPrice": "60000", "cost": "600000",
       "evaluationKrw": null, "unrealizedPnl": null, "weight": null }
   ],
   "totalCostByCurrency": { "KRW": "600000" },
@@ -372,6 +391,10 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   "totalUnrealizedPnl": null
 }
 ```
+
+`quantity`는 자산유형·통화와 무관하게 항상 8자리 scale로 내려온다(시뮬레이터 `expectedQuantity`와 동일 규칙). `avgPrice`·`cost`는 자산유형/통화별 「금융 정밀도 규칙」(COIN 8자리, 그 외 통화 기준)을 따른다 — 이 스케일 결정은 `GET /v1/portfolio`에만 적용되며, `GET /v1/assets`(Task 012)는 여전히 DB `NUMERIC(28,8)` 왕복 스케일을 그대로 노출한다(위 Task 013 항목의 「남은 갭」 참고).
+
+**주의**: `cost`는 반올림 전 원본 정밀도(`quantity × avgPrice` 원본값)로 계산한 뒤 스케일을 적용하고, `avgPrice`는 응답에 나가기 직전 별도로 반올림된다 — 즉 `cost`와 `quantity × 응답의 avgPrice`를 클라이언트가 직접 재계산하면 반올림 오차만큼(보통 통화 최소단위 이하) 다를 수 있다. 예: KRW 자산 평단가 원본이 `60000.75`면 응답은 `avgPrice: "60001"`(반올림)이지만 `cost`는 원본 `60000.75`로 계산해 반올림한 값이라 `quantity × 60001`과 정확히 일치하지 않는다. 화면 표시값(프론트가 별도로 반올림)에는 영향 없다.
 
 `totalCostByCurrency`는 `items`에 담긴 모든 자산의 취득원가를 통화별로 합산한 값이다(위 예시는 자산 1건뿐이라 KRW 값이 그 자산의 `cost`와 같다). 자산이 둘 이상이거나 USD 자산이 섞이면 통화별 키가 함께 늘어난다 — 예시는 `frontend/src/api/fixtures.ts`의 `portfolioFixture` 참고.
 
