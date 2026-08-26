@@ -256,10 +256,20 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - `MdcFilter`는 `OncePerRequestFilter`라 컨테이너 ERROR 디스패치(핸들러 없는 404 등)에는 기본적으로 재실행되지 않아 `traceId`가 비어있다 — `SecurityConfig`가 "보안 필터는 ERROR 디스패치에도 적용된다"고 명시한 것과는 비대칭. 실제로는 `GlobalExceptionHandler`가 대부분의 4xx/5xx를 REQUEST 디스패치 중에 처리해 `traceId`가 붙으므로 영향은 미미(2차 code-reviewer 확인) — 지금 고칠 사안은 아님
     - Task 015(시뮬레이터) 구현 시 `allfolio.simulation.duration` 이름으로 실제 `Timer`를 기록하는 프로덕션 코드(`@Timed` 또는 `Timer.record`)가 필요하다 — 이번엔 `MeterRegistry` 직접 호출로 설정이 살아있음만 검증했다
 
-- **Task 015: 물타기 시뮬레이터 구현 (F006)**
-  - `POST /v1/simulate/avg-price`, In-Memory 가중평균, DB 쓰기 없음
-  - 응답에 `expectedQuantity` 필드(scale 8) 포함 필수
-  - P99 ≤ 5ms
+- **Task 015: 물타기 시뮬레이터 구현 (F006)** ✅ — 완료 (2026-08-25)
+  - ✅ `POST /v1/simulate/avg-price` 신규 구현 — `domain/service/SimulationService.java` + `web/SimulateController.java` 2계층(`AssetController`/`PortfolioController`와 동일한 컨트롤러 패턴). 요청·응답 DTO는 Task 006에서 이미 확정돼 있어 변경 없음
+  - ✅ 소유권 검증은 `AssetService`와 동일하게 `findByIdAndUser_Id` → 없거나 타 유저 소유면 `AssetNotFoundException` → 기존 404 `ASSET_NOT_FOUND` 재사용(신규 에러 코드 없음, 403 대신 404로 ID 유출 방지)
+  - ✅ In-Memory 가중평균 계산, DB 쓰기 없음(`@Transactional(readOnly = true)`, `save`/`flush`/`delete` 호출 0건 — 2차 code-reviewer가 grep으로 실측 확인). `BigDecimal.divide(분모, scale, HALF_UP)`로 나눗셈·반올림을 1회에 처리. scale 결정 로직(`COIN` 8자리, `KRW` 0/`USD` 4/기타 2)은 `PortfolioService.scaleFor`/`scaleForCurrency`를 로컬 복제(2차 code-reviewer가 두 메서드 본문을 문자열로 직접 비교해 완전히 동일함을 확인) — 공유 유틸 추출은 여전히 Task 016 몫
+  - ✅ `currentAvgPrice`/`expectedAvgPrice` 둘 다 응답 직전 scale 재정규화 — `SimulateAvgPriceResponse.of()`가 `expectedQuantity`만 8자리로 반올림하고 두 평단가는 호출자 책임이라, 누락하면 DB `NUMERIC(28,8)` 왕복 scale이 그대로 노출되는 결함(Task 012/013 전례)이 재현될 뻔했으나 처음부터 반영돼 있었음(문자열 정확 비교 골든 테스트로 검증)
+  - ✅ CASH 자산도 별도 거부 로직 없이 그냥 계산해서 반환(사용자 확정 결정, 계획 단계에서 확인) — 프론트가 이미 UI로 CASH 자산에는 시뮬레이터를 안 보여주므로 백엔드가 중복 방어할 근거가 약하다고 판단
+  - ✅ `allfolio.simulation.duration` Micrometer 타이머 계측(Task 014가 준비해둔 히스토그램 설정에 실제 `Timer.record()` 연결) — `Timer.start()`는 조회 직전, `sample.stop()`은 계산 성공 시에만 호출해 실패(자산 못 찾음) 경로는 미계측(의도된 설계, 2차 code-reviewer가 Javadoc과 코드 위치로 확인 — Timer.Sample은 stop() 전엔 레지스트리에 아무것도 등록 안 해 누수 아님)
+  - ✅ `SimulateIntegrationTest` 신규(Testcontainers, 10케이스) — 골든 케이스(60,000원×10주+55,000원×5주→58,333원, `expectedQuantity` "15.00000000") 문자열 정확 비교, 타 유저 자산 접근 404, 존재하지 않는 자산 404, 미인증 401(에러 코드까지 단언), DB 미변경(`HoldingRepository` 재조회로 quantity/avgPrice/**version**/updatedAt 전부 동일 확인 — version까지 봐서 UPDATE가 안 나갔음을 실증), CASH 자산 정상 동작, COIN 8자리 HALF_UP 반올림(무한소수 케이스), USD 4자리 스케일, `additionalQuantity=0` → 400 `VALIDATION_ERROR`, 메트릭 카운트 자동 증가 검증
+  - ✅ `SimulationPerformanceTest` 신규 — `MockMvc`/HTTP 스택 없이 `SimulationService`를 직접 호출(ROADMAP KPI 정의가 "holding 단건 조회 포함한 수치"일 뿐 HTTP 프레이밍까지 포함하지 않는다고 해석), 워밍업 200회 + 측정 1,000회로 P99 계산. **실측 P99 = 약 1.0~1.4ms**(여러 차례 재실행에서 일관됨), 5ms 기준 대비 3~5배 여유. 2차 code-reviewer가 2차 캐시 미설정(매 반복 실제 SELECT 발생)을 확인해 "가짜 측정"이 아님을 검증
+  - ✅ 1차 실제 기동 검증(curl) + code-reviewer 독립 검증(Blocker 0건, Major 0건). Minor 7건 중 4건 반영: 검증 실패(`additionalQuantity=0`) 테스트 추가, 401 응답의 `code` 단언 보강, 메트릭 카운트 자동 증가 단언 추가, USD scale 4 골든 케이스 추가(153.7448) — 전부 `SimulateIntegrationTest`에 반영, 7→10케이스로 증가
+  - ⚠️ 남은 갭:
+    - `scaleFor`/`scaleForCurrency`가 이제 `PortfolioService`/`SimulationService` 2곳에 완전 동일하게 복제돼 있다 — Task 023(비중 계산, scale 2)에서 3번째 사용처가 생기면 그때 공유 유틸로 추출 검토(2차 code-reviewer 권고, 지금 손대면 기존 `PortfolioService`를 건드리게 돼 이번 Task 범위를 벗어남)
+    - 프론트(`frontend/src/lib/simulate.ts`)의 `simulateAvgPrice`는 `currentAvgPrice`를 입력값 그대로 통과시킨다 — 서버 응답의 scale 정규화와 표기가 갈릴 가능성이 있음, Task 018(프론트-백엔드 실연동) 착수 시 확인 필요
+    - Task 016(금융 정밀도 통합 테스트)에서 `scaleFor` 등 정밀도 스케일 로직 상수화가 여전히 예정돼 있음(Task 013부터 이월된 항목)
 
 - **Task 016: 금융 정밀도 및 도메인 통합 테스트**
   - `BigDecimalPrecisionTest`, `SimulationServiceTest`, `AssetCrudIntegrationTest`, `OptimisticLockingTest`
