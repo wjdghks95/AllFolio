@@ -24,6 +24,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ./gradlew test --info
 ```
 
+`./gradlew test` 전체 스위트 실행 시 간헐적 실패가 나는데 실패한 클래스만 단독 실행(`--tests`)하면 항상 통과한다면, 로직 버그가 아니라 `AbstractIntegrationTest`의 Testcontainers `static @Container` 공유 구조로 인한 기존 인프라 이슈일 가능성이 높다. 먼저 단독 실행으로 격리해 재현되는지부터 확인할 것.
+
 ### 앱 실행
 ```bash
 # Docker Compose로 PostgreSQL 시작
@@ -117,6 +119,7 @@ Phase와 무관하게 이 저장소에서 계속 유효한 환경 제약입니�
 | MockMvc | `@SpringBootTest`가 더 이상 MockMvc를 자동 제공하지 않음. `spring-boot-starter-webmvc-test`를 테스트 의존성에 별도 추가 |
 | Security 자동 설정 | JWT 기반 무상태 인증이므로 `UserDetailsServiceAutoConfiguration`을 제외해야 함 — 제외하지 않으면 부팅 시 랜덤 생성 비밀번호가 로그에 남음 |
 | Testcontainers 버전 | 버전을 고정하지 말 것. Spring Boot 4.1 BOM이 관리하는 2.x를 그대로 사용 (1.x로 고정하면 Docker Engine 29+와 API 버전 협상이 깨짐) |
+| 컨트롤러 `@Validated` | 클래스 레벨 `@Validated`를 붙이면 Spring 7 내장 메서드 파라미터 검증(400 응답 경로)이 꺼지고 구식 AOP 경로(`ConstraintViolationException`)로 전환되는데, `GlobalExceptionHandler`가 이 예외를 못 잡아 500으로 샌다. `@Min`/`@Max` 등은 `@Validated` 없이도 내장 경로로 그대로 동작하므로 컨트롤러에 붙이지 말 것 |
 
 ---
 
@@ -130,6 +133,8 @@ Flyway는 `src/main/resources/db/migration/V*.sql`에서 마이그레이션을 �
 - 모든 금융 컬럼은 `NUMERIC(28,8)` 사용 (BigDecimal 1:1 매핑)
 - 낙관적 잠금(Optimistic Lock)을 위해 `version INT` 컬럼 필수 (holdings는 사용자 액션 기반 저빈도 쓰기 — BIGINT 불필요)
 - UUID v7은 PK 기본값 (`DEFAULT uuidv7()`)
+
+**낙관적 잠금 수동 검증 주의:** 같은 트랜잭션에서 방금 읽은 엔티티의 `version`은 항상 최신값이라, Hibernate의 자동 `@Version` 검사만으로는 "클라이언트가 과거에 읽은 값" 기준 충돌을 잡지 못한다. 갱신 서비스 메서드에서 `entity.getVersion() != request.version()`을 직접 비교해 다르면 `ObjectOptimisticLockingFailureException`을 던질 것(409 응답으로 매핑). 엔티티 갱신 직후 `repository.flush()`를 호출해 응답에 증가된 `version`이 나가도록 보장할 것 (flush 누락 시 응답에 증가 전 값이 나가는 버그 실측됨).
 
 ### 로컬 개발 DB 설정
 
@@ -152,6 +157,7 @@ psql -h localhost -U allfolio -d allfolio
 - **원칙:** 금융 계산에는 `double`/`float` 절대 금지. 모든 금액/비율/가중치는 `BigDecimal`.
 - **DB:** `NUMERIC(28,8)` ↔ JPA `@Column(columnDefinition = "NUMERIC(28,8)")`로 1:1 매핑
 - **테스트:** `BigDecimal` 비교는 `.compareTo()` 사용 (`.equals()`는 scale 차이로 실패 가능)
+- **스케일 계산:** 코인 8자리 고정, 그 외엔 통화 기준(KRW 0/USD 4/기타 2) 규칙은 `domain/PrecisionScale`에 이미 구현되어 있다. 새 서비스에서 스케일을 다시 계산하지 말고 이 유틸을 재사용할 것 (과거 PortfolioService/SimulationService에 중복 구현됐다가 Task 016에서 통합된 전례가 있음).
 
 ### 정밀도 검증
 
@@ -179,6 +185,7 @@ grep -r "double " src/main/java --include="*.java" | grep -v "Double\|//.*double
 - 평단가(`avg_price`), 수량(`quantity`)을 `BigDecimal`로 추적
 - 시뮬레이터 입력: 추가 매수 가격 × 수량 → 신규 평단가 계산
 - **CASH 자산의 `avg_price`는 항상 `1`** (Task 006 결정). 현금에는 평단가 개념이 없지만 `holdings.avg_price`에 `CHECK (avg_price > 0)` 제약이 있어 `0`을 넣을 수 없다. `1`을 고정값으로 써서 "평가금액 = quantity × avg_price" 계산식을 CASH에도 그대로 적용할 수 있게 한다(문자 그대로 "1원짜리 단위 × 보유량"). 등록 화면에서는 CASH 선택 시 평단가 입력란을 숨긴다
+- **타 유저 소유 자원 접근은 403이 아닌 404** — 조회·수정·삭제·시뮬레이터 전 구간의 컨벤션. 소유권 없음과 존재하지 않음을 구분해 응답하면 ID 유출 경로가 되므로, 소유권 조회 쿼리(`findByIdAndUser_Id`)가 없으면 곧장 404로 응답한다
 
 ### 포트폴리오 (Portfolio)
 
