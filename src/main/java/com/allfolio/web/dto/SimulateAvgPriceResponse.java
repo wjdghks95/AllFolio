@@ -1,5 +1,7 @@
 package com.allfolio.web.dto;
 
+import com.allfolio.domain.PrecisionScale;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -21,14 +23,14 @@ public record SimulateAvgPriceResponse(
 ) {
 
     /**
-     * expectedQuantity는 통화/자산 종류와 무관하게 항상 scale 8로 직렬화한다
+     * expectedQuantity는 통화/자산 종류와 무관하게 항상 PrecisionScale.QUANTITY_SCALE(8)로 직렬화한다
      * (docs/ROADMAP.md 「시뮬레이터 응답 예시」 골든 케이스 주석 참조).
      */
     public static SimulateAvgPriceResponse of(BigDecimal currentAvg, BigDecimal expectedAvg, BigDecimal expectedQuantity) {
         return new SimulateAvgPriceResponse(
                 currentAvg.toPlainString(),
                 expectedAvg.toPlainString(),
-                expectedQuantity.setScale(8, RoundingMode.HALF_UP).toPlainString(),
+                expectedQuantity.setScale(PrecisionScale.QUANTITY_SCALE, RoundingMode.HALF_UP).toPlainString(),
                 null,
                 null,
                 Instant.now()

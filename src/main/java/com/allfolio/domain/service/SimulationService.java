@@ -1,8 +1,8 @@
 package com.allfolio.domain.service;
 
 import com.allfolio.domain.Asset;
-import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Holding;
+import com.allfolio.domain.PrecisionScale;
 import com.allfolio.domain.exception.AssetNotFoundException;
 import com.allfolio.domain.repository.AssetRepository;
 import com.allfolio.domain.repository.HoldingRepository;
@@ -57,7 +57,7 @@ public class SimulationService {
         BigDecimal totalCost = currentQuantity.multiply(currentAvgPrice)
                 .add(additionalQuantity.multiply(additionalPrice));
 
-        int scale = scaleFor(asset);
+        int scale = PrecisionScale.scaleFor(asset.getAssetType(), asset.getCurrency());
         // DB NUMERIC(28,8) 왕복 scale이 그대로 노출되지 않도록, 응답에 나가기 전 두 평단가 모두
         // 여기서 최종 반올림한다(Task 012/013에서 실제로 있었던 결함 유형).
         BigDecimal expectedAvgPrice = totalCost.divide(totalQuantity, scale, RoundingMode.HALF_UP);
@@ -74,21 +74,5 @@ public class SimulationService {
     private Holding findHolding(UUID assetId) {
         return holdingRepository.findByAsset_Id(assetId)
                 .orElseThrow(() -> new IllegalStateException("자산 " + assetId + "에 대한 보유 정보가 없습니다."));
-    }
-
-    /** 「금융 정밀도 규칙」(docs/ROADMAP.md): COIN은 통화 무관 8자리, 그 외엔 통화 기준. */
-    private int scaleFor(Asset asset) {
-        if (asset.getAssetType() == AssetType.COIN) {
-            return 8;
-        }
-        return scaleForCurrency(asset.getCurrency());
-    }
-
-    private int scaleForCurrency(String currency) {
-        return switch (currency) {
-            case "KRW" -> 0;
-            case "USD" -> 4;
-            default -> 2;
-        };
     }
 }

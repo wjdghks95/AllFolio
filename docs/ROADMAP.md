@@ -233,9 +233,9 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - **(문서로 해결)** `avgPrice`가 M4로 반올림되면서 `cost`(반올림 전 원본 정밀도로 계산)와 `quantity × 응답의 avgPrice`가 반올림 오차만큼 어긋나게 됨 — 코드는 그대로 두고 위 「`GET /v1/portfolio` 응답 예시」 절에 예외로 명문화(사용자 결정: 화면 표시값엔 영향 없고 코드 수정 비용 대비 실익이 낮다고 판단)
     - Minor 2건 추가 발견: (a) `quantity`/`avgPrice`가 테스트로 전혀 검증되지 않아 위 Major를 테스트가 못 잡았음 — `PortfolioIntegrationTest`에 항목별 스케일 단언과 소수 평단가 회귀 케이스 추가로 해결. (b) `items` 배열 순서가 문서에 정의돼 있지 않던 문제 — `AssetRepository.findByUser_Id`를 `findByUser_IdOrderByIdDesc`(단일 인자 오버로드)로 바꿔 `GET /v1/assets`와 동일하게 id DESC(최신 등록순) 보장으로 해결
   - ⚠️ 남은 갭:
-    - `GET /v1/assets`(Task 012)와 `GET /v1/portfolio`(Task 013)의 `quantity`/`avgPrice` 스케일 표기 기준이 서로 다르다(위 서술) — 두 엔드포인트를 통일할지는 다음 착수 시 재검토
-    - KRW/USD 외 통화(예: JPY)로 자산을 등록하면 `scaleFor()`가 스케일 2로 폴백하는데, 이 폴백 규칙이 「금융 정밀도 규칙」 표에 없음
-    - 정밀도 스케일 로직이 `PortfolioService.scaleFor`/`SimulateAvgPriceResponse`/프론트 `lib/big.ts` 3곳에 흩어져 있음 — Task 016(금융 정밀도 통합 테스트)에서 상수화 예정(code-reviewer 명시 권고, 이번엔 추상화하지 않음)
+    - `GET /v1/assets`(Task 012)와 `GET /v1/portfolio`(Task 013)의 `quantity`/`avgPrice` 스케일 표기 기준이 서로 다르다(위 서술) — 두 엔드포인트를 통일할지는 다음 착수 시 재검토(Task 016에서 회귀 테스트로 현재 동작을 스냅샷 고정, 처리 방향 자체는 여전히 미정)
+    - ✅ (Task 016에서 해소) KRW/USD 외 통화(예: JPY)로 자산을 등록하면 `scaleFor()`가 스케일 2로 폴백하는 문제 — 아래 「금융 정밀도 규칙」 표에 폴백 행 추가로 해소
+    - ✅ (Task 016에서 해소) 정밀도 스케일 로직이 `PortfolioService.scaleFor`/`SimulateAvgPriceResponse`/프론트 `lib/big.ts` 3곳에 흩어져 있던 문제 — 백엔드 2곳은 `domain/PrecisionScale`로 통합(프론트는 언어 경계라 별개 유지, Task 007이 이미 `lib/big.ts`에 별도 상수화를 해둔 상태)
 
 - **Task 014: Observability 최소 셋업** ✅ — 완료 (2026-08-25)
   - ✅ `logback-spring.xml` 신규 작성 — 콘솔 로그를 `LogstashEncoder`로 JSON 출력(의존성은 이미 있었으나 설정 파일이 없어 미사용 상태였음). Boot 기본 노이즈 억제 로거를 `<include resource="org/springframework/boot/logging/logback/defaults.xml"/>`로 가져옴. `<root>` level은 `INFO` 리터럴 — `application.yml`의 `logging.level.*`가 부팅 후 항상 덮어쓰므로(`LOGGING_LEVEL_ROOT` 환경변수도 Spring relaxed binding으로 결국 같은 경로라 마찬가지) 여기 값은 어떤 경로로도 최종 레벨에 영향을 못 준다. 한때 환경변수 폴백(`${LOGGING_LEVEL_ROOT:-INFO}`)으로 바꿔봤으나 실효 없는 죽은 설정임을 2차 code-reviewer가 지적해(CLAUDE.md §2 요청되지 않은 configurability 금지) 리터럴로 되돌림
@@ -259,7 +259,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 - **Task 015: 물타기 시뮬레이터 구현 (F006)** ✅ — 완료 (2026-08-25)
   - ✅ `POST /v1/simulate/avg-price` 신규 구현 — `domain/service/SimulationService.java` + `web/SimulateController.java` 2계층(`AssetController`/`PortfolioController`와 동일한 컨트롤러 패턴). 요청·응답 DTO는 Task 006에서 이미 확정돼 있어 변경 없음
   - ✅ 소유권 검증은 `AssetService`와 동일하게 `findByIdAndUser_Id` → 없거나 타 유저 소유면 `AssetNotFoundException` → 기존 404 `ASSET_NOT_FOUND` 재사용(신규 에러 코드 없음, 403 대신 404로 ID 유출 방지)
-  - ✅ In-Memory 가중평균 계산, DB 쓰기 없음(`@Transactional(readOnly = true)`, `save`/`flush`/`delete` 호출 0건 — 2차 code-reviewer가 grep으로 실측 확인). `BigDecimal.divide(분모, scale, HALF_UP)`로 나눗셈·반올림을 1회에 처리. scale 결정 로직(`COIN` 8자리, `KRW` 0/`USD` 4/기타 2)은 `PortfolioService.scaleFor`/`scaleForCurrency`를 로컬 복제(2차 code-reviewer가 두 메서드 본문을 문자열로 직접 비교해 완전히 동일함을 확인) — 공유 유틸 추출은 여전히 Task 016 몫
+  - ✅ In-Memory 가중평균 계산, DB 쓰기 없음(`@Transactional(readOnly = true)`, `save`/`flush`/`delete` 호출 0건 — 2차 code-reviewer가 grep으로 실측 확인). `BigDecimal.divide(분모, scale, HALF_UP)`로 나눗셈·반올림을 1회에 처리. scale 결정 로직(`COIN` 8자리, `KRW` 0/`USD` 4/기타 2)은 `PortfolioService.scaleFor`/`scaleForCurrency`를 로컬 복제(2차 code-reviewer가 두 메서드 본문을 문자열로 직접 비교해 완전히 동일함을 확인) — 공유 유틸 추출은 Task 016에서 완료(아래 참고)
   - ✅ `currentAvgPrice`/`expectedAvgPrice` 둘 다 응답 직전 scale 재정규화 — `SimulateAvgPriceResponse.of()`가 `expectedQuantity`만 8자리로 반올림하고 두 평단가는 호출자 책임이라, 누락하면 DB `NUMERIC(28,8)` 왕복 scale이 그대로 노출되는 결함(Task 012/013 전례)이 재현될 뻔했으나 처음부터 반영돼 있었음(문자열 정확 비교 골든 테스트로 검증)
   - ✅ CASH 자산도 별도 거부 로직 없이 그냥 계산해서 반환(사용자 확정 결정, 계획 단계에서 확인) — 프론트가 이미 UI로 CASH 자산에는 시뮬레이터를 안 보여주므로 백엔드가 중복 방어할 근거가 약하다고 판단
   - ✅ `allfolio.simulation.duration` Micrometer 타이머 계측(Task 014가 준비해둔 히스토그램 설정에 실제 `Timer.record()` 연결) — `Timer.start()`는 조회 직전, `sample.stop()`은 계산 성공 시에만 호출해 실패(자산 못 찾음) 경로는 미계측(의도된 설계, 2차 code-reviewer가 Javadoc과 코드 위치로 확인 — Timer.Sample은 stop() 전엔 레지스트리에 아무것도 등록 안 해 누수 아님)
@@ -267,13 +267,22 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ `SimulationPerformanceTest` 신규 — `MockMvc`/HTTP 스택 없이 `SimulationService`를 직접 호출(ROADMAP KPI 정의가 "holding 단건 조회 포함한 수치"일 뿐 HTTP 프레이밍까지 포함하지 않는다고 해석), 워밍업 200회 + 측정 1,000회로 P99 계산. **실측 P99 = 약 1.0~1.4ms**(여러 차례 재실행에서 일관됨), 5ms 기준 대비 3~5배 여유. 2차 code-reviewer가 2차 캐시 미설정(매 반복 실제 SELECT 발생)을 확인해 "가짜 측정"이 아님을 검증
   - ✅ 1차 실제 기동 검증(curl) + code-reviewer 독립 검증(Blocker 0건, Major 0건). Minor 7건 중 4건 반영: 검증 실패(`additionalQuantity=0`) 테스트 추가, 401 응답의 `code` 단언 보강, 메트릭 카운트 자동 증가 단언 추가, USD scale 4 골든 케이스 추가(153.7448) — 전부 `SimulateIntegrationTest`에 반영, 7→10케이스로 증가
   - ⚠️ 남은 갭:
-    - `scaleFor`/`scaleForCurrency`가 이제 `PortfolioService`/`SimulationService` 2곳에 완전 동일하게 복제돼 있다 — Task 023(비중 계산, scale 2)에서 3번째 사용처가 생기면 그때 공유 유틸로 추출 검토(2차 code-reviewer 권고, 지금 손대면 기존 `PortfolioService`를 건드리게 돼 이번 Task 범위를 벗어남)
+    - ✅ (Task 016에서 해소) `scaleFor`/`scaleForCurrency`가 `PortfolioService`/`SimulationService` 2곳에 완전 동일하게 복제돼 있던 문제 — `domain/PrecisionScale` 공유 유틸로 통합, 두 서비스 모두 이 유틸을 호출하도록 리팩터링(기존 응답 문자열 무변경, 회귀 테스트로 확인)
     - 프론트(`frontend/src/lib/simulate.ts`)의 `simulateAvgPrice`는 `currentAvgPrice`를 입력값 그대로 통과시킨다 — 서버 응답의 scale 정규화와 표기가 갈릴 가능성이 있음, Task 018(프론트-백엔드 실연동) 착수 시 확인 필요
-    - Task 016(금융 정밀도 통합 테스트)에서 `scaleFor` 등 정밀도 스케일 로직 상수화가 여전히 예정돼 있음(Task 013부터 이월된 항목)
 
-- **Task 016: 금융 정밀도 및 도메인 통합 테스트**
-  - `BigDecimalPrecisionTest`, `SimulationServiceTest`, `AssetCrudIntegrationTest`, `OptimisticLockingTest`
-  - `double`/`float` 0건 정적 검사
+- **Task 016: 금융 정밀도 및 도메인 통합 테스트** ✅ — 완료 (2026-08-27)
+  - 원안 체크리스트(`BigDecimalPrecisionTest`/`SimulationServiceTest`/`AssetCrudIntegrationTest`/`OptimisticLockingTest`)는 Phase 1 Step 6 시절 작성돼, 그 사이 Task 012·013·015가 이미 만든 자체 통합 테스트(`AssetIntegrationTest` 15케이스·`PortfolioIntegrationTest`·`SimulateIntegrationTest`)와 상당 부분 겹쳤다. 실제 코드베이스 조사로 남은 갭만 추려 아래처럼 조정해 구현했다
+  - ✅ `domain/PrecisionScale.java` 신규 — `PortfolioService`/`SimulationService`에 완전히 동일하게 복제돼 있던 `scaleFor`/`scaleForCurrency`(Task 013·015가 이월한 항목)를 정적 유틸 하나로 통합. 두 서비스는 이 유틸을 호출만 하도록 리팩터링(로직 변경 없이 코드만 이동), quantity 공용 스케일(8)도 `PrecisionScale.QUANTITY_SCALE` 상수로 뽑아 `SimulateAvgPriceResponse`·`PortfolioService`가 함께 참조하도록 정리. 리팩터링 전후로 `PortfolioIntegrationTest`·`SimulateIntegrationTest`의 문자열 정확 비교 골든 테스트가 전부 변경 없이 통과해 응답 문자열이 한 글자도 안 바뀌었음을 확인
+  - ✅ `BigDecimalPrecisionTest` 신규 — `PrecisionScale.scaleFor`를 「금융 정밀도 규칙」 표(아래) 전 조합(STOCK/CASH/COIN × KRW/USD/기타 통화 폴백)으로 파라미터라이즈드 검증 + HALF_UP 반올림 경계값 2건. 같은 클래스에 `double`/`float` 금지 규칙(CLAUDE.md)을 `src/main/java` 전체 스캔으로 자동 검사하는 테스트 추가 — 처음엔 라인 단위로 `//`만 잘라내 여러 줄 Javadoc/블록 주석에 "double" 단어가 있으면 오탐하는 결함이 있었으나(code-reviewer 지적), 상태 추적형 주석 제거 로직으로 교체해 해소(뮤테이션 검증으로 오탐 해소·실제 위반 검출 둘 다 확인)
+  - ✅ `OptimisticLockingTest` 신설 — `AssetService.updateHolding()`의 낙관적 잠금이 두 요청을 동시에 제출해도 정확히 1건만 성공(200)시키고 1건은 409 `HOLDING_CONFLICT`를 내는지 `ExecutorService`(2스레드)+`CountDownLatch`로 검증. 기존 `AssetIntegrationTest.updateHoldingWithStaleVersionReturnsHoldingConflict`는 순차 재현이라 실제 동시 제출 경로는 검증한 적이 없었다. `--rerun` 5회 연속 통과로 flaky 아님을 확인. **주의(code-reviewer 지적, 클래스 Javadoc에 명시)**: `AssetService.updateHolding()`이 flush 이전에 인메모리로 버전을 먼저 비교하므로, 이 테스트는 "동시 제출 시 정확히 1건만 성공"까지만 증명하고 "DB 트랜잭션이 실제로 겹쳤는지"는 증명하지 않는다
+  - ✅ `SimulationServiceTest` 신설 — Mockito(`AssetRepository`/`HoldingRepository` 목킹) + 실제 `SimpleMeterRegistry`로 Spring 컨텍스트 없이 `SimulationService.simulate()`의 계산 로직만 단위 테스트(골든 케이스·HALF_UP 경계값·CASH·COIN 8자리 반올림·자산 미소유 시 예외·실패 경로 미계측 확인 6케이스). 초기 버전은 입력 `avgPrice`가 이미 목표 scale이라 `currentAvgPrice.setScale(...)`를 지워도 통과하는 뮤테이션 사각지대가 있었으나(code-reviewer 지적), 목표 scale보다 자리수가 많은 입력(`60000.4`) 케이스를 추가해 해소
+  - ✅ 원안의 `AssetCrudIntegrationTest`는 기존 `AssetIntegrationTest`(15케이스)와 완전 중복이라 신규 클래스를 만들지 않고, 대신 이 클래스에 정밀도 특화 케이스 3건을 추가했다: NUMERIC(28,8) 상한 근처 값(정수부 20자리+소수부 8자리) CRUD 왕복 무손실 확인, `@Digits(integer=20)` 상한 초과(정수부 21자리) 시 400 `VALIDATION_ERROR` 확인, `POST` 응답(요청 스케일 그대로)과 `GET /v1/assets` 응답(DB 왕복 스케일 8 고정)의 표기 차이를 "미결 사항의 현재 동작 스냅샷"으로 고정하는 회귀 테스트(위 Task 012·013 「남은 갭」이 여전히 미정임을 정확히 반영하는 문구로 작성)
+  - ✅ `grep -rn "double \|float " src/main/java --include="*.java"` 0건 실측 확인, `BigDecimalPrecisionTest`의 자동 검사로 회귀 방지
+  - ✅ code-reviewer 독립 검증(실제 `./gradlew test --rerun-tasks` 실행 + 뮤테이션 검증 포함) — Blocker 0건, Major 0건. Minor 9건 발견, 위 서술된 5건(주석 오탐·동시성 Javadoc·계산 뮤테이션 사각지대·quantity 상수화·상한 초과 케이스·문구 정정)은 전부 반영. 나머지는 이 항목과 아래 「금융 정밀도 규칙」 갱신으로 해소
+  - ✅ 테스트 개수 실측: 기존 85케이스 → **108케이스**(`BigDecimalPrecisionTest` 13, `OptimisticLockingTest` 1, `SimulationServiceTest` 6, `AssetIntegrationTest` +3 신규 반영)
+  - ⚠️ 남은 갭:
+    - `GET /v1/assets`와 `GET /v1/portfolio`의 `quantity`/`avgPrice` 스케일 표기 불일치(Task 012·013 이월)는 이번에 회귀 테스트로 스냅샷만 고정했을 뿐, 통일 여부는 여전히 미정 — 다음 착수 시 결정
+    - `OptimisticLockingTest`가 진짜 DB 트랜잭션 경합까지 구분해 증명하지는 못한다(위 서술) — 필요해지면 예외 발생 지점을 로거로 구분하는 방식 검토
 
 - **Task 017: MVP 로컬 실행 문서화**
   - `README.md` 신규 작성 (현재 저장소에 없음)
@@ -469,7 +478,10 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 | KRW 주식 | 0 | HALF_UP |
 | USD 자산 | 4 | HALF_UP |
 | 코인 | 8 | HALF_UP |
+| 기타 통화(폴백, 예: JPY) | 2 | HALF_UP |
 | 비중(%) | 2 | HALF_UP |
+
+코인은 통화와 무관하게 항상 스케일 8이 우선 적용된다(위 표의 "코인" 행이 통화별 행보다 우선). KRW/USD 외 통화는 스케일 2로 폴백한다 — `domain/PrecisionScale.scaleFor()`/`scaleForCurrency()`(Task 016에서 `PortfolioService`/`SimulationService` 중복 로직을 통합한 공유 유틸)의 실제 코드 동작이며, `BigDecimalPrecisionTest`가 이 표 전체 조합을 고정한다.
 
 모든 금융 컬럼은 `NUMERIC(28,8)` (BigDecimal 1:1 매핑). `double`/`float` 절대 금지.
 
@@ -497,7 +509,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 | 리스크 | 완화 |
 |---|---|
-| BigDecimal 스케일 규칙 누락 | 위 「금융 정밀도 규칙」 표를 `BigDecimalPrecisionTest`로 상수화, 모든 서비스 로직에 재사용 |
+| BigDecimal 스케일 규칙 누락 | ✅ (Task 016 해소) 위 「금융 정밀도 규칙」 표를 `domain/PrecisionScale` 유틸로 코드화, `BigDecimalPrecisionTest`로 고정, `PortfolioService`/`SimulationService`가 공유 |
 | Optimistic Lock 고빈도 충돌 | 유저 수 적은 초기 단계이므로 단순 `@Version`으로 충분. 충돌 시 `HOLDING_CONFLICT` 409 응답으로 클라이언트가 재조회 후 재시도 |
 | 프론트-백엔드 API 계약 어긋남 | Task 006에서 TypeScript 타입(`frontend/src/api/types.ts`)과 더미 픽스처(`frontend/src/api/fixtures.ts`)를 계약의 단일 출처로 삼아 양쪽이 참조. 백엔드는 `ApiContractSerializationTest`로 직렬화 형태를 고정 |
 | 종목 중복 등록 허용에 따른 포트폴리오 집계 복잡도 | 「확정된 설계 결정」 #3 참조 — 티커별 합산이 아닌 자산(행) 단위 집계로 설계해 복잡도를 피한다 |

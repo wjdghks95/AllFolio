@@ -1,8 +1,8 @@
 package com.allfolio.domain.service;
 
 import com.allfolio.domain.Asset;
-import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Holding;
+import com.allfolio.domain.PrecisionScale;
 import com.allfolio.domain.repository.AssetRepository;
 import com.allfolio.domain.repository.HoldingRepository;
 import com.allfolio.web.dto.PortfolioItemResponse;
@@ -55,7 +55,7 @@ public class PortfolioService {
      * non-null이다 — 방어적 null 체크를 두지 않는다(CLAUDE.md 「불가능한 시나리오 에러 처리 금지」).
      */
     private PortfolioItemResponse toItemResponse(Asset asset, Holding holding) {
-        int scale = scaleFor(asset);
+        int scale = PrecisionScale.scaleFor(asset.getAssetType(), asset.getCurrency());
         BigDecimal cost = holding.getQuantity().multiply(holding.getAvgPrice())
                 .setScale(scale, RoundingMode.HALF_UP);
 
@@ -66,7 +66,7 @@ public class PortfolioService {
                 asset.getAssetType(),
                 asset.getCurrency(),
                 // quantity는 자산유형·통화 무관 항상 8자리(시뮬레이터 expectedQuantity와 동일 규칙).
-                holding.getQuantity().setScale(8, RoundingMode.HALF_UP).toPlainString(),
+                holding.getQuantity().setScale(PrecisionScale.QUANTITY_SCALE, RoundingMode.HALF_UP).toPlainString(),
                 holding.getAvgPrice().setScale(scale, RoundingMode.HALF_UP).toPlainString(),
                 cost.toPlainString(),
                 null,
@@ -74,23 +74,7 @@ public class PortfolioService {
                 null);
     }
 
-    /** 「금융 정밀도 규칙」(docs/ROADMAP.md): COIN은 통화 무관 8자리, 그 외엔 통화 기준. cost·avgPrice가 공유한다. */
-    private int scaleFor(Asset asset) {
-        if (asset.getAssetType() == AssetType.COIN) {
-            return 8;
-        }
-        return scaleForCurrency(asset.getCurrency());
-    }
-
-    private int scaleForCurrency(String currency) {
-        return switch (currency) {
-            case "KRW" -> 0;
-            case "USD" -> 4;
-            default -> 2;
-        };
-    }
-
-    /** currency별 cost 합산 후 그 통화의 스케일(scaleForCurrency)로 반올림한다 — 항목별 cost와 표기가 어긋나지 않도록. */
+    /** currency별 cost 합산 후 그 통화의 스케일(PrecisionScale.scaleForCurrency)로 반올림한다 — 항목별 cost와 표기가 어긋나지 않도록. */
     private Map<String, String> totalCostByCurrency(List<PortfolioItemResponse> items) {
         return items.stream()
                 .collect(Collectors.groupingBy(PortfolioItemResponse::currency))
@@ -102,6 +86,6 @@ public class PortfolioService {
         BigDecimal sum = itemsInCurrency.stream()
                 .map(item -> new BigDecimal(item.cost()))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        return sum.setScale(scaleForCurrency(currency), RoundingMode.HALF_UP).toPlainString();
+        return sum.setScale(PrecisionScale.scaleForCurrency(currency), RoundingMode.HALF_UP).toPlainString();
     }
 }

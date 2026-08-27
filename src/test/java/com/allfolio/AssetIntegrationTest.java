@@ -14,6 +14,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.UnsupportedEncodingException;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -203,6 +204,53 @@ class AssetIntegrationTest extends AbstractIntegrationTest {
                 .hasStatus(HttpStatus.CREATED);
         assertThat(createAsset(tokenA, stockRequest("005930", "삼성전자", "5", "65000")))
                 .hasStatus(HttpStatus.CREATED);
+    }
+
+    /**
+     * NUMERIC(28,8)(정수부 20자리+소수부 8자리)의 CreateAssetRequest.quantity/avgPrice 상한 근처
+     * 값이 DB 왕복 후에도 손실 없이 유지되는지 확인한다(docs/ROADMAP.md Task 016).
+     */
+    @Test
+    void registeringAssetWithNumericUpperBoundValuesRoundTripsWithoutLoss() {
+        String quantity = "12345678901234567890.12345678";
+        String avgPrice = "99999999999999999999.99999999";
+        String assetId = idOf(createAsset(tokenA, stockRequest("005930", "삼성전자", quantity, avgPrice)));
+
+        MvcTestResult result = authorizedGet("/v1/assets/" + assetId, tokenA);
+
+        assertThat(result).hasStatusOk();
+        Map<String, Object> body = bodyOf(result);
+        assertThat(new BigDecimal((String) body.get("quantity"))).isEqualByComparingTo(new BigDecimal(quantity));
+        assertThat(new BigDecimal((String) body.get("avgPrice"))).isEqualByComparingTo(new BigDecimal(avgPrice));
+    }
+
+    /** CreateAssetRequest.quantity의 @Digits(integer=20) 상한을 넘는 정수부 21자리는 400을 내야 한다. */
+    @Test
+    void registeringAssetWithQuantityExceedingIntegerDigitLimitReturnsValidationError() {
+        String tooManyIntegerDigits = "123456789012345678901"; // 21자리(상한 20자리 초과)
+
+        assertThat(createAsset(tokenA, stockRequest("005930", "삼성전자", tooManyIntegerDigits, "60000")))
+                .hasStatus(HttpStatus.BAD_REQUEST)
+                .bodyJson().extractingPath("$.code").asString().isEqualTo("VALIDATION_ERROR");
+    }
+
+    /**
+     * POST 응답은 요청 스케일 그대로("10")를 돌려주지만, GET /v1/assets는 DB NUMERIC(28,8) 왕복
+     * 스케일("10.00000000")을 그대로 노출한다. 버그는 아니지만 처리 방향(GET 스케일로 통일할지,
+     * 자산 유형별 스케일을 POST/PUT에도 적용할지)은 아직 미정이다(docs/ROADMAP.md Task 012 「남은
+     * 갭」 213·236행) — 이 테스트는 그 미결 사항을 "결정 완료"가 아닌 현재 동작의 스냅샷으로
+     * 고정해, 다음에 통일하기로 결정될 때 이 테스트부터 고치면 되도록 한다(Task 016).
+     */
+    @Test
+    void postEchoesRequestScaleWhileGetListNormalizesToDbScale() {
+        MvcTestResult createResult = createAsset(tokenA, stockRequest("005930", "삼성전자", "10", "60000"));
+        assertThat(bodyOf(createResult).get("quantity")).isEqualTo("10");
+
+        MvcTestResult listResult = authorizedGet("/v1/assets", tokenA);
+        List<Map<String, Object>> items = itemsOf(bodyOf(listResult));
+
+        assertThat(items).hasSize(1);
+        assertThat(items.getFirst().get("quantity")).isEqualTo("10.00000000");
     }
 
     /**
