@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-08-25
+**최종 수정:** 2026-08-27
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~4와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -124,7 +124,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - ✅ `CreateAssetRequest.currency` 검증을 `@Pattern("^[A-Z]{3}$")`로 강화 (`web/dto/CreateAssetRequest.java`)
     - ✅ 응답 DTO enum 직렬화 정책 확정 — `AssetResponse.assetType`은 `"STOCK"` 문자열로 직렬화(Jackson 기본 동작)되며 `ApiContractSerializationTest`로 고정. TypeScript `AssetType`도 동일한 문자열 유니온으로 반영
 
-### Phase 2: UI/UX 완성 + 백엔드 도메인 구현 (병렬 2트랙) 🔵 진행 중
+### Phase 2: UI/UX 완성 + 백엔드 도메인 구현 (병렬 2트랙) ✅ 완료 (2026-08-27)
 
 두 트랙 모두 Task 006(API 계약)을 선행 조건으로 한다.
 
@@ -284,9 +284,11 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - `GET /v1/assets`와 `GET /v1/portfolio`의 `quantity`/`avgPrice` 스케일 표기 불일치(Task 012·013 이월)는 이번에 회귀 테스트로 스냅샷만 고정했을 뿐, 통일 여부는 여전히 미정 — 다음 착수 시 결정
     - `OptimisticLockingTest`가 진짜 DB 트랜잭션 경합까지 구분해 증명하지는 못한다(위 서술) — 필요해지면 예외 발생 지점을 로거로 구분하는 방식 검토
 
-- **Task 017: MVP 로컬 실행 문서화**
-  - `README.md` 신규 작성 (현재 저장소에 없음)
-  - 백엔드·프론트 동시 실행법, curl 시퀀스
+- **Task 017: MVP 로컬 실행 문서화** ✅ — 완료 (2026-08-27)
+  - ✅ 저장소 루트에 `README.md` 신규 작성 — 사전 요구사항, 백엔드 기동(`docker compose up -d` → `ALLFOLIO_JWT_SECRET` 환경변수 필수 이유 → `gradlew bootRun` → `/actuator/health` 확인), 프론트 기동(`npm run dev`, `/v1` 프록시 설명, 실데이터 연동은 Task 018 예정임을 명시), curl 기반 API 흐름(회원가입→로그인→자산 등록(STOCK/CASH)→목록 조회→물타기 시뮬레이션→포트폴리오 조회) 순서로 구성. CLAUDE.md(빌드/테스트 상세·아키텍처 레퍼런스)와 역할을 분리해 README는 "처음 실행 온보딩" 전용 문서로 유지
+  - ✅ 실제 `docker compose up -d` + `ALLFOLIO_JWT_SECRET` 설정 + `gradlew bootRun`으로 기동해 README의 curl 시퀀스를 처음부터 끝까지 그대로 실행·검증. 이 과정에서 실제 응답을 확인해 예시를 맞춤: (a) 자산 생성 직후 응답은 `quantity`/`avgPrice`가 패딩 없이 내려오지만 `GET /v1/assets` 목록 조회에서는 소수점 8자리로 패딩됨(Task 012·013·016이 이미 스냅샷 고정해둔 것과 동일한 표기 차이), (b) KRW 통화 금액은 `PrecisionScale` 규칙상 소수점 0자리라 시뮬레이션 결과(`expectedAvgPrice`)가 정수로 나옴 — 반올림 오류가 아니라 의도된 설계
+  - ✅ `null`로 내려오는 필드(`evaluationKrw`/`unrealizedPnl`/`weight`/`currentWeight`/`expectedWeight`/`totalEvaluationKrw`/`totalUnrealizedPnl`)가 Task 023(Phase 3) 전까지 의도된 설계임을 README에 명시, 에러 응답 포맷(`{code,message,timestamp}`)과 대표 코드 표도 포함
+  - 코드·설정 파일은 변경하지 않은 순수 문서화 Task(검증에 쓴 `bootRun` 프로세스는 종료해 8080 포트 정리)
 
 ### Phase 3: 핵심 기능 구현 (실데이터 연동 및 외부 시세)
 
