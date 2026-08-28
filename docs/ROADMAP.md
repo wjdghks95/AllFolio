@@ -331,7 +331,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 - **Task 027: Capacitor 하이브리드 앱 패키징**
   - Vite `dist/`를 WebView에 탑재
   - 앱은 `capacitor://` 출처에서 도는 별도 origin이라 개발 중 프록시로 우회하던 CORS 설정이 여기서 실제로 필요해진다.
-  - 웹폰트(IBM Plex) self-host 전환 검토 — `frontend/index.html`이 Google Fonts CDN에서 로드해, 오프라인/제한된 네트워크 환경에서 로드 실패 시 `--font-sans` 폴백으로 떨어질 수 있음
+  - 웹폰트(Instrument Sans · Gothic A1 · Reddit Mono) self-host 전환 검토 — `frontend/index.html`이 Google Fonts CDN에서 로드해, 오프라인/제한된 네트워크 환경에서 로드 실패 시 `--font-sans` 폴백으로 떨어질 수 있음
 
 - **Task 028: 부하 검증 및 성능 튜닝**
   - Virtual Thread 1,000+ 동시 SSE 커넥션, k6 벤치마크

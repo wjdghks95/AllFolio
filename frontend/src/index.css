@@ -1,33 +1,33 @@
 @import "tailwindcss";
 
 /*
- * AllFolio 디자인 토큰 — "격자지 위의 잉크(Ink on graph paper)"
+ * AllFolio 디자인 토큰 — "격자지 위의 잉크(Ink on graph paper)" / 백자(白磁)
  * Tailwind v4는 CSS-first이므로 tailwind.config.js 없이 이 @theme 블록이 토큰의 단일 출처다.
  * 색·타이포·라운딩의 선택 근거는 docs/DESIGN.md 참조.
  */
 @theme {
-  /* --- 무채 램프 (종이와 잉크) --- */
-  --color-grid: #eff2f1; /* 앱 배경. 청록기 도는 회색 = 모눈종이 */
+  /* --- 무채 램프 (백자 유약과 청화 먹) --- */
+  --color-grid: #edf1f7; /* 앱 배경. 푸른기 도는 유백색 = 모눈종이 */
   --color-surface: #ffffff; /* 카드·입력 표면 */
-  --color-rule: #d3dad8; /* 경계선·격자선 */
-  --color-ink-soft: #56636b; /* 보조 텍스트·라벨 */
-  --color-ink: #11161a; /* 본문·제목·primary 액션 */
+  --color-rule: #d8dfec; /* 경계선·격자선. 흰 표면 위 1.34:1 — 카드 없는 인증 화면에서 입력칸 윤곽이 남는 하한 */
+  --color-ink-soft: #5a6880; /* 보조 텍스트·라벨. grid 위 4.97:1 */
+  --color-ink: #0e1c31; /* 본문·제목·primary 액션. 검정이 아니라 청화(靑華) 먹 */
 
   /* --- 손익 축 (한국 증권 관례: 상승 빨강 / 하락 파랑) --- */
-  --color-gain: #d92e22;
-  --color-loss: #1552d6;
+  --color-gain: #ce2e26; /* grid 위 4.58:1 — bg-grid 행 호버·시뮬레이터 밴드에서도 AA 통과 */
+  --color-loss: #1e5fd1;
 
   /* --- 시스템 상태 축 (손익 축과 hue를 분리해 의미 충돌을 막는다) --- */
   --color-alarm: #7a2e52; /* error·danger */
   --color-affirm: #2f6b4f; /* success */
 
-  /* --- 타이포 3역할 --- */
-  --font-sans: "IBM Plex Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
-  --font-mono: "IBM Plex Mono", "IBM Plex Sans KR", ui-monospace, SFMono-Regular, monospace;
+  /* --- 타이포 3역할 (라틴 Instrument Sans + 한글 Gothic A1 / 숫자 Reddit Mono) --- */
+  --font-sans: "Instrument Sans", "Gothic A1", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  --font-mono: "Reddit Mono", "Gothic A1", ui-monospace, SFMono-Regular, monospace;
 
   /* --- 라운딩 2단계 --- */
-  --radius-control: 6px;
-  --radius-card: 10px;
+  --radius-control: 10px;
+  --radius-card: 18px;
 }
 
 /* 차트 플롯 영역용 격자. 배경의 격자지 텍스처와 같은 24px 모듈을 쓰되 조금 더 진하게 보인다. */
