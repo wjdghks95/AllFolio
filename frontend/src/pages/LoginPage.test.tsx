@@ -55,7 +55,7 @@ describe('LoginPage', () => {
   it('7자 비밀번호로도 클라이언트 검증을 통과해 API 호출까지 도달한다', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ accessToken: 'tok', tokenType: 'Bearer', expiresIn: 900 }),
+      json: async () => ({ accessToken: 'tok', tokenType: 'Bearer', expiresIn: 900, refreshToken: 'refresh-tok' }),
     });
     vi.stubGlobal('fetch', fetchMock);
     renderLoginPage();
@@ -70,7 +70,7 @@ describe('LoginPage', () => {
   it('로그인 성공 시 토큰을 저장하고 이전 경로로 이동한다', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ accessToken: 'tok', tokenType: 'Bearer', expiresIn: 900 }),
+      json: async () => ({ accessToken: 'tok', tokenType: 'Bearer', expiresIn: 900, refreshToken: 'refresh-tok' }),
     });
     vi.stubGlobal('fetch', fetchMock);
     renderLoginPage([{ pathname: '/login', state: { from: { pathname: '/assets/new' } } }]);
@@ -93,7 +93,7 @@ describe('LoginPage', () => {
   it('돌아갈 경로가 없으면 로그인 성공 후 포트폴리오로 이동한다', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ accessToken: 'tok', tokenType: 'Bearer', expiresIn: 900 }),
+      json: async () => ({ accessToken: 'tok', tokenType: 'Bearer', expiresIn: 900, refreshToken: 'refresh-tok' }),
     });
     vi.stubGlobal('fetch', fetchMock);
     renderLoginPage();

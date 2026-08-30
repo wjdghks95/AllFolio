@@ -40,7 +40,7 @@ describe('SignupPage', () => {
   it('회원가입 성공 시 자동 로그인되어 토큰이 저장된다', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ accessToken: 'tok', tokenType: 'Bearer', expiresIn: 900 }),
+      json: async () => ({ accessToken: 'tok', tokenType: 'Bearer', expiresIn: 900, refreshToken: 'refresh-tok' }),
     });
     vi.stubGlobal('fetch', fetchMock);
 

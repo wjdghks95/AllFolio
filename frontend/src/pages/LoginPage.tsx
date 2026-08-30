@@ -37,7 +37,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const res = await login({ email, password });
-      auth.login(res.accessToken);
+      auth.login(res.accessToken, res.refreshToken);
       const from = (location.state as { from?: { pathname: string } } | null)?.from?.pathname;
       navigate(from ?? '/portfolio', { replace: true });
     } catch (e) {

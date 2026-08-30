@@ -33,7 +33,7 @@ export default function SignupPage() {
     setSubmitting(true);
     try {
       const res = await signup({ email, password });
-      auth.login(res.accessToken);
+      auth.login(res.accessToken, res.refreshToken);
       navigate('/portfolio', { replace: true });
     } catch (e) {
       setSubmitError(messageForErrorCode(e instanceof ApiError ? e.code : 'NETWORK_ERROR'));

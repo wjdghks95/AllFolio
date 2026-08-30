@@ -2,6 +2,8 @@ package com.allfolio.web;
 
 import com.allfolio.domain.service.AuthService;
 import com.allfolio.web.dto.LoginRequest;
+import com.allfolio.web.dto.LogoutRequest;
+import com.allfolio.web.dto.RefreshRequest;
 import com.allfolio.web.dto.SignupRequest;
 import com.allfolio.web.dto.TokenResponse;
 import jakarta.validation.Valid;
@@ -31,5 +33,16 @@ public class AuthController {
     @PostMapping("/login")
     public TokenResponse login(@Valid @RequestBody LoginRequest request) {
         return authService.login(request);
+    }
+
+    @PostMapping("/refresh")
+    public TokenResponse refresh(@Valid @RequestBody RefreshRequest request) {
+        return authService.refresh(request);
+    }
+
+    @PostMapping("/logout")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void logout(@Valid @RequestBody LogoutRequest request) {
+        authService.logout(request);
     }
 }

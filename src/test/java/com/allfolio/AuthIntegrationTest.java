@@ -1,9 +1,12 @@
 package com.allfolio;
 
+import com.allfolio.domain.RefreshToken;
 import com.allfolio.domain.User;
+import com.allfolio.domain.repository.RefreshTokenRepository;
 import com.allfolio.domain.repository.UserRepository;
 import com.allfolio.infra.security.JwtIssuer;
 import com.allfolio.infra.security.JwtProperties;
+import com.allfolio.infra.security.RefreshTokenIssuer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +50,12 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
+
+    @Autowired
+    private RefreshTokenIssuer refreshTokenIssuer;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -228,7 +237,7 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
     @Test
     void protectedEndpointWithExpiredTokenReturnsUnauthorized() {
         // 서명은 유효하되 exp만 과거인 토큰 — nimbus가 만료를 자동 검사하지 않으므로 반드시 필요한 케이스다.
-        JwtIssuer expiredIssuer = new JwtIssuer(new JwtProperties(TEST_JWT_SECRET, Duration.ofMinutes(-15)));
+        JwtIssuer expiredIssuer = new JwtIssuer(new JwtProperties(TEST_JWT_SECRET, Duration.ofMinutes(-15), Duration.ofDays(14)));
         String expired = expiredIssuer.issue(UUID.randomUUID());
 
         assertThat(authorizedGet("/v1/assets", "Bearer " + expired))
@@ -277,6 +286,97 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
         assertThat(mvc.get().uri("/actuator/prometheus").exchange()).hasStatusOk();
     }
 
+    @Test
+    void refreshWithValidTokenReturnsNewTokenPair() {
+        MvcTestResult signupResult = signup(EMAIL, PASSWORD);
+        String originalRefreshToken = refreshTokenOf(signupResult);
+
+        MvcTestResult refreshResult = post("/v1/auth/refresh", refreshRequest(originalRefreshToken));
+
+        assertThat(refreshResult).hasStatus(HttpStatus.OK);
+        String newAccessToken = accessTokenOf(refreshResult);
+        String newRefreshToken = refreshTokenOf(refreshResult);
+        // accessToken은 sub+iat+exp(초 단위)만으로 서명되므로(JwtIssuer), signup과 refresh가 같은 초 안에
+        // 일어나면 원래 값과 동일할 수 있다(정상 동작) — 존재 여부만 확인한다. refreshToken은 SecureRandom
+        // 32바이트 원문이라 충돌 확률이 무시할 수준이므로 값이 달라졌는지까지 확인한다.
+        assertThat(newAccessToken).isNotBlank();
+        assertThat(newRefreshToken).isNotBlank().isNotEqualTo(originalRefreshToken);
+    }
+
+    @Test
+    void refreshWithAlreadyRotatedTokenReturnsUnauthorized() {
+        MvcTestResult signupResult = signup(EMAIL, PASSWORD);
+        String originalRefreshToken = refreshTokenOf(signupResult);
+
+        // 최초 refresh는 성공해 originalRefreshToken을 폐기(rotation)시킨다.
+        assertThat(post("/v1/auth/refresh", refreshRequest(originalRefreshToken)))
+                .hasStatus(HttpStatus.OK);
+
+        // 이미 회전된(폐기된) 원래 토큰을 재사용하면 거부돼야 한다.
+        assertThat(post("/v1/auth/refresh", refreshRequest(originalRefreshToken)))
+                .hasStatus(HttpStatus.UNAUTHORIZED)
+                .bodyJson().extractingPath("$.code").asString().isEqualTo("INVALID_REFRESH_TOKEN");
+    }
+
+    @Test
+    void refreshWithExpiredTokenReturnsUnauthorized() {
+        signup(EMAIL, PASSWORD);
+        User user = userRepository.findByEmail(EMAIL).orElseThrow();
+
+        String rawExpiredToken = refreshTokenIssuer.issue();
+        RefreshToken expiredToken = RefreshToken.of(user, refreshTokenIssuer.hash(rawExpiredToken),
+                Instant.now().minusSeconds(1));
+        refreshTokenRepository.save(expiredToken);
+
+        assertThat(post("/v1/auth/refresh", refreshRequest(rawExpiredToken)))
+                .hasStatus(HttpStatus.UNAUTHORIZED)
+                .bodyJson().extractingPath("$.code").asString().isEqualTo("INVALID_REFRESH_TOKEN");
+    }
+
+    @Test
+    void logoutRevokesTokenSoSubsequentRefreshFails() {
+        MvcTestResult signupResult = signup(EMAIL, PASSWORD);
+        MvcTestResult refreshResult = post("/v1/auth/refresh", refreshRequest(refreshTokenOf(signupResult)));
+        String latestRefreshToken = refreshTokenOf(refreshResult);
+
+        assertThat(post("/v1/auth/logout", logoutRequest(latestRefreshToken)))
+                .hasStatus(HttpStatus.NO_CONTENT);
+
+        assertThat(post("/v1/auth/refresh", refreshRequest(latestRefreshToken)))
+                .hasStatus(HttpStatus.UNAUTHORIZED)
+                .bodyJson().extractingPath("$.code").asString().isEqualTo("INVALID_REFRESH_TOKEN");
+    }
+
+    @Test
+    void logoutWithUnknownOrAlreadyRevokedTokenIsIdempotent() {
+        // 애초에 존재한 적 없는 토큰 — revoke() 예외 없이 204여야 한다.
+        assertThat(post("/v1/auth/logout", logoutRequest("never-issued-token")))
+                .hasStatus(HttpStatus.NO_CONTENT);
+
+        MvcTestResult signupResult = signup(EMAIL, PASSWORD);
+        String refreshToken = refreshTokenOf(signupResult);
+        assertThat(post("/v1/auth/logout", logoutRequest(refreshToken)))
+                .hasStatus(HttpStatus.NO_CONTENT);
+
+        // 이미 폐기된 토큰으로 다시 로그아웃해도 여전히 204(idempotent).
+        assertThat(post("/v1/auth/logout", logoutRequest(refreshToken)))
+                .hasStatus(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    void refreshWithBlankTokenReturnsValidationError() {
+        assertThat(post("/v1/auth/refresh", refreshRequest("")))
+                .hasStatus(HttpStatus.BAD_REQUEST)
+                .bodyJson().extractingPath("$.code").asString().isEqualTo("VALIDATION_ERROR");
+    }
+
+    @Test
+    void logoutWithBlankTokenReturnsValidationError() {
+        assertThat(post("/v1/auth/logout", logoutRequest("")))
+                .hasStatus(HttpStatus.BAD_REQUEST)
+                .bodyJson().extractingPath("$.code").asString().isEqualTo("VALIDATION_ERROR");
+    }
+
     private MvcTestResult signup(String email, String password) {
         return post("/v1/auth/signup", credentials(email, password));
     }
@@ -293,6 +393,10 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
         return (String) bodyOf(result).get("accessToken");
     }
 
+    private String refreshTokenOf(MvcTestResult result) {
+        return (String) bodyOf(result).get("refreshToken");
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> bodyOf(MvcTestResult result) {
         try {
@@ -304,6 +408,14 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
 
     private static String credentials(String email, String password) {
         return "{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, password);
+    }
+
+    private static String refreshRequest(String refreshToken) {
+        return "{\"refreshToken\":\"%s\"}".formatted(refreshToken);
+    }
+
+    private static String logoutRequest(String refreshToken) {
+        return "{\"refreshToken\":\"%s\"}".formatted(refreshToken);
     }
 
     private static String base64Url(String json) {

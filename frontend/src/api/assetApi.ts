@@ -2,8 +2,8 @@
 // 던지고 문구는 만들지 않는다 — 문구 조회(messageForErrorCode)는 화면의 책임이다.
 // 모든 요청에 로그인 토큰을 Authorization 헤더로 실어 보낸다(authApi.ts의 signup/login은
 // 토큰이 없는 상태에서 호출되므로 이 헤더가 없다 — 그것이 이 파일과의 유일한 차이).
-import { ApiError } from './authApi';
-import { getToken } from '../auth/tokenStorage';
+import { ApiError, refresh as refreshTokens } from './authApi';
+import { getToken, getRefreshToken, setToken, setRefreshToken } from '../auth/tokenStorage';
 import type {
   Asset,
   CreateAssetRequest,
@@ -11,10 +11,24 @@ import type {
   PortfolioResponse,
   SimulateAvgPriceRequest,
   SimulateAvgPriceResponse,
+  TokenResponse,
   ErrorResponse,
 } from './types';
 
-async function authorizedRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+// 동시에 여러 요청이 401을 맞아도 refresh 요청은 1번만 나가야 한다(백엔드가 rotation 방식이라
+// 두 번째 refresh는 반드시 실패한다). 진행 중인 refresh Promise를 모듈 스코프에서 공유한다.
+let refreshPromise: Promise<TokenResponse> | null = null;
+
+function requestRefresh(refreshToken: string): Promise<TokenResponse> {
+  if (!refreshPromise) {
+    refreshPromise = refreshTokens(refreshToken).finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+async function doFetch<T>(path: string, options: RequestInit): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -34,6 +48,31 @@ async function authorizedRequest<T>(path: string, options: RequestInit = {}): Pr
     return undefined as T;
   }
   return res.json() as Promise<T>;
+}
+
+async function authorizedRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  try {
+    return await doFetch<T>(path, options);
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.code !== 'UNAUTHORIZED') {
+      throw e;
+    }
+    const storedRefreshToken = getRefreshToken();
+    if (!storedRefreshToken) {
+      throw e;
+    }
+    let refreshed: TokenResponse;
+    try {
+      refreshed = await requestRefresh(storedRefreshToken);
+    } catch {
+      // refresh 실패(만료·폐기·존재하지 않음)는 기존 페이지가 알아듣는 UNAUTHORIZED로 변환한다.
+      throw new ApiError('UNAUTHORIZED');
+    }
+    setToken(refreshed.accessToken);
+    setRefreshToken(refreshed.refreshToken);
+    // 재시도는 최대 1회 — doFetch를 직접 호출해 재귀적으로 재시도하지 않는다.
+    return doFetch<T>(path, options);
+  }
 }
 
 export function getAsset(id: string): Promise<Asset> {

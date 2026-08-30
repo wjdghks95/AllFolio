@@ -40,8 +40,10 @@ public class SecurityConfig {
                 .logout(logout -> logout.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // Task 019에서 /v1/auth/logout 등이 추가돼도 조용히 열리지 않도록 와일드카드 대신 명시 나열한다.
-                        .requestMatchers("/v1/auth/signup", "/v1/auth/login").permitAll()
+                        // 와일드카드 대신 명시 나열한다. refresh/logout이 permitAll이어도 안전한 이유:
+                        // 인증 주체는 URL 접근 권한이 아니라 요청 본문의 Refresh Token 자체다.
+                        .requestMatchers("/v1/auth/signup", "/v1/auth/login",
+                                "/v1/auth/refresh", "/v1/auth/logout").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**",
                                 "/actuator/info", "/actuator/prometheus").permitAll()
                         // 보안 필터는 ERROR 디스패치에도 적용된다 — 열어두지 않으면 404/500이 401로 뒤바뀐다.

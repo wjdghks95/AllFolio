@@ -4,6 +4,7 @@ import com.allfolio.domain.exception.AssetNotFoundException;
 import com.allfolio.domain.exception.AvgPriceRequiredException;
 import com.allfolio.domain.exception.EmailAlreadyExistsException;
 import com.allfolio.domain.exception.InvalidCredentialsException;
+import com.allfolio.domain.exception.RefreshTokenInvalidException;
 import com.allfolio.web.dto.ErrorResponse;
 import org.hibernate.exception.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -157,6 +158,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of("INVALID_CREDENTIALS", e.getMessage()));
+    }
+
+    /** 없거나 이미 폐기(rotation·로그아웃)됐거나 만료된 Refresh Token. */
+    @ExceptionHandler(RefreshTokenInvalidException.class)
+    public ResponseEntity<ErrorResponse> handleRefreshTokenInvalid(RefreshTokenInvalidException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("INVALID_REFRESH_TOKEN", e.getMessage()));
     }
 
     /** 자산이 없을 때와 남의 자산일 때 모두 같은 응답 — 403이면 "그 ID는 존재한다"는 사실이 새어 나간다. */

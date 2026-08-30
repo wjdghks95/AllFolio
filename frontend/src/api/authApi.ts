@@ -27,6 +27,10 @@ async function postAuth<TReq, TRes>(path: string, body: TReq): Promise<TRes> {
     const err: ErrorResponse = await res.json()
     throw new ApiError(err.code, err.message)
   }
+  // logout(204)은 응답 본문이 없어 res.json()이 빈 본문 파싱 실패로 터진다.
+  if (res.status === 204) {
+    return undefined as TRes
+  }
   return res.json() as Promise<TRes>
 }
 
@@ -36,4 +40,12 @@ export function signup(req: SignupRequest): Promise<TokenResponse> {
 
 export function login(req: LoginRequest): Promise<TokenResponse> {
   return postAuth<LoginRequest, TokenResponse>('/v1/auth/login', req)
+}
+
+export function refresh(refreshToken: string): Promise<TokenResponse> {
+  return postAuth<{ refreshToken: string }, TokenResponse>('/v1/auth/refresh', { refreshToken })
+}
+
+export function logout(refreshToken: string): Promise<void> {
+  return postAuth<{ refreshToken: string }, void>('/v1/auth/logout', { refreshToken })
 }

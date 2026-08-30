@@ -95,7 +95,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ `JwtFilter`, `GlobalExceptionHandler`, 에러 코드 10종
   - ✅ `AuthIntegrationTest` 24종
   - 인증은 제품 기능이 아니라 보안 필터 체인과 에러 포맷 계약을 세우는 인프라라 골격 단계에 둔다.
-  - ⚠️ 남은 갭: Refresh Token 부재로 15분마다 재로그인 필요 → Task 019에서 해소
+  - ✅ 남은 갭 해소: Refresh Token 부재로 15분마다 재로그인해야 했던 문제는 Task 019에서 해소됨
 
 - **Task 004: 프론트엔드 프로젝트 셋업 및 라우팅 골격** ✅ — 완료
   - ✅ `frontend/` React + Vite + TypeScript 초기화 (react-router v8, Tailwind CSS v4)
@@ -310,11 +310,32 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - **(보류)** 비-JSON 에러 응답(예: 프록시가 내는 HTML 502) 시 `authorizedRequest`의 `res.json()`이 `SyntaxError`를 던져 `ApiError`가 아닌 예외가 새는 경로 — 화면은 `NETWORK_ERROR` 폴백으로 우아하게 저하돼 크래시는 아니고 발생 가능성도 낮아 이번엔 보류
   - ⚠️ 남은 갭:
     - `GET /v1/assets`(커서 페이지네이션 목록) API를 소비하는 화면이 아직 없다 — `assetApi.ts`에 `listAssets()`를 만들지 않았으므로, 이 목록이 필요한 화면(예: Task 010 후속 과제인 티커 검색 자동완성)이 생기면 그때 추가한다
-    - Task 019(Refresh Token) 전까지는 401 발생 시 재로그인만 가능(자동 갱신 없음) — 이번 Task는 이 제약을 그대로 전제하고 설계됨
+    - ✅ (해소) Task 019에서 401 발생 시 자동 갱신(refresh-and-retry)이 추가돼 재로그인 없이 세션이 유지된다
     - 비-JSON 에러 응답 처리(위 Minor 보류 항목)는 발생 가능성이 낮아 미루되, 프록시/게이트웨이 계층이 생기는 Task 027(Capacitor) 이후 재검토
 
-- **Task 019: 인증 강화 — Refresh Token 및 로그아웃 (F010)**
-  - Task 003의 남은 갭 해소. 실시간 차트(F007)를 띄워두는 사용 패턴과 15분 만료가 충돌하므로 연동 직후 처리
+- **Task 019: 인증 강화 — Refresh Token 및 로그아웃 (F010)** ✅ — 완료 (2026-08-30)
+  - Task 003의 남은 갭 해소. 실시간 차트(F007)를 띄워두는 사용 패턴과 Access Token 15분 만료가 충돌하는 문제를, 재로그인 없이 자동 갱신하는 흐름으로 해결한다.
+  - **핵심 설계 결정**: Refresh Token(장기 세션 유지 토큰)은 Access Token과 달리 무상태 JWT로 만들지 않았다. 로그아웃(F010 요구 기능)은 "서버가 특정 토큰을 더 이상 유효하지 않다고 판단"하는 기능인데, 무상태 JWT는 서버가 개별 토큰을 무효화할 방법이 없기 때문이다. 대신 `SecureRandom` 32바이트로 만든 무작위 원문 토큰을 클라이언트에 발급하고, DB(`refresh_tokens` 테이블)에는 SHA-256 해시(64자 hex)만 저장한다. Access Token은 기존 그대로 무상태 HS256 JWT 유지(요청마다 DB 조회 없음, 기존 성능 특성 보존)
+  - ✅ `V3__refresh_tokens.sql` 신규(`id`/`user_id` FK `ON DELETE CASCADE`/`token_hash` UNIQUE/`expires_at`/`revoked_at`/`created_at`) — `version`(낙관적 잠금) 컬럼은 의도적으로 생략(토큰 문자열로 단건 조회 후 즉시 revoke하는 패턴이라 동시 수정 충돌 시나리오가 없음). `RefreshToken` 엔티티(`revoke()` 멱등 캡슐화), `RefreshTokenRepository`
+  - ✅ `RefreshTokenIssuer`(`infra/security/`) — 원문 발급(`issue()`), SHA-256 해시(`hash()`, BCrypt 대신 채택 — 이미 고엔트로피 무작위값이라 사전 대입 공격 대상이 아니므로 느린 해시가 불필요), TTL 반영 만료시각 계산(`expiresAt()`). `application.yml`에 `allfolio.jwt.refresh-token-ttl: 14d` 추가
+  - ✅ `AuthService.refresh()`(rotation — 갱신마다 기존 토큰 즉시 폐기 + 새 Access+Refresh 쌍 발급, 탈취된 토큰 재사용 방지) / `logout()`(idempotent — 존재하지 않거나 이미 폐기된 토큰으로 호출해도 예외 없이 204, 정보 비노출 원칙은 `ASSET_NOT_FOUND`가 403 대신 404를 쓰는 것과 동일). `POST /v1/auth/refresh`(200/401)·`POST /v1/auth/logout`(204) 신규, 둘 다 Access Token 인증 없이 호출 가능(Refresh Token 소유 자체가 세션 종료·갱신 권한의 증명) — `SecurityConfig` 화이트리스트에 명시 추가. 신규 에러 코드 `INVALID_REFRESH_TOKEN`(401)
+  - ✅ 프론트 `assetApi.ts`의 `authorizedRequest()`에 401 자동 refresh-and-retry 추가 — 실제 요청(`doFetch`)과 재시도 판단(`authorizedRequest`)을 분리해 재귀적 무한 재시도가 구조적으로 불가능하게 설계, 동시에 여러 요청이 401을 맞아도 갱신 요청은 모듈 스코프 공유 Promise로 1회만 나가도록 가드(rotation 특성상 두 번째 갱신 시도는 반드시 실패하므로 필수). 기존 4개 화면의 `err.code === 'UNAUTHORIZED'` → `auth.logout()` 처리는 코드 변경 없이 "갱신까지 실패한 뒤의 최종 폴백"으로 의미만 자연스럽게 바뀜
+  - ✅ 기존에 이미 있던 `AppLayout.tsx` 로그아웃 버튼(신규 UI 아님)이 서버 `POST /v1/auth/logout` 호출로 Refresh Token을 폐기한 뒤 로컬 정리하도록 확장 — 서버 호출이 실패해도(네트워크 오류 등) 로컬 정리는 항상 진행해 로그인 상태에 갇히지 않게 함
+  - ✅ 테스트 개수: 백엔드 `AuthIntegrationTest` 24 → **31**(+7: 갱신 성공·회전 후 재사용 차단·만료 차단·로그아웃 후 재사용 차단·로그아웃 멱등성 등), `SchemaMigrationTest` 12 → **17**(+5: refresh_tokens UNIQUE·CASCADE·nullable·인덱스·version 부재 검증), `RefreshTokenIssuerTest` 신규 4건, 백엔드 전체 **124개**(0 실패). 프론트 141(Task 018 기준) → **149**(+8: `assetApi.test.ts` 5건·`AppLayout.test.tsx` 3건 신규)
+  - ✅ `ApiContractSerializationTest`(Task 006)는 애초에 `TokenResponse`를 다루지 않아 갱신 대상이 아니었음을 직접 확인 — 계획 단계에서 "갱신 필요"로 잘못 추정했던 항목을 실측으로 정정
+  - ✅ code-reviewer 에이전트 독립 검증 — Blocker 0건. Major 2건(신규 에러 코드·엔드포인트가 이 문서에 미등재 — 이번 갱신으로 해소), Minor 6건 발견, 4건 반영:
+    - **(수정 완료)** 안 쓰이는 `RefreshTokenRepository.findByUser_Id()` 삭제 — CLAUDE.md 「Simplicity First」(요청받지 않은 기능 금지) 위반으로 판단, 필요해지면 그 기능(전 기기 로그아웃) 착수 시 다시 추가
+    - **(수정 완료)** `AuthService.login()`이 Refresh Token INSERT로 인해 이제 커밋 실패 가능성이 생겼는데 감사 로그가 커밋 전에 남던 문제 — `signup()`이 이미 쓰던 "커밋 성공 후에만 로그" 패턴(`TransactionSynchronization.afterCommit`)을 동일 적용
+    - **(수정 완료)** `refresh()`/`logout()`에 감사 로그가 전혀 없던 공백 — 성공 시(`afterCommit`)와 실패 시(폐기·만료된 토큰 재사용은 탈취 탐지의 유일한 관측 신호이므로 `userId` 포함 warn 로그) 추가, 원문 토큰은 어떤 로그에도 남기지 않음을 직접 확인
+    - **(수정 완료)** 401 자동 재시도의 "최대 1회" 안전장치를 검증하는 테스트가 없던 공백 — 뮤테이션 테스트(재시도 코드를 실제로 무한재시도로 바꿔 테스트가 행(hang)에 빠지는지 확인 후 원복)로 검출력을 실증하는 신규 케이스 추가
+    - **(보류)** 갱신 시 React `AuthContext`의 `token` state가 silent refresh와 동기화되지 않음 — 현재는 `RequireAuth`/`AppLayout` 모두 truthiness로만 소비해 무해하지만, 향후 `auth.token` 값 자체를 Authorization 헤더 등에 쓰는 화면이 생기면 만료된 값이 나갈 수 있음. 지금 고칠 필요는 없어 남은 갭으로만 기록
+    - **(보류)** 갱신 실패로 확정된 Refresh Token이 `localStorage`에서 지워지지 않음 — 현재는 호출 화면들이 `UNAUTHORIZED` 분기에서 `auth.logout()`으로 결과적으로 정리되어 실질 영향 없음
+  - ⚠️ 남은 갭:
+    - 만료된 `refresh_tokens` 행을 지우는 정리 배치 없음 — `token_hash` UNIQUE 인덱스 조회라 성능 영향은 없으나 저장 공간은 계속 누적됨
+    - Rotation된(이미 폐기된) 토큰이 재사용될 때 해당 유저의 다른 세션 전체를 강제 로그아웃(cascade revoke)하는 기능 없음 — 다중 기기 동시 로그인 요구사항이 없어 의도적으로 축소
+    - **다중 탭 환경에서 한쪽 탭만 예기치 않게 로그아웃될 수 있음(신규 발견)**: 401 자동 재시도의 동시성 가드는 같은 탭(같은 JS 모듈 인스턴스) 안에서만 유효하다. 두 탭이 거의 동시에 Access Token 만료를 맞으면 각자 독립적으로 갱신을 시도하는데, rotation 특성상 먼저 도착한 탭만 성공하고 늦게 도착한 탭은 이미 폐기된 토큰으로 시도한 셈이 되어 강제 로그아웃된다. 다중 탭 동시 사용은 PRD·ROADMAP 어디에도 요구사항으로 명시된 적이 없고, 고치려면 `BroadcastChannel`/`storage` 이벤트로 탭 간 토큰 상태를 동기화하는 별도 구현이 필요해 이번 범위를 크게 벗어난다
+    - 위 code-reviewer 보류 항목 2건(React state 미동기화, 실패한 Refresh Token 미정리)
+    - `README.md`의 curl 예시·인증 방식 설명이 아직 Task 003 시점(Access Token만) 기준 — Task 019 갱신은 이번 범위 밖
 
 - **Task 020: E2E 통합 테스트 (Playwright MCP)**
   - 전체 사용자 여정(로그인 → 자산 등록 → 포트폴리오 → 상세 → 시뮬레이션 → 수정/삭제)
@@ -367,6 +388,8 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 |---|---|---|---|
 | `POST` | `/v1/auth/signup` | 201 / 409 | 가입 성공 시 JWT 자동 발급, 이메일 중복 시 `EMAIL_ALREADY_EXISTS` (F010, Task 003) |
 | `POST` | `/v1/auth/login` | 200 / 401 | 실패 시 `INVALID_CREDENTIALS` (F010, Task 003) |
+| `POST` | `/v1/auth/refresh` | 200 / 401 | Refresh Token 회전(rotation) — 기존 토큰 즉시 폐기 + 새 Access+Refresh 쌍 발급, 실패 시 `INVALID_REFRESH_TOKEN` (F010, Task 019) |
+| `POST` | `/v1/auth/logout` | 204 | Refresh Token 폐기. 인증 불필요(Refresh Token 소유가 곧 권한 증명), idempotent(존재하지 않거나 이미 폐기된 토큰도 204) (F010, Task 019) |
 | `POST` | `/v1/assets` | 201 | 자산+Holding+거래이력(BUY) 단일 트랜잭션 생성 |
 | `GET` | `/v1/assets` | 200 | 커서 페이지네이션 (`limit` 기본 20/max 100, `cursor`), 최신 등록 순 |
 | `GET` | `/v1/assets/{id}` | 200 / 404 | 타 유저 접근 시 404 (ID 유출 방지) |
@@ -486,6 +509,8 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 **구현된 코드 (Task 003)**: `EMAIL_ALREADY_EXISTS`(409), `INVALID_CREDENTIALS`(401, user enumeration 방지를 위해 미가입 이메일과 비밀번호 불일치를 동일 코드로 응답), `UNAUTHORIZED`(401), `VALIDATION_ERROR`(400), `NOT_FOUND`(404), `METHOD_NOT_ALLOWED`(405), `UNSUPPORTED_MEDIA_TYPE`(415), `NOT_ACCEPTABLE`(406), `CLIENT_ERROR`(4xx 포괄), `INTERNAL_ERROR`(500)
 
 **구현된 코드 (Task 006)**: `ASSET_NOT_FOUND`(404, 존재하지 않거나 타 유저 소유 — 403 대신 404로 ID 유출 방지), `HOLDING_CONFLICT`(409, 낙관적 잠금 `version` 불일치. `ObjectOptimisticLockingFailureException` 캐치), `CONFLICT`(409, `uk_users_email` 외의 데이터 무결성 제약 위반 — 매칭되는 도메인 에러 코드가 없을 때의 일반 폴백)
+
+**구현된 코드 (Task 019)**: `INVALID_REFRESH_TOKEN`(401, Refresh Token이 존재하지 않거나·이미 폐기됐거나·만료됨 — 세 상황을 구분하지 않는 단일 코드로 응답해 토큰 존재 여부가 새지 않게 함)
 
 ---
 
