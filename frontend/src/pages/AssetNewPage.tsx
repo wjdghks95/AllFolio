@@ -1,7 +1,10 @@
 // 구조·동작: senior-frontend / 시각 표현·문구: ui-ux-designer
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { ASSET_TYPES, type AssetType, type CreateAssetRequest } from '../api/types';
+import { createAsset } from '../api/assetApi';
+import { ApiError } from '../api/authApi';
+import { useAuth } from '../auth/useAuth';
 import {
   validateAvgPrice,
   validateName,
@@ -9,7 +12,8 @@ import {
   validateTicker,
   type ValidationCode,
 } from '../lib/validation';
-import { VALIDATION_MESSAGES } from '../lib/messages';
+import { VALIDATION_MESSAGES, messageForErrorCode } from '../lib/messages';
+import Alert from '../components/Alert';
 import SegmentToggle from '../components/SegmentToggle';
 import TextField from '../components/TextField';
 import Button from '../components/Button';
@@ -71,8 +75,12 @@ export default function AssetNewPage() {
   const [nameError, setNameError] = useState<ValidationCode | null>(null);
   const [quantityError, setQuantityError] = useState<ValidationCode | null>(null);
   const [avgPriceError, setAvgPriceError] = useState<ValidationCode | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const auth = useAuth();
 
   // CASH로 전환하면 서버가 avgPrice=1을 강제 삽입한다(평단가 개념 없음) — 이전 값이 남아있다가
   // 실수로 제출되는 것을 막기 위해 함께 리셋한다. 에러도 함께 지운다 — 그렇지 않으면 STOCK에서
@@ -86,8 +94,9 @@ export default function AssetNewPage() {
     }
   }
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setSubmitError(null);
 
     const tickerCode = validateTicker(ticker);
     const nameCode = validateName(name);
@@ -101,8 +110,6 @@ export default function AssetNewPage() {
 
     if (tickerCode || nameCode || quantityCode || avgPriceCode) return;
 
-    // 등록 API(POST /v1/assets, Task 012)는 아직 없다 — 형태만 조립해 유효성을 확인하고,
-    // 실제 전송 없이 성공 흐름으로 넘어간다.
     const request: CreateAssetRequest = {
       ticker,
       name,
@@ -111,10 +118,22 @@ export default function AssetNewPage() {
       quantity,
       avgPrice,
     };
-    void request;
 
-    const flash: Flash = { tone: 'success', message: '자산이 등록되었습니다.' };
-    navigate('/portfolio', { state: { flash } });
+    setSubmitting(true);
+    try {
+      await createAsset(request);
+      const flash: Flash = { tone: 'success', message: '자산이 등록되었습니다.' };
+      navigate('/portfolio', { state: { flash } });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'UNAUTHORIZED') {
+        auth.logout();
+        navigate('/login', { replace: true, state: { from: location } });
+        return;
+      }
+      setSubmitError(messageForErrorCode(err instanceof ApiError ? err.code : 'NETWORK_ERROR'));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const placeholder = PLACEHOLDER[assetType];
@@ -130,6 +149,13 @@ export default function AssetNewPage() {
           묶음 제목은 목록 화면의 장부 머리글과 같은 규격(text-sm semibold)이라
           13px ink-soft인 필드 라벨과 섞이지 않는다 (docs/DESIGN.md §6-3). */}
       <form onSubmit={handleSubmit} noValidate className="mt-8 max-w-md">
+        {submitError ? (
+          <div className="mb-6">
+            <Alert tone="error" testId="asset-new-error">
+              {submitError}
+            </Alert>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-4">
           <h2 className="text-sm font-semibold tracking-tight text-ink">자산 정보</h2>
 
@@ -220,8 +246,8 @@ export default function AssetNewPage() {
 
         {/* 진입 버튼("자산 등록")·화면 제목·제출 버튼이 모두 같은 단어를 쓴다 — 한 흐름 = 한 어휘. */}
         <div className="mt-8 flex flex-col [&>button]:w-full">
-          <Button type="submit" variant="primary" testId="asset-new-submit">
-            자산 등록
+          <Button type="submit" variant="primary" disabled={submitting} testId="asset-new-submit">
+            {submitting ? '등록 중' : '자산 등록'}
           </Button>
         </div>
       </form>

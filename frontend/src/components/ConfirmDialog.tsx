@@ -9,6 +9,7 @@ export interface ConfirmDialogProps {
   confirmLabel: string;
   cancelLabel?: string;
   tone?: 'default' | 'danger';
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
   testId?: string;
@@ -24,6 +25,7 @@ export default function ConfirmDialog({
   confirmLabel,
   cancelLabel = '취소',
   tone = 'default',
+  confirmDisabled = false,
   onConfirm,
   onCancel,
   testId,
@@ -68,6 +70,7 @@ export default function ConfirmDialog({
         <Button
           variant={tone === 'danger' ? 'danger' : 'primary'}
           onClick={onConfirm}
+          disabled={confirmDisabled}
           testId={testId ? `${testId}-confirm` : undefined}
         >
           {confirmLabel}

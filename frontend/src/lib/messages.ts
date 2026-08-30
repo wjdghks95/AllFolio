@@ -20,6 +20,7 @@ export const VALIDATION_MESSAGES: Record<ValidationCode, string> = {
   NUMBER_PRECISION: '정수 부분은 20자리까지 입력할 수 있습니다.',
   PRICE_NOT_POSITIVE: '평단가는 0보다 커야 합니다.',
   PRICE_FORBIDDEN_FOR_CASH: '현금 자산은 평단가를 입력하지 않습니다.',
+  QUANTITY_NOT_POSITIVE: '추가 매수 수량은 0보다 커야 합니다.',
 }
 
 export const ERROR_MESSAGES: Record<ErrorCode, string> = {

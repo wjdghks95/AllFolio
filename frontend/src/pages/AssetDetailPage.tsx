@@ -1,9 +1,17 @@
 // 구조·동작: senior-frontend / 시각 표현·문구: ui-ux-designer
-import { useState, type FormEvent, type ReactNode } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
-import type { AssetType, UpdateHoldingRequest } from '../api/types';
-import { assetListFixture, portfolioFixture } from '../api/fixtures';
-import { ERROR_MESSAGES, VALIDATION_MESSAGES } from '../lib/messages';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
+import type {
+  Asset,
+  AssetType,
+  PortfolioItem,
+  SimulateAvgPriceResponse,
+  UpdateHoldingRequest,
+} from '../api/types';
+import { deleteAsset, getAsset, getPortfolio, simulateAvgPrice, updateHolding } from '../api/assetApi';
+import { ApiError } from '../api/authApi';
+import { useAuth } from '../auth/useAuth';
+import { ERROR_MESSAGES, VALIDATION_MESSAGES, messageForErrorCode } from '../lib/messages';
 import {
   formatAmount,
   formatQuantity,
@@ -12,8 +20,13 @@ import {
   scaleFor,
 } from '../lib/money';
 import { Dec, toScaledString } from '../lib/big';
-import { simulateAvgPrice, type SimulateResult } from '../lib/simulate';
-import { validateAvgPrice, validateQuantity, type ValidationCode } from '../lib/validation';
+import {
+  validateAdditionalQuantity,
+  validateAvgPrice,
+  validateQuantity,
+  type ValidationCode,
+} from '../lib/validation';
+import Alert from '../components/Alert';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -49,6 +62,23 @@ const TONE_LINE_CLASS: Record<'gain' | 'loss' | 'flat', { border: string; bg: st
   flat: { border: 'border-ink', bg: 'bg-ink' },
 };
 
+// 자산 상세 조회 상태. GET /v1/assets/{id}(자산 자체)와 GET /v1/portfolio(비중 등 파생 필드의
+// 출처)를 병렬 조회한다 — Promise.all이 아니라 Promise.allSettled를 쓰는 이유는 후자가 실패해도
+// 전자만 성공했으면 화면은 정상 렌더돼야 하기 때문이다(파생 필드만 NULL_DISPLAY로 빠진다).
+// asset이 null인 'ready'는 ASSET_NOT_FOUND 상태를 의미한다 — 기존 not-found 렌더 분기를 그대로 탄다.
+// portfolioFetchFailed: GET /v1/portfolio 호출 자체가 실패했는지(응답에 대상 항목이 없는
+// 것과는 다르다). true일 때만 상세 정보 카드에 "일부 정보를 불러오지 못했습니다" 안내를
+// 추가로 보여준다 — cost 등 파생 필드가 "—"로 빠지는 원인을 화면이 오귀속하지 않게 한다.
+type LoadState =
+  | { status: 'loading' }
+  | { status: 'error'; code: string }
+  | {
+      status: 'ready';
+      asset: Asset | null;
+      portfolioItem: PortfolioItem | null;
+      portfolioFetchFailed: boolean;
+    };
+
 // 라벨과 값을 점선 리더로 잇는다 (DevUiPage의 ReadRow를 이 페이지로 복제 — 공용화하지 않는다).
 function ReadRow({
   label,
@@ -73,14 +103,57 @@ function ReadRow({
 export default function AssetDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const auth = useAuth();
 
-  // 비중(%) 계산 방식(사용자 확정): GET /v1/assets/{id} 응답에는 분모(전체 평가금액)가 없어
-  // 자산 상세 조회 하나만으로는 비중을 못 구한다. assetListFixture(수량·평단가·version)와
-  // portfolioFixture.items(취득원가·평가금액·평가손익·비중)를 각각 조회해 합친다.
-  // Task 018(실 연동)에서는 이 두 줄이 GET /v1/assets/{id} + GET /v1/portfolio fetch로
-  // 치환될 예정이므로 조회 로직을 컴포넌트 최상단에 모아둔다.
-  const asset = assetListFixture.items.find((item) => item.id === id);
-  const portfolioItem = portfolioFixture.items.find((item) => item.assetId === id);
+  const [state, setState] = useState<LoadState>({ status: 'loading' });
+
+  useEffect(() => {
+    if (!id) return;
+    // PortfolioPage와 같은 cancelled 플래그 패턴(StrictMode 이중 mount 대비).
+    let cancelled = false;
+    Promise.allSettled([getAsset(id), getPortfolio()]).then(([assetResult, portfolioResult]) => {
+      if (cancelled) return;
+
+      if (assetResult.status === 'rejected') {
+        const err = assetResult.reason;
+        if (err instanceof ApiError && err.code === 'UNAUTHORIZED') {
+          auth.logout();
+          navigate('/login', { replace: true, state: { from: location } });
+          return;
+        }
+        if (err instanceof ApiError && err.code === 'ASSET_NOT_FOUND') {
+          setState({ status: 'ready', asset: null, portfolioItem: null, portfolioFetchFailed: false });
+          return;
+        }
+        setState({ status: 'error', code: err instanceof ApiError ? err.code : 'NETWORK_ERROR' });
+        return;
+      }
+
+      const fetchedAsset = assetResult.value;
+      // getPortfolio 실패는 화면을 막지 않는다 — 파생 필드(취득원가·평가금액·평가손익·비중)만
+      // NULL_DISPLAY로 빠지고 화면 자체는 정상 렌더된다. 다만 실패 자체는 portfolioFetchFailed로
+      // 남겨 상세 정보 카드에 원인 안내를 보여준다(대상 항목이 없는 것과는 구분한다).
+      const fetchedPortfolioItem =
+        portfolioResult.status === 'fulfilled'
+          ? (portfolioResult.value.items.find((item) => item.assetId === fetchedAsset.id) ?? null)
+          : null;
+      setState({
+        status: 'ready',
+        asset: fetchedAsset,
+        portfolioItem: fetchedPortfolioItem,
+        portfolioFetchFailed: portfolioResult.status === 'rejected',
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const asset = state.status === 'ready' ? state.asset : null;
+  const portfolioItem = state.status === 'ready' ? state.portfolioItem : null;
+  const portfolioFetchFailed = state.status === 'ready' && state.portfolioFetchFailed;
 
   // 시뮬레이터 상태(F006)
   const [additionalPrice, setAdditionalPrice] = useState('');
@@ -89,20 +162,56 @@ export default function AssetDetailPage() {
   const [additionalQuantityError, setAdditionalQuantityError] = useState<ValidationCode | null>(
     null,
   );
-  const [simResult, setSimResult] = useState<SimulateResult | null>(null);
+  const [simResult, setSimResult] = useState<SimulateAvgPriceResponse | null>(null);
+  const [simSubmitting, setSimSubmitting] = useState(false);
+  const [simSubmitError, setSimSubmitError] = useState<string | null>(null);
 
   // 수정 폼 상태(F003). version은 화면에 노출하지 않고 제출 조립에만 쓴다.
-  const [editQuantity, setEditQuantity] = useState(asset?.quantity ?? '');
-  const [editAvgPrice, setEditAvgPrice] = useState<string | null>(
-    asset && asset.assetType !== 'CASH' ? asset.avgPrice : null,
-  );
+  const [editQuantity, setEditQuantity] = useState('');
+  const [editAvgPrice, setEditAvgPrice] = useState<string | null>(null);
   const [editQuantityError, setEditQuantityError] = useState<ValidationCode | null>(null);
   const [editAvgPriceError, setEditAvgPriceError] = useState<ValidationCode | null>(null);
-  // 훅이 아니라 값 계산이므로 useState가 필요 없다(모든 사용처가 조기 리턴 이후).
-  const version = asset?.version ?? 0;
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editSubmitError, setEditSubmitError] = useState<string | null>(null);
 
-  // 삭제 확인 다이얼로그(F004)
+  // 자산 조회가 완료된 시점에만 수정 폼의 초깃값을 채운다 — 마운트 시점엔 asset이 아직 없다.
+  useEffect(() => {
+    if (!asset) return;
+    setEditQuantity(asset.quantity);
+    setEditAvgPrice(asset.assetType !== 'CASH' ? asset.avgPrice : null);
+  }, [asset]);
+
+  // 삭제 확인 다이얼로그(F004). deleteSubmitting은 연타 방지용 — 확인 버튼을 disabled 처리해
+  // 응답이 오기 전 두 번째 DELETE가 나가지 않게 한다(시뮬레이터의 simSubmitting과 같은 패턴).
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteSubmitError, setDeleteSubmitError] = useState<string | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
+  if (state.status === 'loading') {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">자산 상세</h1>
+        <div className="mt-6">
+          <Card testId="asset-detail-loading">
+            <p className="py-6 text-center text-sm text-ink-soft">불러오는 중...</p>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">자산 상세</h1>
+        <div className="mt-6">
+          <Alert tone="error" testId="asset-detail-error">
+            {messageForErrorCode(state.code)}
+          </Alert>
+        </div>
+      </div>
+    );
+  }
 
   // 이 앱에서 URL 파라미터가 유효하지 않을 수 있는 첫 화면 — 전용 에러 컴포넌트를 새로
   // 만들지 않고 기존 Card + 안내 문구 한 줄로 처리한다.
@@ -141,9 +250,11 @@ export default function AssetDetailPage() {
     );
   }
 
-  const handleSimulate = () => {
+  const version = asset.version;
+
+  const handleSimulate = async () => {
     const priceCode = validateAvgPrice(additionalPrice, asset.assetType);
-    const quantityCode = validateQuantity(additionalQuantity);
+    const quantityCode = validateAdditionalQuantity(additionalQuantity);
     setAdditionalPriceError(priceCode);
     setAdditionalQuantityError(quantityCode);
     // 이전 결과가 남아 있었다면 handleAdditionalPriceChange/handleAdditionalQuantityChange가
@@ -153,25 +264,25 @@ export default function AssetDetailPage() {
       return;
     }
 
-    // simulateAvgPrice는 총수량(보유+추가)이 0이면 throw한다(lib/simulate.ts 주석) —
-    // "페이지가 먼저 막아야 하는 입력"이라는 뜻이다. validateQuantity는 추가 수량 0을 허용하므로
-    // 보유수량 0 자산에 추가수량 0을 입력하는 조합은 여기서 막는다. 이 분기에 들어오는 시점엔
-    // 위 152-154행과 같은 이유로 simResult가 이미 null이라 지울 것이 없다.
-    const totalQuantity = Dec(asset.quantity).plus(Dec(additionalQuantity));
-    if (totalQuantity.eq('0')) {
-      return;
-    }
-
-    setSimResult(
-      simulateAvgPrice({
-        currentQuantity: asset.quantity,
-        currentAvgPrice: asset.avgPrice,
-        additionalQuantity,
+    setSimSubmitting(true);
+    setSimSubmitError(null);
+    try {
+      const result = await simulateAvgPrice({
+        assetId: asset.id,
         additionalPrice,
-        assetType: asset.assetType,
-        currency: asset.currency,
-      }),
-    );
+        additionalQuantity,
+      });
+      setSimResult(result);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'UNAUTHORIZED') {
+        auth.logout();
+        navigate('/login', { replace: true, state: { from: location } });
+        return;
+      }
+      setSimSubmitError(messageForErrorCode(err instanceof ApiError ? err.code : 'NETWORK_ERROR'));
+    } finally {
+      setSimSubmitting(false);
+    }
   };
 
   // 입력이 바뀌면 이전 계산은 더 이상 그 입력에 대한 답이 아니다 — 결과가 남아 있으면 함께 지운다.
@@ -184,8 +295,9 @@ export default function AssetDetailPage() {
     if (simResult) setSimResult(null);
   };
 
-  const handleEditSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleEditSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setEditSubmitError(null);
 
     const quantityCode = validateQuantity(editQuantity);
     const avgPriceCode = validateAvgPrice(editAvgPrice, asset.assetType);
@@ -193,24 +305,46 @@ export default function AssetDetailPage() {
     setEditAvgPriceError(avgPriceCode);
     if (quantityCode || avgPriceCode) return;
 
-    // 수정 API(PUT /v1/assets/{id}/holdings, Task 012)는 아직 없다 — 형태만 조립해
-    // 유효성을 확인하고, 실제 전송 없이 성공 흐름으로 넘어간다. 409 HOLDING_CONFLICT
-    // 분기는 Task 018에서 실 연동 시 추가한다(지금은 실패할 수 없는 요청이라 흉내내지 않는다).
     const request: UpdateHoldingRequest = {
       quantity: editQuantity,
       avgPrice: editAvgPrice,
       version,
     };
-    void request;
 
-    const flash: Flash = { tone: 'success', message: '자산이 수정되었습니다.' };
-    navigate('/portfolio', { state: { flash } });
+    setEditSubmitting(true);
+    try {
+      await updateHolding(asset.id, request);
+      const flash: Flash = { tone: 'success', message: '자산이 수정되었습니다.' };
+      navigate('/portfolio', { state: { flash } });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'UNAUTHORIZED') {
+        auth.logout();
+        navigate('/login', { replace: true, state: { from: location } });
+        return;
+      }
+      setEditSubmitError(messageForErrorCode(err instanceof ApiError ? err.code : 'NETWORK_ERROR'));
+    } finally {
+      setEditSubmitting(false);
+    }
   };
 
-  const handleDeleteConfirm = () => {
-    // 삭제 API(DELETE /v1/assets/{id}, Task 012)는 아직 없다 — 확인 후 바로 성공 흐름으로 넘어간다.
-    const flash: Flash = { tone: 'success', message: '자산이 삭제되었습니다.' };
-    navigate('/portfolio', { state: { flash } });
+  const handleDeleteConfirm = async () => {
+    setDeleteSubmitting(true);
+    try {
+      await deleteAsset(asset.id);
+      const flash: Flash = { tone: 'success', message: '자산이 삭제되었습니다.' };
+      navigate('/portfolio', { state: { flash } });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'UNAUTHORIZED') {
+        auth.logout();
+        navigate('/login', { replace: true, state: { from: location } });
+        return;
+      }
+      setDeleteDialogOpen(false);
+      setDeleteSubmitError(messageForErrorCode(err instanceof ApiError ? err.code : 'NETWORK_ERROR'));
+    } finally {
+      setDeleteSubmitting(false);
+    }
   };
 
   const priceOpts = { currency: asset.currency, assetType: asset.assetType };
@@ -280,6 +414,17 @@ export default function AssetDetailPage() {
           간격의 대비가 곧 구조다 (docs/DESIGN.md §6-2·§6-4). */}
       <div className="mt-8 space-y-4">
         <Card title="상세 정보" testId="asset-detail-info">
+          {/* portfolioFetchFailed: GET /v1/portfolio 호출 자체가 실패했을 때만 보여준다.
+              대상 항목이 그냥 없는 경우(§ 정상 케이스)와는 원인이 달라, 아래 취득원가 등
+              파생 필드가 "—"인 이유를 여기서 먼저 밝힌다. */}
+          {portfolioFetchFailed ? (
+            <p
+              className="mb-3 text-xs leading-5 text-loss"
+              data-testid="asset-detail-portfolio-fetch-failed"
+            >
+              일부 정보를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.
+            </p>
+          ) : null}
           {/* 위 묶음은 내가 적어 넣은 값, 아래 묶음은 시세가 채워 넣는 값이다.
               Phase 2에서 아래 셋이 전부 "—"라, 구분선과 주석 없이 여섯 줄을 한 번에 쌓으면
               뒤쪽 세 줄이 "빈 값"이 아니라 "고장"으로 읽힌다 (docs/DESIGN.md §6-2). */}
@@ -431,11 +576,17 @@ export default function AssetDetailPage() {
                   type="button"
                   variant="secondary"
                   onClick={handleSimulate}
+                  disabled={simSubmitting}
                   testId="asset-detail-sim-calculate"
                 >
                   계산
                 </Button>
               </div>
+              {simSubmitError ? (
+                <Alert tone="error" testId="asset-detail-sim-error">
+                  {simSubmitError}
+                </Alert>
+              ) : null}
               {/* 결과는 입력의 연장이 아니라 답이다 — 격자지 색 밴드로 떼어 놓으면
                   같은 흰 표면에 이어 붙은 세 번째·네 번째 줄로 읽히지 않는다. */}
               {simResult ? (
@@ -463,6 +614,13 @@ export default function AssetDetailPage() {
         {/* F003: 수정 폼. 폼 제목·제출 버튼·완료 배너가 모두 "수정"이라는 한 단어를 쓴다
             (한 흐름 = 한 어휘, docs/DESIGN.md §6-1·§6-3). */}
         <Card title="보유 정보 수정" testId="asset-detail-edit">
+          {editSubmitError ? (
+            <div className="mb-4">
+              <Alert tone="error" testId="asset-detail-edit-error">
+                {editSubmitError}
+              </Alert>
+            </div>
+          ) : null}
           <form onSubmit={handleEditSubmit} noValidate className="flex max-w-md flex-col gap-4">
             <TextField
               label="수량"
@@ -491,7 +649,12 @@ export default function AssetDetailPage() {
               />
             )}
             <div>
-              <Button type="submit" variant="primary" testId="asset-detail-edit-submit">
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={editSubmitting}
+                testId="asset-detail-edit-submit"
+              >
                 수정
               </Button>
             </div>
@@ -508,12 +671,22 @@ export default function AssetDetailPage() {
           <div className="mt-3">
             <Button
               variant="danger"
-              onClick={() => setDeleteDialogOpen(true)}
+              onClick={() => {
+                setDeleteSubmitError(null);
+                setDeleteDialogOpen(true);
+              }}
               testId="asset-detail-delete-open"
             >
               자산 삭제
             </Button>
           </div>
+          {deleteSubmitError ? (
+            <div className="mt-3">
+              <Alert tone="error" testId="asset-detail-delete-error">
+                {deleteSubmitError}
+              </Alert>
+            </div>
+          ) : null}
           {/* 제목에 종목명을 넣어 "어느 자산을 지우는지"를 팝업 안에서 다시 확인하게 한다.
               조사(을/를)를 붙이지 않는 이유는 종목명의 받침에 따라 달라지기 때문이다 —
               "삼성전자를"/"비트코인을"을 코드로 가르느니 명사구로 끊는다.
@@ -524,6 +697,7 @@ export default function AssetDetailPage() {
             description="보유 정보와 거래 이력이 함께 삭제되며 복구할 수 없습니다."
             confirmLabel="삭제"
             tone="danger"
+            confirmDisabled={deleteSubmitting}
             onConfirm={handleDeleteConfirm}
             onCancel={() => setDeleteDialogOpen(false)}
             testId="asset-detail-delete-dialog"

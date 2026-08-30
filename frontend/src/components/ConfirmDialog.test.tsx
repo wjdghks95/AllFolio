@@ -73,6 +73,25 @@ describe('ConfirmDialog', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  it('confirmDisabled가 true면 confirm 버튼이 비활성화된다', () => {
+    render(
+      <ConfirmDialog
+        open={true}
+        title="삭제하시겠습니까?"
+        description="이 작업은 되돌릴 수 없습니다."
+        confirmLabel="삭제"
+        confirmDisabled={true}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+        testId="delete-confirm"
+      />,
+    );
+
+    expect(
+      (screen.getByTestId('delete-confirm-confirm') as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it('브라우저 기본 닫기(cancel 이벤트, 예: Esc)도 onCancel을 호출한다', () => {
     const onCancel = vi.fn();
     render(

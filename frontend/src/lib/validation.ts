@@ -28,6 +28,7 @@ export type ValidationCode =
   | 'NUMBER_PRECISION'
   | 'PRICE_NOT_POSITIVE'
   | 'PRICE_FORBIDDEN_FOR_CASH'
+  | 'QUANTITY_NOT_POSITIVE'
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const CURRENCY_REGEX = /^[A-Z]{3}$/
@@ -85,6 +86,17 @@ function validateDecimalStructure(v: string): ValidationCode | null {
 export function validateQuantity(v: string): ValidationCode | null {
   if (v.length === 0) return 'REQUIRED'
   return validateDecimalStructure(v)
+}
+
+// 물타기 시뮬레이터(F006)의 추가 매수 수량 전용 — validateQuantity의 구조 검증에 더해
+// 0을 허용하지 않는다(백엔드가 additionalQuantity > 0을 강제한다). validateQuantity 자체는
+// 보유수량 등 0을 허용해야 하는 다른 곳에서 계속 쓰이므로 건드리지 않는다.
+export function validateAdditionalQuantity(v: string): ValidationCode | null {
+  const structureCode = validateQuantity(v)
+  if (structureCode) return structureCode
+  // strict 모드이므로 반드시 문자열 인자('0')를 넘긴다 — 숫자 리터럴 0은 throw.
+  if (!Dec(v).gt('0')) return 'QUANTITY_NOT_POSITIVE'
+  return null
 }
 
 // CASH는 avgPrice가 없어야 하고(null만 허용), 그 외 자산은 필수 + 자릿수 구조 + 양수여야 한다.

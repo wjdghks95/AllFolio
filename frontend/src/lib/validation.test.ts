@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   LIMITS,
   utf8ByteLength,
+  validateAdditionalQuantity,
   validateAvgPrice,
   validateCurrency,
   validateEmail,
@@ -134,6 +135,24 @@ describe('validateQuantity', () => {
 
   it("'0'은 허용한다", () => {
     expect(validateQuantity('0')).toBeNull()
+  })
+})
+
+describe('validateAdditionalQuantity', () => {
+  it("'0'은 QUANTITY_NOT_POSITIVE (validateQuantity와 달리 0을 허용하지 않는다)", () => {
+    expect(validateAdditionalQuantity('0')).toBe('QUANTITY_NOT_POSITIVE')
+  })
+
+  it('양수는 통과한다', () => {
+    expect(validateAdditionalQuantity('5')).toBeNull()
+  })
+
+  it('빈 문자열은 REQUIRED (구조 검증이 먼저 실패한다)', () => {
+    expect(validateAdditionalQuantity('')).toBe('REQUIRED')
+  })
+
+  it('음수는 NUMBER_FORMAT (구조 검증이 먼저 실패한다)', () => {
+    expect(validateAdditionalQuantity('-5')).toBe('NUMBER_FORMAT')
   })
 })
 

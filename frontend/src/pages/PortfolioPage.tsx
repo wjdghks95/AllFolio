@@ -1,12 +1,15 @@
 // 구조·동작: senior-frontend / 시각 표현·문구: ui-ux-designer
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import type { PortfolioItem } from '../api/types';
-import { portfolioFixture } from '../api/fixtures';
+import type { PortfolioItem, PortfolioResponse } from '../api/types';
+import { getPortfolio } from '../api/assetApi';
+import { ApiError } from '../api/authApi';
+import { useAuth } from '../auth/useAuth';
 import Alert, { type AlertProps } from '../components/Alert';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import { formatAmount, formatQuantity, formatSignedAmount } from '../lib/money';
+import { messageForErrorCode } from '../lib/messages';
 
 // 자산 등록 등 다른 화면에서 이동해 올 때 history state로 전달하는 1회성 안내 배너
 // (Task 007에서 정한 토스트 대체 패턴: navigate(path, { state: { flash } }) + Alert 렌더).
@@ -16,6 +19,12 @@ export interface Flash {
   tone: AlertProps['tone'];
   message: string;
 }
+
+// 포트폴리오 조회 상태. flash 배너와는 독립적으로 관리한다 — 로딩/에러 중에도 flash는 보여야 한다.
+type LoadState =
+  | { status: 'loading' }
+  | { status: 'error'; code: string }
+  | { status: 'ready'; data: PortfolioResponse };
 
 const TONE_CLASS: Record<'gain' | 'loss' | 'flat' | 'unknown', string> = {
   gain: 'text-gain',
@@ -222,7 +231,7 @@ function PortfolioItemGroup({
 export default function PortfolioPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { items, totalEvaluationKrw, totalUnrealizedPnl } = portfolioFixture;
+  const auth = useAuth();
 
   // location.state는 아래 effect가 navigate로 곧장 비워버리므로, 배너에 쓸 값은 첫 렌더
   // 시점에 한 번만 떠서 로컬 state로 들고 있는다. location.state를 매 렌더 다시 읽으면
@@ -241,11 +250,74 @@ export default function PortfolioPage() {
     navigate(location.pathname + location.search, { replace: true, state: {} });
   }, [flash, navigate, location.pathname, location.search]);
 
+  // 포트폴리오 조회는 마운트 시 1회. flash 정리 effect와 관심사가 달라 별도로 둔다.
+  const [state, setState] = useState<LoadState>({ status: 'loading' });
+
+  useEffect(() => {
+    // StrictMode(main.tsx)가 dev 모드에서 effect를 mount→cleanup→mount로 두 번 실행하므로,
+    // cleanup 시점에 이미 언마운트된(또는 재마운트 전) 첫 번째 호출의 응답이 뒤늦게 와서
+    // state를 덮어쓰지 않도록 cancelled 플래그로 막는다. 이 파일이 이 앱 최초의 실 API GET
+    // 호출 effect라 이후 자산 상세/등록 화면(Task 018 하위 태스크)도 이 패턴을 따르면 된다.
+    let cancelled = false;
+    getPortfolio()
+      .then((data) => {
+        if (cancelled) return;
+        setState({ status: 'ready', data });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.code === 'UNAUTHORIZED') {
+          auth.logout();
+          navigate('/login', { replace: true, state: { from: location } });
+          return;
+        }
+        setState({ status: 'error', code: err instanceof ApiError ? err.code : 'NETWORK_ERROR' });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // deps를 의도적으로 비워둔다: location을 채우면 위쪽 flash 정리 effect가 매번
+    // navigate(..., {replace:true})로 새 location 객체를 만들어내 이 effect가 재실행되고,
+    // flash가 있을 때마다 GET /v1/portfolio가 불필요하게 두 번 나간다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const flashAlert = flash ? (
     <Alert tone={flash.tone} testId="portfolio-flash">
       {flash.message}
     </Alert>
   ) : null;
+
+  // 로딩·에러 중에도 flash 배너와 제목은 그대로 보여야 하므로, 데이터 렌더보다 먼저 분기한다.
+  if (state.status === 'loading') {
+    return (
+      <div>
+        {flashAlert ? <div className="mb-6">{flashAlert}</div> : null}
+        <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">총 자산</h1>
+        <div className="mt-6">
+          <Card testId="portfolio-loading">
+            <p className="py-6 text-center text-sm text-ink-soft">불러오는 중...</p>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div>
+        {flashAlert ? <div className="mb-6">{flashAlert}</div> : null}
+        <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">총 자산</h1>
+        <div className="mt-6">
+          <Alert tone="error" testId="portfolio-error">
+            {messageForErrorCode(state.code)}
+          </Alert>
+        </div>
+      </div>
+    );
+  }
+
+  const { items, totalEvaluationKrw, totalUnrealizedPnl } = state.data;
 
   const totalPnl = formatSignedAmount(totalUnrealizedPnl, { currency: 'KRW' });
 

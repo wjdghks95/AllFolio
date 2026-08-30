@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-08-27
+**최종 수정:** 2026-08-30
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~4와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -292,10 +292,26 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 ### Phase 3: 핵심 기능 구현 (실데이터 연동 및 외부 시세)
 
-- **Task 018: 프론트–백엔드 실데이터 연동**
-  - 더미 데이터를 실제 API 호출로 교체
-  - JWT 저장·주입, 401 처리, 로딩·에러 상태
-  - Task 007에서 추가한 `/dev/ui` 컴포넌트 쇼케이스 라우트·`DevUiPage.tsx` 제거 (더미 데이터 단계 전용 도구였으므로)
+- **Task 018: 프론트–백엔드 실데이터 연동** ✅ — 완료 (2026-08-30)
+  - ✅ `frontend/src/api/assetApi.ts` 신규 — `getAsset`/`createAsset`/`updateHolding`/`deleteAsset`/`getPortfolio`/`simulateAvgPrice` 6개 함수. 공통 헬퍼 `authorizedRequest()`가 `tokenStorage.getToken()`으로 얻은 토큰을 `Authorization: Bearer` 헤더에 자동 주입, 실패 응답은 `authApi.ts`의 `ApiError(code, message)`를 재사용(신규 에러 클래스 없음). `GET /v1/assets`(커서 페이지네이션 목록)를 이번 3개 화면 어디도 쓰지 않아 `listAssets()`는 구현하지 않음(CLAUDE.md 「Simplicity First」) — 전용 단위 테스트 파일도 `authApi.ts`와 동일하게 두지 않고, 호출 화면의 fetch 모킹 테스트가 간접 검증하는 기존 컨벤션을 따름
+  - ✅ `PortfolioPage.tsx` — `portfolioFixture` 참조를 `getPortfolio()` 실 호출로 교체. 로딩/에러/완료 3상태를 유니온 타입으로 관리하고, flash 배너는 데이터 상태와 무관하게 항상 최상단에 렌더(등록 직후 목록이 로딩 중이어도 안내는 바로 보여야 함). 401이면 `auth.logout()` 후 `/login` 리다이렉트(`state.from` 보존)
+  - ✅ `AssetNewPage.tsx` — `'void request;'` 플레이스홀더를 `createAsset()` 실 호출로 교체, `LoginPage.tsx`의 `submitting`/`submitError` 패턴 재사용
+  - ✅ `AssetDetailPage.tsx`(가장 복잡한 화면) — `useEffect([id])`에서 `Promise.allSettled([getAsset(id), getPortfolio()])`로 병렬 조회. `Promise.all`이 아닌 `allSettled`를 쓴 이유: `getPortfolio()`만 실패해도 `getAsset()`이 성공하면 화면은 정상 렌더돼야 한다는 기존 "portfolioItem 부재 회귀" 원칙과 fail-fast가 충돌하기 때문. `getAsset` 실패는 코드별 분기(`UNAUTHORIZED`→로그아웃+이동, `ASSET_NOT_FOUND`→not-found 렌더, 그 외→에러 상태). 조회 성공 시 `editQuantity`/`editAvgPrice`를 응답 값으로 초기화(Task 011 남은 갭 해소). 물타기 시뮬레이터는 로컬 `lib/simulate.ts` 계산 대신 `assetApi.simulateAvgPrice()` 실 호출로 전환, `additionalQuantity > 0` 검증을 `lib/validation.ts`의 신규 `validateAdditionalQuantity()`로 분리(Task 011 남은 갭 해소) — 이에 따라 도달 불가능해진 총수량 0 가드와 전용 회귀 테스트를 제거. 수정 폼은 `updateHolding()` 연동, `409 HOLDING_CONFLICT`는 전용 분기 없이 기존 `messageForErrorCode()` 범용 조회로 자연 처리. 삭제는 `deleteAsset()` 연동 + 연타 방지(`deleteSubmitting` state, `ConfirmDialog`에 `confirmDisabled` prop 신설)
+  - ✅ `/dev/ui` 라우트·`DevUiPage.tsx` 삭제, 이어서 도달 불가능해진 `lib/simulate.ts`·`lib/simulate.test.ts`·`api/fixtures.ts` 삭제(CLAUDE.md 「Surgical Changes」 — 이번 변경이 직접 만든 죽은 코드이므로 삭제 대상으로 분류)
+  - ✅ 3개 화면 `*.test.tsx` 전부 `vi.doMock('../api/fixtures', ...)`에서 `vi.stubGlobal('fetch', fetchMock)` 방식으로 재작성(`LoginPage.test.tsx` 선례). `renderXxxPage()` 테스트 헬퍼에 `AuthProvider` 래핑을 신규 추가(3개 화면 모두 이번에 처음 `useAuth()`를 호출하게 되는데 누락돼 있었음 — 실측으로 발견). 테스트 개수: 136(Task 002~017 누적) → **141**(Task 018 최종, 순증가 +5)
+  - ✅ 구현 과정에서 에이전트의 자체 실행 결과를 그대로 신뢰하지 않고 매 하위 태스크마다 `tsc`/`oxlint`/`vitest`/`vite build`를 직접 재실행해 검증 — 실제 결함 1건 발견·수정: `QUANTITY_NOT_POSITIVE`를 `lib/messages.ts`와 사용 코드에는 추가했지만 `lib/validation.ts`의 `ValidationCode` 유니온에는 빠뜨려 `tsc`가 타입 오류 3건(TS2353/TS2339/TS2322)을 냄 — 유니온에 추가해 해소
+  - ✅ code-reviewer 에이전트 독립 검증(뮤테이션 테스트 10건 포함, 격리된 사본에서 실행) — Blocker 0건, Major 0건. Minor 7건 발견, 6건 반영:
+    - **(수정 완료)** `Authorization` 헤더·`auth.logout()` 호출·`PUT` 메서드·`version` 필드·204 분기를 지워도 테스트가 못 잡던 문제 — `fetchMock.mock.calls`로 실제 요청의 method/path/headers/body를 직접 단언하는 테스트를 추가하고, 뮤테이션(코드를 실제로 지웠다가 테스트 실패 확인 후 원복)으로 검출력 실증
+    - **(수정 완료)** `getPortfolio()` 실패 시 취득원가(`cost`)가 "—"로 빠지는데 화면 문구는 "시세 연동 전"이라는 다른 원인을 말하던 문제 — 조회 상태에 `portfolioFetchFailed` 플래그를 추가해 원인을 구분 표시
+    - **(수정 완료, 최초 판단은 반대로 뒤집힘)** `// eslint-disable-next-line react-hooks/exhaustive-deps` 억제 주석이 아무 규칙도 안 끈다는 code-reviewer의 최초 판단(`.oxlintrc.json`에 `react-hooks` 플러그인 미설정이 근거)에 따라 주석을 제거했더니, 실측 결과 oxlint가 이 규칙을 기본 내장으로 인식해 경고 2건이 새로 나타남 — code-reviewer의 최초 판단이 틀렸음이 재실측으로 드러나 주석을 원상복구(Task 010의 "근거가 부정확했던 억제 주석을 제거"한 선례와 반대 방향 사례 — 이번엔 억제가 정당했음)
+    - **(수정 완료)** `QUANTITY_NOT_POSITIVE` 판정 로직이 `lib/validation.ts` 밖(`AssetDetailPage.tsx` 안)에 있어 그 파일 자신의 "검증 로직은 이 파일에만" 원칙과 어긋나던 문제 — `validateAdditionalQuantity()` 함수를 신설해 페이지가 이 함수 하나만 호출하도록 정리
+    - **(수정 완료)** 삭제 확인 다이얼로그의 confirm 버튼에 연타 방지가 없어 `DELETE` 중복 전송 가능성 — `ConfirmDialog`에 `confirmDisabled` prop 신설
+    - **(수정 완료)** `docs/DESIGN.md`·`docs/ROADMAP.md`에 삭제된 `DevUiPage.tsx`/`fixtures.ts`를 가리키던 잔여 참조 3곳(「개발 단계」 절 밖이라 놓치기 쉬웠음)을 현재 유효한 참조로 교체
+    - **(보류)** 비-JSON 에러 응답(예: 프록시가 내는 HTML 502) 시 `authorizedRequest`의 `res.json()`이 `SyntaxError`를 던져 `ApiError`가 아닌 예외가 새는 경로 — 화면은 `NETWORK_ERROR` 폴백으로 우아하게 저하돼 크래시는 아니고 발생 가능성도 낮아 이번엔 보류
+  - ⚠️ 남은 갭:
+    - `GET /v1/assets`(커서 페이지네이션 목록) API를 소비하는 화면이 아직 없다 — `assetApi.ts`에 `listAssets()`를 만들지 않았으므로, 이 목록이 필요한 화면(예: Task 010 후속 과제인 티커 검색 자동완성)이 생기면 그때 추가한다
+    - Task 019(Refresh Token) 전까지는 401 발생 시 재로그인만 가능(자동 갱신 없음) — 이번 Task는 이 제약을 그대로 전제하고 설계됨
+    - 비-JSON 에러 응답 처리(위 Minor 보류 항목)는 발생 가능성이 낮아 미루되, 프록시/게이트웨이 계층이 생기는 Task 027(Capacitor) 이후 재검토
 
 - **Task 019: 인증 강화 — Refresh Token 및 로그아웃 (F010)**
   - Task 003의 남은 갭 해소. 실시간 차트(F007)를 띄워두는 사용 패턴과 15분 만료가 충돌하므로 연동 직후 처리
@@ -430,7 +446,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 **주의**: `cost`는 반올림 전 원본 정밀도(`quantity × avgPrice` 원본값)로 계산한 뒤 스케일을 적용하고, `avgPrice`는 응답에 나가기 직전 별도로 반올림된다 — 즉 `cost`와 `quantity × 응답의 avgPrice`를 클라이언트가 직접 재계산하면 반올림 오차만큼(보통 통화 최소단위 이하) 다를 수 있다. 예: KRW 자산 평단가 원본이 `60000.75`면 응답은 `avgPrice: "60001"`(반올림)이지만 `cost`는 원본 `60000.75`로 계산해 반올림한 값이라 `quantity × 60001`과 정확히 일치하지 않는다. 화면 표시값(프론트가 별도로 반올림)에는 영향 없다.
 
-`totalCostByCurrency`는 `items`에 담긴 모든 자산의 취득원가를 통화별로 합산한 값이다(위 예시는 자산 1건뿐이라 KRW 값이 그 자산의 `cost`와 같다). 자산이 둘 이상이거나 USD 자산이 섞이면 통화별 키가 함께 늘어난다 — 예시는 `frontend/src/api/fixtures.ts`의 `portfolioFixture` 참고.
+`totalCostByCurrency`는 `items`에 담긴 모든 자산의 취득원가를 통화별로 합산한 값이다(위 예시는 자산 1건뿐이라 KRW 값이 그 자산의 `cost`와 같다). 자산이 둘 이상이거나 USD 자산이 섞이면 통화별 키가 함께 늘어난다 — 다중 자산·다중 통화 예시는 `frontend/src/pages/PortfolioPage.test.tsx`의 `portfolioResponseFixture` 참고.
 
 `totalCostByCurrency`가 통화별 Map인 이유: 취득원가 합계를 단일 `totalCostKrw`로 두면 USD 자산이 섞였을 때 환율 없이는 정확한 값을 낼 수 없다. Task 023(환율 연동) 전까지 거짓 숫자를 내보내지 않기 위해 통화별로 나눠 담는다.
 
@@ -513,7 +529,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 |---|---|
 | BigDecimal 스케일 규칙 누락 | ✅ (Task 016 해소) 위 「금융 정밀도 규칙」 표를 `domain/PrecisionScale` 유틸로 코드화, `BigDecimalPrecisionTest`로 고정, `PortfolioService`/`SimulationService`가 공유 |
 | Optimistic Lock 고빈도 충돌 | 유저 수 적은 초기 단계이므로 단순 `@Version`으로 충분. 충돌 시 `HOLDING_CONFLICT` 409 응답으로 클라이언트가 재조회 후 재시도 |
-| 프론트-백엔드 API 계약 어긋남 | Task 006에서 TypeScript 타입(`frontend/src/api/types.ts`)과 더미 픽스처(`frontend/src/api/fixtures.ts`)를 계약의 단일 출처로 삼아 양쪽이 참조. 백엔드는 `ApiContractSerializationTest`로 직렬화 형태를 고정 |
+| 프론트-백엔드 API 계약 어긋남 | Task 006에서 TypeScript 타입(`frontend/src/api/types.ts`)을 계약의 단일 출처로 삼아 프론트가 참조(Task 006~017 더미 데이터 단계에서는 `frontend/src/api/fixtures.ts` 더미 픽스처도 이 타입을 따르도록 병행 유지했으나, Task 018에서 실 API 연동과 함께 제거됨 — 이제는 `frontend/src/api/assetApi.ts`가 실제 백엔드 호출로 계약 일치 여부를 상시 검증). 백엔드는 `ApiContractSerializationTest`로 직렬화 형태를 고정 |
 | 종목 중복 등록 허용에 따른 포트폴리오 집계 복잡도 | 「확정된 설계 결정」 #3 참조 — 티커별 합산이 아닌 자산(행) 단위 집계로 설계해 복잡도를 피한다 |
 
 **해소된 리스크 (Task 002에서 실측 확인 완료)**
