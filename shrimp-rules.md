@@ -8,14 +8,16 @@
   - 경계: senior-frontend는 컴포넌트의 "구조와 동작"(무엇을 렌더링하고 어떻게 반응하는가)까지만 담당하고, 그 구조에 입히는 시각 표현은 ui-ux-designer 소관이다. 컴포넌트 파일 최상단에 `// 구조·동작: senior-frontend / className·마크업·문구: ui-ux-designer` 주석으로 경계를 명시한다
 - **DB 계층** (`src/main/resources/db/migration/V*.sql`, JPA 엔티티 스키마 매핑) → `database` 에이전트
 - **코드 리뷰** (읽기 전용 검증) → `code-reviewer` 에이전트
+- **Playwright MCP E2E 시나리오** (`docs/E2E_SCENARIOS.md`, 전체 사용자 여정·에러 케이스 검증) → `qa-e2e` 에이전트
+  - 경계: qa-e2e는 실제 브라우저+백엔드+DB가 연결된 상태만 검증하고 코드를 직접 수정하지 않는다. 발견한 버그는 원인에 맞는 담당 에이전트(senior-frontend/senior-backend/database)로 라우팅한다
 - Flyway 마이그레이션 추가 + 대응 JPA 엔티티 변경은 `database` 에이전트가 동시에 처리
 
 ---
 
 ## Project Phase Status
 
-- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정), Task 007(공통 컴포넌트·디자인 시스템), Task 012(자산 CRUD API)
-- **우선순위**: Task 013(포트폴리오 홈 API) — Phase 2 백엔드 트랙 다음 단계
+- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정), Task 007(공통 컴포넌트·디자인 시스템), Task 008(인증 화면), Task 009(포트폴리오 홈 화면), Task 010(자산 등록 화면), Task 011(자산 상세 화면), Task 012(자산 CRUD API), Task 013(포트폴리오 홈 API), Task 014(Observability 최소 셋업), Task 015(물타기 시뮬레이터), Task 016(금융 정밀도·도메인 통합 테스트), Task 017(MVP 로컬 실행 문서화), Task 018(프론트-백엔드 실데이터 연동), Task 019(인증 강화 — Refresh Token 및 로그아웃)
+- **우선순위**: Task 020(E2E 통합 테스트, Playwright MCP) — Phase 3 착수 단계
 - 상세 Task 명세 → `docs/ROADMAP.md`
 
 ---
@@ -137,17 +139,25 @@ domain.service → infra (허용: JwtIssuer 등)
 | `PUT` | `/v1/assets/{id}/holdings` | 요청에 `version` 필수, 낙관적 잠금은 서비스에서 수동 비교, 충돌 시 `HOLDING_CONFLICT` 409 |
 | `DELETE` | `/v1/assets/{id}` | 204 |
 
-### 계약 확정, 구현 예정 (Task 006에서 DTO·에러코드 확정 / Task 013·015에서 컨트롤러 구현)
+### 구현된 엔드포인트 (Task 013·015)
 
 | Method | Path | 비고 |
 |---|---|---|
-| `GET` | `/v1/portfolio` | Phase 2에서 `evaluationKrw`·`unrealizedPnl`·`weight`는 `null` |
-| `POST` | `/v1/simulate/avg-price` | DB 저장 없음, P99 ≤ 5ms |
+| `GET` | `/v1/portfolio` | Phase 2에서 `evaluationKrw`·`unrealizedPnl`·`weight`는 `null`(Task 023에서 채움) |
+| `POST` | `/v1/simulate/avg-price` | DB 저장 없음(Holding 단건 조회 후 In-Memory 계산만), P99 ≤ 5ms |
+
+### 구현된 엔드포인트 (Task 019)
+
+| Method | Path | 비고 |
+|---|---|---|
+| `POST` | `/v1/auth/refresh` | Refresh Token 회전(rotation) — 기존 토큰 즉시 폐기 + 새 Access+Refresh 쌍 발급, 인증 불필요 |
+| `POST` | `/v1/auth/logout` | 204, Refresh Token 폐기. 인증 불필요, idempotent |
 
 ### 에러 코드 목록
 
 - **구현됨 (Task 003)**: `EMAIL_ALREADY_EXISTS`(409), `INVALID_CREDENTIALS`(401), `UNAUTHORIZED`(401), `VALIDATION_ERROR`(400), `NOT_FOUND`(404), `METHOD_NOT_ALLOWED`(405), `UNSUPPORTED_MEDIA_TYPE`(415), `NOT_ACCEPTABLE`(406), `CLIENT_ERROR`(4xx), `INTERNAL_ERROR`(500)
 - **구현됨 (Task 006, Task 012에서 실제 사용 시작)**: `ASSET_NOT_FOUND`(404, 타 유저 소유 자산도 동일 코드), `HOLDING_CONFLICT`(409, 낙관적 잠금 충돌), `CONFLICT`(409, 매칭되는 도메인 코드가 없는 데이터 무결성 제약 위반 폴백)
+- **구현됨 (Task 019)**: `INVALID_REFRESH_TOKEN`(401, Refresh Token이 존재하지 않거나·이미 폐기됐거나·만료됨 — 세 상황을 구분하지 않는 단일 코드로 응답)
 
 ---
 

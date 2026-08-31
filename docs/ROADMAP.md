@@ -337,9 +337,16 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - 위 code-reviewer 보류 항목 2건(React state 미동기화, 실패한 Refresh Token 미정리)
     - `README.md`의 curl 예시·인증 방식 설명이 아직 Task 003 시점(Access Token만) 기준 — Task 019 갱신은 이번 범위 밖
 
-- **Task 020: E2E 통합 테스트 (Playwright MCP)**
-  - 전체 사용자 여정(로그인 → 자산 등록 → 포트폴리오 → 상세 → 시뮬레이션 → 수정/삭제)
-  - 에러·엣지 케이스
+- **Task 020: E2E 통합 테스트 (Playwright MCP)** ✅ — 완료 (2026-08-31)
+  - 상세 시나리오·실행 절차·결과 근거는 [`docs/E2E_SCENARIOS.md`](E2E_SCENARIOS.md) 참고(신규 4번째 문서, PRD/ROADMAP/DESIGN 체계에 이어 추가). npm `@playwright/test`가 아니라 이미 연결된 Playwright MCP 서버를 에이전트가 직접 조작해 실제 브라우저+백엔드+DB가 연결된 상태에서 검증하는 방식
+  - ✅ 신규 `qa-e2e` 서브에이전트(`.claude/agents/qa-e2e.md`) 신설 — ui-ux-designer.md·senior-frontend.md에 이미 못박혀 있던 "별도 QA 에이전트" 역할. 코드는 직접 수정하지 않고 버그 발견 시 담당 에이전트(senior-frontend/senior-backend/database)로 라우팅만 한다
+  - ✅ `shrimp-rules.md`를 Task 007/012 시점에서 Task 019까지 전체 최신화(Agent Routing에 qa-e2e 추가, Project Phase Status·API 엔드포인트 표·에러 코드 목록 갱신)
+  - ✅ 해피 패스 7개(회원가입→로그인/로그아웃→STOCK/CASH 등록→시뮬레이터→보유수정→삭제) + 에러·엣지 케이스 9개(중복 이메일 409·로그인 실패 401·비인증 리다이렉트·존재하지 않는 자산 404·타 유저 자산 404(403 아님 확정)·시뮬레이터 잘못된 입력 차단·삭제 연타 방지·낙관적 잠금 충돌 409·401 자동 refresh-and-retry) 총 **16개 시나리오 전부 PASS**(FAIL 0건)
+  - ✅ 재현 난이도가 있던 두 케이스도 실측 완료: 낙관적 잠금 충돌은 브라우저 탭 2개(`browser_tabs`)로 동시 수정을 재현해 탭A 200(`version` 0→1)·탭B 409 `HOLDING_CONFLICT` 확인. 401 자동갱신은 Access Token TTL(15분) 설정을 건드리지 않고 실제로 16분을 대기해 401→`POST /v1/auth/refresh` 200(토큰 rotation 확인)→재시도 200 순서와 세션 미종료를 확인
+  - ✅ 코드 버그 0건 발견. 부수 발견 2건은 버그가 아닌 기존 설계 확인 사항(CASH 자산에는 물타기 시뮬레이터 UI 자체가 없음 — 평단가 개념 부재로 당연한 설계, 401 직후 콘솔에 표준 fetch 에러 로그가 남는 것은 화면 동작과 무관)으로 `docs/E2E_SCENARIOS.md`에 기록
+  - ⚠️ 남은 갭:
+    - 이번 실행은 에이전트가 Playwright MCP로 수동 재현하는 방식이라 CI 자동 재실행 구조가 아니다 — 반복 회귀 검증이 필요해지면 headless 자동화(`@playwright/test` 등) 도입 여부를 별도로 검토해야 한다
+    - 테스트 계정(`e2e-happy-*`, `e2e-userb-*`)과 등록한 자산이 로컬 dev DB에 남아있음(실질 영향 없어 정리 보류)
 
 - **Task 021: 외부 시세 API 연동**
   - Upbit/KIS/환율, Circuit Breaker + Fallback, WireMock 기반 테스트

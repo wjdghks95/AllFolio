@@ -223,4 +223,5 @@ spring.jpa.open-in-view: false
 - **[PRD](docs/PRD.md)** — 화면·기능 중심 MVP 명세(F001~F010), 화면 경로, 클라이언트 스택, 데이터 모델. API 규격·에러 포맷·성능 KPI·리스크는 다루지 않음
 - **[개발 로드맵](docs/ROADMAP.md)** — Phase/Task별 진행 상황, API 규격·에러 포맷·성능 KPI·리스크의 원본(single source of truth), 착수 전 결정 사항, Phase 번호 대응표
 - **[디자인 시스템](docs/DESIGN.md)** — 팔레트·타이포·간격 등 디자인 토큰, 화면 골격 규약, 컴포넌트 시각 규약의 단일 출처
+- **[E2E 시나리오](docs/E2E_SCENARIOS.md)** — Playwright MCP E2E 시나리오 목록·실행 절차·결과 근거(Task 020, `qa-e2e` 에이전트 소관)
 - **[Spring Boot 레퍼런스](https://spring.io/projects/spring-boot)** — 프레임워크 문서
