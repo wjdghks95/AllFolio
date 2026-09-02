@@ -125,11 +125,11 @@ GET https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getSto
 |---|---|
 | `resultType=json`을 항상 명시 | 생략하면 XML 기본값 — 프로젝트가 Jackson 기반 JSON 처리를 표준으로 쓰므로 XML 파싱을 피한다 |
 | 특정 종목 조회 시 `likeSrtnCd`는 **포함 검색**이지 정확히 일치가 아니다 — 응답의 `srtnCd`가 요청한 티커와 정확히 같은 항목만 골라 쓸 것 | 문서 요청 파라미터 표에 `srtnCd`(정확 일치) 파라미터 자체가 없고 `likeSrtnCd`(포함)만 존재함 — 짧은 코드가 다른 코드의 부분 문자열일 가능성을 배제 못함 |
-| `clpr`(종가)를 `BigDecimal`로 받는다 — `double`/`float` 금지 | CLAUDE.md 금융 정밀도 원칙 |
+| `clpr`(종가)를 `BigDecimal`로 받는다 — `double`/`float` 금지 | `.claude/rules/financial-precision.md` |
 | `Price.asOf`는 응답의 `basDt`를 `LocalDate.parse(basDt, DateTimeFormatter.BASIC_ISO_DATE).atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant()`로 변환해 채운다. `Instant.now()` 절대 금지 | 이 API는 전일 종가이므로 조회 시각을 쓰면 실시간처럼 오도함 |
 `basDt` 생략 시 최신 거래일 데이터가 온다(2026-09-01 실측 확인 완료) — `numOfRows=1&pageNo=1`만으로 최신값 조회 가능 | 실제 서비스키 curl 호출로 확정 |
 | `clpr` 등 숫자 필드는 JSON에서 따옴표 붙은 문자열로 온다 — `BigDecimal` 필드로 그대로 받아도 Jackson이 자동 변환하므로 별도 처리 불필요(단, WireMock 테스트 스텁도 실제와 같이 따옴표를 붙여야 함) | 2026-09-01 실측 확인 완료 |
-| serviceKey는 `StockProperties`(환경변수 `ALLFOLIO_STOCK_SERVICE_KEY`)로만 주입, 코드·설정 파일에 하드코딩 금지 | CLAUDE.md 원칙, JwtProperties와 동일 패턴 |
+| serviceKey는 `StockProperties`(환경변수 `ALLFOLIO_STOCK_SERVICE_KEY`)로만 주입, 코드·설정 파일에 하드코딩 금지 | `src/main/java/com/allfolio/infra/price/CLAUDE.md`, JwtProperties와 동일 패턴 |
 | Circuit Breaker(`@CircuitBreaker(name = "stock")`)는 `application.yml`의 `resilience4j.circuitbreaker.instances.stock`(업비트/환율과 동일 튜닝) 그대로 재사용 | Task 021에서 이미 확정된 값, 새로 튜닝하지 않음 |
 | 이 API는 4개 오퍼레이션을 제공하지만 AllFolio는 `getStockPriceInfo`(주식시세) **하나만** 쓴다 — 나머지 3개(신주인수권증서/수익증권/신주인수권증권)를 구현하지 않는다 | CLAUDE.md Simplicity First — 요청받지 않은 기능 금지 |
 

@@ -1,9 +1,9 @@
 # AllFolio — Product Requirements Document (PRD)
 
 **버전:** 2.2.0
-**최종 수정:** 2026-08-21
+**최종 수정:** 2026-08-21 (「상태」 줄만 2026-09-01 기준으로 갱신)
 **작성자:** JEONGHWANLEE
-**상태:** Phase 2 진행 중 (2-A 프론트: 공통 컴포넌트·인증 화면·총 자산 홈·자산 등록·자산 상세 완료 / 2-B 백엔드: 착수 전 — 상세 진행 상황은 [`docs/ROADMAP.md`](ROADMAP.md) 참조)
+**상태:** Phase 1·2 완료, Phase 3(실데이터 연동 + 외부 시세 API + Redis 캐시) 진행 중 — Task 021(외부 시세 API 연동)까지 완료, 다음은 Task 022(Redis 캐시·요청 Throttling). 상세 진행 상황은 [`docs/ROADMAP.md`](ROADMAP.md) 참조
 
 ---
 

@@ -35,7 +35,7 @@ shrimp-task-manager(MCP 기반 태스크 관리 도구)의 `verify_task`로 지�
 3. `get_task_detail`로 해당 태스크의 `verificationCriteria`·`implementationGuide`·`relatedFiles`를 전체 확보
 4. `verificationCriteria`에 적힌 항목 하나하나를 실제로 재확인한다 — 이전 대화의 "됐다"는 진술이나 기억에 의존하지 않고, 각 항목에 맞는 도구로 직접 실측한다
    - 타입·빌드 통과 여부 → `Bash`로 해당 명령(`tsc -b --noEmit`, `npm run build` 등) 재실행
-   - 테스트 통과 여부 → `Bash`로 테스트 명령 재실행(전체 스위트가 간헐적으로 실패하는 기존 인프라 이슈가 있다면 CLAUDE.md 안내대로 해당 파일만 단독 실행해 격리)
+   - 테스트 통과 여부 → `Bash`로 테스트 명령 재실행(전체 스위트가 간헐적으로 실패하는 기존 인프라 이슈가 있다면 `.claude/rules/testing.md` 안내대로 해당 파일만 단독 실행해 격리)
    - 특정 코드 패턴의 존재/부재 → `Grep`
    - 특정 파일의 생성/삭제 여부 → `Glob` 또는 `Read`
    - 구현 내용이 가이드와 일치하는지 → `Read`로 실제 코드 대조

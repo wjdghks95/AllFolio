@@ -58,7 +58,7 @@ Phase가 넘어가면 그 항목이 곧 담당 업무가 된다. 유예와 금�
 |---|---|
 | 금융 연산에 `double`/`float` 금지, 예외 없이 `BigDecimal` | ROADMAP 「금융 정밀도 규칙」 |
 | 스케일·반올림: KRW 0 / USD 4 / 코인 8 / 비중 2, 전부 `HALF_UP` | ROADMAP 「금융 정밀도 규칙」 |
-| `BigDecimal` 비교는 `.compareTo()` (`.equals()`는 scale 차이로 오탐) | CLAUDE.md |
+| `BigDecimal` 비교는 `.compareTo()` (`.equals()`는 scale 차이로 오탐) | `.claude/rules/testing.md` |
 | 에러 응답은 `{code, message, timestamp}` 3필드 고정, code는 ROADMAP 표의 값만 사용 | ROADMAP 「에러 응답 포맷」 |
 | 자산 단건 조회 시 **타 유저 소유는 403이 아니라 404** (ID 유출 방지) | ROADMAP Task 012 |
 | Optimistic Lock 충돌 → 409 + `HOLDING_CONFLICT` | ROADMAP 「에러 응답 포맷」 |
@@ -67,8 +67,8 @@ Phase가 넘어가면 그 항목이 곧 담당 업무가 된다. 유예와 금�
 | `open-in-view: false` — 지연 로딩은 서비스 트랜잭션 경계 안에서 완료 | application.yml |
 | 요청/응답 DTO는 `record` + Bean Validation. 엔티티를 컨트롤러에 직접 노출 금지 | — |
 | 금액·수량은 JSON에서 **문자열**로 직렬화 (부동소수 손실 방지) | ROADMAP 「API 규격」 |
-| Virtual Threads 활성 상태 — `ThreadPoolTaskExecutor` 등 풀 기반 설정 추가 금지 | CLAUDE.md |
-| 외부 API 키·시크릿은 환경변수(`KIS_APP_KEY` 등). 코드·설정 파일 하드코딩 금지 | CLAUDE.md 「금융 정밀도」 절 원칙 준용 |
+| Virtual Threads 활성 상태 — `ThreadPoolTaskExecutor` 등 풀 기반 설정 추가 금지 | `.claude/rules/spring-boot-4.md` |
+| 외부 API 키·시크릿은 환경변수(`KIS_APP_KEY` 등). 코드·설정 파일 하드코딩 금지 | `.claude/rules/financial-precision.md` 원칙 준용 |
 | 모든 외부 호출은 Circuit Breaker 경유 + Fallback 경로 명시. Redis 장애 시 DB 직접 조회 | ROADMAP Task 021~022 |
 | Stale 캐시 응답은 `isStale: true` / `PRICE_STALE` 206으로 표시. 조용히 낡은 값 반환 금지 | ROADMAP Task 022 |
 | SSE 이벤트 스키마(`id`=epoch ms, `event` 3종, heartbeat 주석)는 구 PRD v1.2.0 §8.3 열람 후 고정 | `git show cf24471:docs/PRD.md`, ROADMAP Task 025 |

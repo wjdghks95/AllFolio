@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-08-30
+**최종 수정:** 2026-09-01
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~4와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -600,7 +600,7 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 **해소된 리스크 (Task 002에서 실측 확인 완료)**
 - Spring Boot 4.1.0 + Java 25 호환성 — 정상 동작 확인
 - `uuidv7()` PG18 함수 지원 — Testcontainers PG18 이미지에서 확인됨
-- Flyway 오토컨피규레이션 누락, Testcontainers 버전 협상 실패 — `CLAUDE.md` 「Spring Boot 4 특이사항」 참조
+- Flyway 오토컨피규레이션 누락, Testcontainers 버전 협상 실패 — `.claude/rules/spring-boot-4.md` 참조
 
 ---
 
