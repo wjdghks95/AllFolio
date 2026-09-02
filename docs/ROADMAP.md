@@ -348,8 +348,30 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - 이번 실행은 에이전트가 Playwright MCP로 수동 재현하는 방식이라 CI 자동 재실행 구조가 아니다 — 반복 회귀 검증이 필요해지면 headless 자동화(`@playwright/test` 등) 도입 여부를 별도로 검토해야 한다
     - 테스트 계정(`e2e-happy-*`, `e2e-userb-*`)과 등록한 자산이 로컬 dev DB에 남아있음(실질 영향 없어 정리 보류)
 
-- **Task 021: 외부 시세 API 연동**
-  - Upbit/KIS/환율, Circuit Breaker + Fallback, WireMock 기반 테스트
+- **Task 021: 외부 시세 API 연동** ✅ — 완료 (2026-09-01)
+  - ✅ 업비트(COIN)·환율(USD/KRW) 2개 외부 시세 클라이언트를 `infra/price/`에 신설(`UpbitPriceClient`/`ExchangeRateClient`). 공통 인터페이스로 억지로 묶지 않았다 — 응답 스키마·에러 케이스가 서로 달라 얕은 추상화가 되는 것을 피하기 위함. `domain/service/PriceService`가 `AssetType`으로 분기해 라우팅만 담당하고 도메인 값 객체 `Price`를 반환한다(웹 계층 비의존 — Task 023이 그대로 재사용할 수 있게). `GET /v1/assets/{id}/price` 신규 엔드포인트로 실제 호출까지 연결했고, 소유권 검증은 `SimulationService`와 동일하게 `PriceService`가 `AssetRepository`를 직접 조회해 자체 처리한다(404 `ASSET_NOT_FOUND` 통일). Circuit Breaker(Resilience4j `resilience4j-spring-boot4:2.4.0`)로 반복 실패 시 즉시 `ExternalPriceApiException`(503 `EXTERNAL_API_DOWN`)으로 전환, WireMock(`wiremock-standalone:3.13.2`)으로 정상·5xx·타임아웃·Circuit Breaker Open 4가지 시나리오를 전부 검증했다.
+  - ✅ **STOCK(국내 주식) 시세는 이번 Task 범위에서 완전히 제외됐다** — **단, 아래 「[후속] STOCK 시세 연동 완료」 항목에서 번복됨.** 이 문단 시점에는 유효했던 결정이나, 같은 Task 안에서 사용자가 벤더를 확정하며 이어서 STOCK 클라이언트를 실제로 구현했다. 착수 전 계획은 업비트·KIS·환율 3개였으나, 착수 중 사용자가 KIS 오픈API 개인 발급 키의 약관("시세정보는 계좌 보유 개인이 본인 투자 목적에 한해 이용, 제3자 제공 불가")을 재확인해 다중 사용자 서비스에는 애초에 쓸 수 없었음을 발견했다. 대안 조사 결과 KRX Open API(상업적 이용 금지)·코스콤 오픈API(법인만 이용 가능, 개인사업자도 불가)·Twelve Data 무료 플랜(제3자 표시 금지, 유료도 표시 범위 불명확)이 전부 부적합했고, 공공데이터포털(금융위원회 증권상품시세정보, CC-Zero 라이선스, 전일 종가 기준)은 법적으로는 문제없으나 실시간이 아니라는 이유로 사용자가 보류를 결정했다. 유료 벤더(FnGuide·DeepSearch·알파스퀘어 등)는 실제 계약 조건 확인이 필요해 사용자가 직접 연락 중이며, 벤더가 정해지면 STOCK 클라이언트 구현을 후속 Task로 착수한다 — `PriceService`가 클라이언트별로 독립된 구조라 STOCK 클라이언트 추가 시 다른 코드는 건드릴 필요가 없다. STOCK·CASH(KRW) 자산에 시세를 요청하면 둘 다 `PriceUnavailableException`(400 `PRICE_NOT_APPLICABLE`, 서로 다른 메시지로 로그 구분 가능)으로 응답한다.
+  - ✅ 업비트·환율 모두 이번 Task에서는 WireMock으로만 검증했고 실서버 연결은 후속 과제로 남겼다 — 둘 다 API 키가 필요 없어 기술적으로는 즉시 실연동이 가능하지만, KIS(실키 미발급)와 세 클라이언트를 동일한 방식으로 다루기 위해 일부러 함께 미뤘다.
+  - ✅ Resilience4j `resilience4j-spring-boot4:2.4.0`의 Spring Boot 4.1 호환성을 착수 즉시 실측(`./gradlew dependencies`로 하위 모듈 트리 확인) — 구 PRD 시점엔 "미확정"이었던 리스크가 해소됐음을 확인했고, Retry 전용 축소안은 불필요했다. 다만 CB 파라미터 기본값(`minimumNumberOfCalls=100`)으로는 회로가 열리는 데 100번 호출이 필요해 테스트가 비현실적이었다 — `application.yml`에 `resilience4j.circuitbreaker.instances.{upbit,exchange-rate}`를 `slidingWindowSize=4`로 명시 설정해, 테스트를 가능하게 하는 동시에 실제 운영 튜닝까지 겸해 해소했다.
+  - ✅ Fallback은 Redis 캐시(Task 022)가 아직 없어 "장애 시 직전 시세 재사용"이 아니라 "장애를 503 `EXTERNAL_API_DOWN`으로 명확히 응답"하는 수준으로 한정했다. "Stale 시세" 표시는 Task 022 이후 범위다.
+  - ✅ 환율 API(`fawazahmed0/exchange-api`)의 실제 엔드포인트를 착수 중 재확인해 계획 단계의 잘못된 가정(단일 통화쌍 응답 엔드포인트가 존재한다는 가정)을 정정했다 — 실제로는 `usd.json` 하나뿐이고 USD 기준 전체 환율표(수백 개 통화 키)를 반환하므로, `Map<String, BigDecimal>`로 받아 `krw` 키만 추출하도록 구현했다.
+  - ✅ 구현 중 발견한 Spring Boot 4 함정 1건을 `CLAUDE.md` 「Spring Boot 4 특이사항」 표에 추가: `spring-boot-starter-web`만으로는 `RestClientAutoConfiguration`이 로드되지 않아 `RestClient.Builder` 빈이 없다는 `NoSuchBeanDefinitionException`이 남는다 — `spring-boot-restclient` 모듈 별도 필요.
+  - ✅ 테스트 개수: 백엔드 124개(Task 019 기준) → **146개**(+22: `PriceTest` 3·`PricePropertiesTest` 2·`UpbitPriceClientTest` 3·`ExchangeRateClientTest` 3·`PriceServiceTest` 5·`AssetPriceIntegrationTest` 5·`PriceClientCircuitBreakerTest` 1). 매 서브태스크마다 `--rerun-tasks`로 캐시가 아닌 실제 재실행 결과를 직접 확인했고, 전체 스위트도 최종적으로 강제 재실행해 회귀 없음을 확인했다.
+  - ✅ **[후속] STOCK(국내 주식) 시세 연동 완료** (2026-09-01, Task 021 완료 이후 사용자가 벤더를 직접 확정하며 이어서 진행). 위 「STOCK 완전 제외」 결정 이후, 사용자가 대안으로 KRX Open API를 재검토했으나 실측 결과 KIS와 동일한 구조의 제약이 있어 배제됨을 확인했다 — 실제 약관(openapi.krx.co.kr) 원문: 제6조 2항 "API 이용자는 API 서비스를 비상업적인 목적으로만 이용할 수 있으며, API 서비스를 이용한 결과에 대한 대가를 제3자에게 청구해서는 아니된다", 제11조 2항 "API 이용자는 한국거래소로부터 제공받은 정보를 제3자에게 제공할 수 없다". 최종적으로 **공공데이터포털의 "금융위원회_주식시세정보"(data.go.kr dataset 15094808)로 확정** — 이용허락범위 제한 없음(상업적 활용·재배포 가능)·무료·일 1회 갱신(EOD, 전일 종가 기준).
+    - `infra/price/StockPriceClient` 신설 — 업비트/환율 클라이언트와 동일한 RestClient+Resilience4j Circuit Breaker+fallback 구조. `domain/service/PriceService`의 STOCK 분기를 `PriceUnavailableException` 스텁에서 실제 호출로 교체.
+    - `Price.asOf`는 API 응답의 기준일자(`basDt`)를 `Asia/Seoul` 자정 `Instant`로 변환한 값을 쓰도록 설계했다 — EOD 데이터라 `Instant.now()`를 쓰면 실시간처럼 사용자를 오도하기 때문.
+    - serviceKey는 이 프로젝트 최초로 비밀값이 필요한 외부 API 클라이언트라, `JwtProperties.secret`과 동일하게 `${ALLFOLIO_STOCK_SERVICE_KEY:}` 환경변수 위임 패턴을 적용했다(`.env` 로컬 사용 시 `.gitignore` 이미 포함, `set -a && source .env && set +a`로 셸에 로드 후 `./gradlew bootRun`).
+    - 사용자가 실제 활용신청으로 서비스키를 발급받아 curl로 직접 재검증까지 완료(2026-09-01): (a) 응답의 `items.item`은 배열, (b) `basDt` 생략 시 최신 거래일 데이터가 반환됨(예: 호출일 9/1에 `basDt: "20260831"`), (c) `clpr` 등 숫자 필드가 JSON에서 따옴표 붙은 문자열로 옴(`"260000"`) — 활용가이드 문서에 없던 사실이나 이 프로젝트의 Jackson이 `BigDecimal` 필드로 문자열 토큰을 자동 변환해줘서 코드 수정은 불필요했음, (d) 인증 실패(잘못된 서비스키)는 정상 응답과 전혀 다른 `{"OpenAPI_ServiceResponse":{"cmmMsgHeader":{...}}}` 스키마로 옴 — 기존 방어 로직(응답 필드 null 체크)이 코드 수정 없이 이 경우도 `ExternalPriceApiException`으로 정상 전환함을 실제 에러 응답을 재현한 테스트로 확인.
+    - 이 API 전문 지식을 담은 `.claude/agents/stock-price-api.md` 신설(원본 `docs/오픈API 활용자가이드_금융위원회_주식시세정보.docx`의 전체 스펙을 옮겨 담음) — 위 (a)~(d) 실측 결과로 최신화됨.
+    - `GET /v1/assets/{id}/price`에 STOCK 200 엔드투엔드 시나리오 추가(`AssetPriceIntegrationTest`), 기존 5개 시나리오는 그대로 유지.
+    - 테스트 개수: 146개 → **151개**(+5: `StockPriceClientTest` 4·`AssetPriceIntegrationTest` +1). 전체 스위트 `--rerun-tasks` 강제 재실행으로 회귀 없음 확인.
+  - ⚠️ 남은 갭:
+    - 발급받은 실제 서비스키는 로컬 `.env`에만 있다 — 배포 환경(운영 서버)의 환경변수 반영은 별도 작업 필요
+    - 공공데이터포털 개발계정 기준 일일 10,000건 호출 제한 — 운영 규모가 커지면 활용사례 등록으로 증설 신청 필요
+    - `basDt` 생략 시 "최신 거래일" 반환은 1회 호출로만 확인됨 — 주말·공휴일이 여러 날 겹치는 경우 등 전체 케이스가 보장되는지는 추가 관찰 필요
+    - 업비트·환율·STOCK 전부 WireMock 검증만 마쳤고 실서버 연결(WireMock→실제 API) 전환 시점은 미정
+    - Resilience4j CB 파라미터(`failureRateThreshold` 등)는 실측 트래픽 없이 보수적 기본값으로 설정됨 — 운영 관측 후 조정 필요
+    - `allfolio.price.fetch.duration` 메트릭에 대한 Prometheus 히스토그램 설정(`management.metrics.distribution.percentiles-histogram`)이 아직 없음(시뮬레이터의 `allfolio.simulation.duration`만 설정돼 있음) — 필요해지면 추가
 
 - **Task 022: Redis 캐시 및 요청 Throttling**
   - Redis 8.8. Stale 응답은 `isStale: true`/`PRICE_STALE` 206으로 명시
@@ -404,6 +426,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 | `DELETE` | `/v1/assets/{id}` | 204 / 404 | `ON DELETE CASCADE`로 holdings·transactions 함께 삭제 |
 | `GET` | `/v1/portfolio` | 200 | Task 013 범위(F005a)는 취득원가만, `evaluationKrw`·`unrealizedPnl`·`weight`는 `null` |
 | `POST` | `/v1/simulate/avg-price` | 200 | DB 저장 없음 |
+| `GET` | `/v1/assets/{id}/price` | 200 / 400 / 404 / 503 | 외부 시세 단건 조회(STOCK/COIN/CASH-USD). 타 유저 접근 시 404, STOCK·CASH(KRW) 자산에 요청 시 400 `PRICE_NOT_APPLICABLE`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN` (Task 021) |
 
 **Bean Validation 규칙**
 - `ticker`: 1~20자, 공백 불가
@@ -428,6 +451,14 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 ```
 
 응답 본문은 두 경우 모두 `AssetResponse`(아래 `GET /v1/assets/{id}` 응답과 동일 형태).
+
+### `GET /v1/assets/{id}/price` 응답 예시
+
+```json
+{ "amount": "71000", "currency": "KRW", "asOf": "2026-08-31T15:00:00Z" }
+```
+
+STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 KRW로 환산된 환율값) 기준 스케일이 적용된다 — `Price.amount`가 이미 라운딩된 값이므로 클라이언트가 재반올림할 필요는 없다. STOCK은 EOD(전일 종가) 데이터라 `asOf`가 조회 시각이 아닌 기준일자 자정(Asia/Seoul)이다.
 
 ### `GET /v1/assets/{id}` 응답 예시
 
@@ -518,6 +549,8 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 **구현된 코드 (Task 006)**: `ASSET_NOT_FOUND`(404, 존재하지 않거나 타 유저 소유 — 403 대신 404로 ID 유출 방지), `HOLDING_CONFLICT`(409, 낙관적 잠금 `version` 불일치. `ObjectOptimisticLockingFailureException` 캐치), `CONFLICT`(409, `uk_users_email` 외의 데이터 무결성 제약 위반 — 매칭되는 도메인 에러 코드가 없을 때의 일반 폴백)
 
 **구현된 코드 (Task 019)**: `INVALID_REFRESH_TOKEN`(401, Refresh Token이 존재하지 않거나·이미 폐기됐거나·만료됨 — 세 상황을 구분하지 않는 단일 코드로 응답해 토큰 존재 여부가 새지 않게 함)
+
+**구현된 코드 (Task 021)**: `PRICE_NOT_APPLICABLE`(400, STOCK·CASH(KRW) 자산에 시세를 요청 — 서로 다른 메시지로 로그 구분 가능하나 코드는 동일), `EXTERNAL_API_DOWN`(503, 외부 시세 API 장애 또는 Circuit Breaker Open. 응답 파싱/매칭 실패(예: 존재하지 않는 티커)는 CB 실패 집계에서 제외되지만 클라이언트 응답 코드는 동일하게 503)
 
 ---
 

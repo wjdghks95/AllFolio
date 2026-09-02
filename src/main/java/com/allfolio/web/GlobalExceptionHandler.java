@@ -3,7 +3,9 @@ package com.allfolio.web;
 import com.allfolio.domain.exception.AssetNotFoundException;
 import com.allfolio.domain.exception.AvgPriceRequiredException;
 import com.allfolio.domain.exception.EmailAlreadyExistsException;
+import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.InvalidCredentialsException;
+import com.allfolio.domain.exception.PriceUnavailableException;
 import com.allfolio.domain.exception.RefreshTokenInvalidException;
 import com.allfolio.web.dto.ErrorResponse;
 import org.hibernate.exception.ConstraintViolationException;
@@ -185,6 +187,22 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of("VALIDATION_ERROR", e.getMessage()));
+    }
+
+    /** CASH(KRW)처럼 시세 개념이 없는 자산에 대한 조회 요청. STOCK도 벤더 미확정으로 이 경로를 함께 쓴다(Task 021). */
+    @ExceptionHandler(PriceUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handlePriceUnavailable(PriceUnavailableException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("PRICE_NOT_APPLICABLE", e.getMessage()));
+    }
+
+    /** 외부 시세 API 최종 실패 또는 Circuit Breaker Open (Task 021). 캐시가 없어 직전 시세로 대체 응답할 수 없다. */
+    @ExceptionHandler(ExternalPriceApiException.class)
+    public ResponseEntity<ErrorResponse> handleExternalPriceApi(ExternalPriceApiException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("EXTERNAL_API_DOWN", e.getMessage()));
     }
 
     /**

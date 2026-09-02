@@ -120,6 +120,7 @@ Phase와 무관하게 이 저장소에서 계속 유효한 환경 제약입니�
 | Security 자동 설정 | JWT 기반 무상태 인증이므로 `UserDetailsServiceAutoConfiguration`을 제외해야 함 — 제외하지 않으면 부팅 시 랜덤 생성 비밀번호가 로그에 남음 |
 | Testcontainers 버전 | 버전을 고정하지 말 것. Spring Boot 4.1 BOM이 관리하는 2.x를 그대로 사용 (1.x로 고정하면 Docker Engine 29+와 API 버전 협상이 깨짐) |
 | 컨트롤러 `@Validated` | 클래스 레벨 `@Validated`를 붙이면 Spring 7 내장 메서드 파라미터 검증(400 응답 경로)이 꺼지고 구식 AOP 경로(`ConstraintViolationException`)로 전환되는데, `GlobalExceptionHandler`가 이 예외를 못 잡아 500으로 샌다. `@Min`/`@Max` 등은 `@Validated` 없이도 내장 경로로 그대로 동작하므로 컨트롤러에 붙이지 말 것 |
+| `RestClient.Builder` 자동 주입 | `spring-boot-starter-web`만으로는 `RestClientAutoConfiguration`이 로드되지 않아 `RestClient.Builder` 빈이 없다는 `NoSuchBeanDefinitionException`이 남 (Task 021 실측). `org.springframework.boot:spring-boot-restclient` 모듈을 별도로 추가해야 함 |
 
 ---
 

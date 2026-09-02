@@ -33,5 +33,8 @@ public abstract class AbstractIntegrationTest {
     @DynamicPropertySource
     static void jwtProperties(DynamicPropertyRegistry registry) {
         registry.add("allfolio.jwt.secret", () -> TEST_JWT_SECRET);
+        // StockProperties.serviceKey는 @NotBlank라 ALLFOLIO_STOCK_SERVICE_KEY 미설정 시
+        // 컨텍스트 로드 자체가 실패한다 — 실키가 없는 테스트 환경에서도 부팅되도록 더미 값을 주입한다.
+        registry.add("allfolio.stock.service-key", () -> "test-service-key");
     }
 }

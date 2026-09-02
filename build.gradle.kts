@@ -41,6 +41,10 @@ dependencies {
     // Structured Logging (Step 7 대비) — BOM 미관리이므로 버전 명시
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")
 
+    // Circuit Breaker (Task 021 대비) — Spring Boot 4용 아티팩트가 최근에야 나와 BOM 미관리, 버전 명시
+    implementation("io.github.resilience4j:resilience4j-spring-boot4:2.4.0")
+    implementation("org.springframework.boot:spring-boot-restclient")
+
     // Test
     // Testcontainers 버전은 Spring Boot 4.1 BOM이 관리하는 2.x를 그대로 사용한다.
     // (구 1.x를 별도 BOM으로 고정하면 Docker Engine 29+와 API 버전 협상이 깨진다 — Step 2에서 실측 확인)
@@ -52,6 +56,9 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers-postgresql")
+
+    // 외부 시세 API Mock (Task 021 대비) — BOM 미관리, 버전 명시. 베타(4.0.0-beta.x)가 아닌 최신 안정판 사용
+    testImplementation("org.wiremock:wiremock-standalone:3.13.2")
 }
 
 tasks.test {

@@ -1,9 +1,12 @@
 package com.allfolio.web;
 
+import com.allfolio.domain.Price;
 import com.allfolio.domain.service.AssetService;
+import com.allfolio.domain.service.PriceService;
 import com.allfolio.web.dto.AssetListResponse;
 import com.allfolio.web.dto.AssetResponse;
 import com.allfolio.web.dto.CreateAssetRequest;
+import com.allfolio.web.dto.PriceResponse;
 import com.allfolio.web.dto.UpdateHoldingRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -37,9 +40,11 @@ import java.util.UUID;
 public class AssetController {
 
     private final AssetService assetService;
+    private final PriceService priceService;
 
-    public AssetController(AssetService assetService) {
+    public AssetController(AssetService assetService, PriceService priceService) {
         this.assetService = assetService;
+        this.priceService = priceService;
     }
 
     @PostMapping
@@ -59,6 +64,12 @@ public class AssetController {
     @GetMapping("/{id}")
     public AssetResponse get(@PathVariable UUID id, Authentication authentication) {
         return assetService.getAsset(userId(authentication), id);
+    }
+
+    @GetMapping("/{id}/price")
+    public PriceResponse getPrice(@PathVariable UUID id, Authentication authentication) {
+        Price price = priceService.getPrice(userId(authentication), id);
+        return new PriceResponse(price.amount().toPlainString(), price.currency(), price.asOf());
     }
 
     @PutMapping("/{id}/holdings")

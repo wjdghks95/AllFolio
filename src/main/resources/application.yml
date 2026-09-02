@@ -12,6 +12,10 @@ spring:
     url: jdbc:postgresql://localhost:5432/allfolio
     username: allfolio
     password: allfolio
+  http:
+    client:
+      connect-timeout: 2s
+      read-timeout: 3s
   jpa:
     hibernate:
       ddl-auto: validate
@@ -27,6 +31,40 @@ allfolio:
     secret: ${ALLFOLIO_JWT_SECRET:}
     access-token-ttl: 15m
     refresh-token-ttl: 14d
+  upbit:
+    base-url: https://api.upbit.com
+  exchange-rate:
+    base-url: https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest
+  stock:
+    base-url: https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService
+    service-key: ${ALLFOLIO_STOCK_SERVICE_KEY:}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      upbit:
+        sliding-window-size: 4
+        minimum-number-of-calls: 4
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        # 존재하지 않는 마켓 코드(정상 200 + 빈 배열)는 외부 서비스 장애가 아니라 클라이언트 입력
+        # 오류이므로 CB 실패 집계에서 제외한다.
+        ignore-exceptions:
+          - com.allfolio.domain.exception.TickerNotFoundException
+      exchange-rate:
+        sliding-window-size: 4
+        minimum-number-of-calls: 4
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+      stock:
+        sliding-window-size: 4
+        minimum-number-of-calls: 4
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        # 요청 티커와 일치하는 종목코드가 없음(정상 200 응답, 매칭 실패)은 외부 서비스 장애가 아니라
+        # 클라이언트 입력 오류이므로 CB 실패 집계에서 제외한다.
+        ignore-exceptions:
+          - com.allfolio.domain.exception.TickerNotFoundException
 
 management:
   endpoints:
