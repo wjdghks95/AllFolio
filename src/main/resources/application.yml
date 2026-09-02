@@ -78,6 +78,7 @@ management:
     distribution:
       percentiles-histogram:
         allfolio.simulation.duration: true
+        allfolio.price.fetch.duration: true
 
 logging:
   level:

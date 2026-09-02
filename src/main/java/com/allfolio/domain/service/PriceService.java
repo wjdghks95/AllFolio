@@ -49,23 +49,25 @@ public class PriceService {
      */
     public Price getPrice(UUID userId, UUID assetId) {
         Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            Asset asset = assetRepository.findByIdAndUser_Id(assetId, userId)
+                    .orElseThrow(() -> new AssetNotFoundException("해당 자산을 찾을 수 없습니다."));
 
-        Asset asset = assetRepository.findByIdAndUser_Id(assetId, userId)
-                .orElseThrow(() -> new AssetNotFoundException("해당 자산을 찾을 수 없습니다."));
+            Price rawPrice = fetchRawPrice(asset);
 
-        Price rawPrice = fetchRawPrice(asset);
-
-        // 스케일은 실제 반환 통화(rawPrice.currency()) 기준이어야 한다 — CASH(USD) 자산의 환율 시세는
-        // 원화 환산값(currency=KRW)으로 오는데, asset.getCurrency()(USD)로 스케일을 계산하면
-        // currency=KRW인데 scale은 USD(4자리)가 되는 자기모순이 생긴다.
-        int scale = PrecisionScale.scaleFor(asset.getAssetType(), rawPrice.currency());
-        Price scaledPrice = new Price(
-                rawPrice.amount().setScale(scale, RoundingMode.HALF_UP),
-                rawPrice.currency(),
-                rawPrice.asOf());
-
-        sample.stop(meterRegistry.timer("allfolio.price.fetch.duration"));
-        return scaledPrice;
+            // 스케일은 실제 반환 통화(rawPrice.currency()) 기준이어야 한다 — CASH(USD) 자산의 환율 시세는
+            // 원화 환산값(currency=KRW)으로 오는데, asset.getCurrency()(USD)로 스케일을 계산하면
+            // currency=KRW인데 scale은 USD(4자리)가 되는 자기모순이 생긴다.
+            int scale = PrecisionScale.scaleFor(asset.getAssetType(), rawPrice.currency());
+            return new Price(
+                    rawPrice.amount().setScale(scale, RoundingMode.HALF_UP),
+                    rawPrice.currency(),
+                    rawPrice.asOf());
+        } finally {
+            // 404/400/503 등 예외 경로에서도 계측이 빠지면 안 된다 — 특히 외부 API 타임아웃(3초)으로
+            // 실패하는 느린 호출이 메트릭에서 통째로 사라지는 것을 방지한다.
+            sample.stop(meterRegistry.timer("allfolio.price.fetch.duration"));
+        }
     }
 
     private Price fetchRawPrice(Asset asset) {

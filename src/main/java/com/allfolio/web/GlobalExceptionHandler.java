@@ -189,7 +189,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .body(ErrorResponse.of("VALIDATION_ERROR", e.getMessage()));
     }
 
-    /** CASH(KRW)처럼 시세 개념이 없는 자산에 대한 조회 요청. STOCK도 벤더 미확정으로 이 경로를 함께 쓴다(Task 021). */
+    /** CASH(KRW) 자산에 대한 조회 요청 — avg_price=1 고정값 자체가 이미 평가금액이라 시세 조회 대상이 아니다. */
     @ExceptionHandler(PriceUnavailableException.class)
     public ResponseEntity<ErrorResponse> handlePriceUnavailable(PriceUnavailableException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -197,9 +197,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .body(ErrorResponse.of("PRICE_NOT_APPLICABLE", e.getMessage()));
     }
 
-    /** 외부 시세 API 최종 실패 또는 Circuit Breaker Open (Task 021). 캐시가 없어 직전 시세로 대체 응답할 수 없다. */
+    /**
+     * 외부 시세 API 최종 실패 또는 Circuit Breaker Open (Task 021). 캐시가 없어 직전 시세로 대체 응답할 수 없다.
+     * 원인 예외(cause)에 커넥션 거부·5xx·타임아웃·파싱 실패 등 실제 장애 원인이 담겨 있으므로 함께 로깅한다.
+     */
     @ExceptionHandler(ExternalPriceApiException.class)
     public ResponseEntity<ErrorResponse> handleExternalPriceApi(ExternalPriceApiException e) {
+        log.warn("외부 시세 API 실패: {}", e.getMessage(), e);
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of("EXTERNAL_API_DOWN", e.getMessage()));

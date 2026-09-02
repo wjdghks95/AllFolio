@@ -5,6 +5,7 @@ import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Price;
 import com.allfolio.domain.User;
 import com.allfolio.domain.exception.AssetNotFoundException;
+import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.PriceUnavailableException;
 import com.allfolio.domain.repository.AssetRepository;
 import com.allfolio.domain.service.PriceService;
@@ -115,6 +116,33 @@ class PriceServiceTest {
 
         assertThatThrownBy(() -> priceService.getPrice(userId, assetId))
                 .isInstanceOf(AssetNotFoundException.class);
+    }
+
+    /**
+     * Timer.Sample이 예외 경로(404)에서도 stop되어야 allfolio.price.fetch.duration이 실패 케이스를
+     * 놓치지 않는다 (code-reviewer 지적, Task 021 후속).
+     */
+    @Test
+    void assetNotFoundStillRecordsFetchDurationMetric() {
+        when(assetRepository.findByIdAndUser_Id(eq(assetId), eq(userId))).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> priceService.getPrice(userId, assetId))
+                .isInstanceOf(AssetNotFoundException.class);
+
+        assertThat(meterRegistry.timer("allfolio.price.fetch.duration").count()).isEqualTo(1);
+    }
+
+    /** 외부 API 실패(503)로 이어지는 경로도 마찬가지로 메트릭에서 누락되면 안 된다. */
+    @Test
+    void externalApiFailureStillRecordsFetchDurationMetric() {
+        givenAsset(AssetType.COIN, "KRW");
+        when(upbitPriceClient.getPrice("BTC"))
+                .thenThrow(new ExternalPriceApiException("업비트 조회 실패"));
+
+        assertThatThrownBy(() -> priceService.getPrice(userId, assetId))
+                .isInstanceOf(ExternalPriceApiException.class);
+
+        assertThat(meterRegistry.timer("allfolio.price.fetch.duration").count()).isEqualTo(1);
     }
 
     private void givenAsset(AssetType assetType, String currency) {

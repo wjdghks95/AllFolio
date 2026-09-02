@@ -4,6 +4,7 @@ import com.allfolio.AbstractIntegrationTest;
 import com.allfolio.domain.Price;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.github.tomakehurst.wiremock.WireMockServer;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +33,9 @@ class ExchangeRateClientTest extends AbstractIntegrationTest {
     @Autowired
     private ExchangeRateClient exchangeRateClient;
 
+    @Autowired
+    private CircuitBreakerRegistry circuitBreakerRegistry;
+
     @BeforeAll
     static void startWireMock() {
         wireMockServer = new WireMockServer(wireMockConfig().dynamicPort());
@@ -49,8 +53,9 @@ class ExchangeRateClientTest extends AbstractIntegrationTest {
     }
 
     @BeforeEach
-    void resetStubs() {
+    void resetStubsAndCircuitBreaker() {
         wireMockServer.resetAll();
+        circuitBreakerRegistry.circuitBreaker("exchange-rate").reset();
     }
 
     @Test
@@ -80,6 +85,23 @@ class ExchangeRateClientTest extends AbstractIntegrationTest {
     void getUsdKrwRateThrowsExternalPriceApiExceptionOnTimeout() {
         wireMockServer.stubFor(get(urlEqualTo("/v1/currencies/usd.json"))
                 .willReturn(aResponse().withStatus(200).withFixedDelay(5000)));
+
+        assertThatThrownBy(() -> exchangeRateClient.getUsdKrwRate())
+                .isInstanceOf(ExternalPriceApiException.class);
+    }
+
+    /**
+     * 정상 200 응답이지만 usd 맵에 krw 키가 없는 경우(응답 스키마 이상) — null을 그대로 반환하면
+     * PriceService.getPrice()의 setScale() 호출에서 NPE로 이어지므로 여기서 명시적으로 막는다
+     * (code-reviewer 지적, Task 021 후속).
+     */
+    @Test
+    void getUsdKrwRateThrowsExternalPriceApiExceptionWhenKrwKeyMissing() {
+        wireMockServer.stubFor(get(urlEqualTo("/v1/currencies/usd.json"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"date\":\"2026-08-31\",\"usd\":{\"aed\":3.6725}}")));
 
         assertThatThrownBy(() -> exchangeRateClient.getUsdKrwRate())
                 .isInstanceOf(ExternalPriceApiException.class);

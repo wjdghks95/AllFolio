@@ -4,6 +4,7 @@ import com.allfolio.AbstractIntegrationTest;
 import com.allfolio.domain.Price;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.github.tomakehurst.wiremock.WireMockServer;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +33,9 @@ class UpbitPriceClientTest extends AbstractIntegrationTest {
     @Autowired
     private UpbitPriceClient upbitPriceClient;
 
+    @Autowired
+    private CircuitBreakerRegistry circuitBreakerRegistry;
+
     @BeforeAll
     static void startWireMock() {
         wireMockServer = new WireMockServer(wireMockConfig().dynamicPort());
@@ -49,8 +53,9 @@ class UpbitPriceClientTest extends AbstractIntegrationTest {
     }
 
     @BeforeEach
-    void resetStubs() {
+    void resetStubsAndCircuitBreaker() {
         wireMockServer.resetAll();
+        circuitBreakerRegistry.circuitBreaker("upbit").reset();
     }
 
     @Test
