@@ -148,6 +148,7 @@ psql -h localhost -U allfolio -d allfolio
 | `src/main/java/com/allfolio/domain/CLAUDE.md` | `domain/` 폴더 파일 | 자산·포트폴리오·시뮬레이션 개념, CASH 평단가, 404 컨벤션, 낙관적 잠금, 시뮬레이터 KPI |
 | `src/main/java/com/allfolio/web/CLAUDE.md` | `web/` 폴더 파일 | 컨트롤러 `@Validated` 금지 |
 | `src/main/java/com/allfolio/infra/price/CLAUDE.md` | `infra/price/` 폴더 파일 | 외부 시세 클라이언트 설계 결정 |
+| `src/main/java/com/allfolio/infra/cache/CLAUDE.md` | `infra/cache/` 폴더 파일 | Redis 캐시 TTL·네거티브 캐싱·Throttle 범위·스테일 폴백(206) |
 | `src/main/resources/db/migration/CLAUDE.md` | 마이그레이션 폴더 파일 | `V*.sql` 작성 원칙 |
 | `frontend/CLAUDE.md` | `frontend/` 폴더 파일 | Vite 프록시 설명 |
 
