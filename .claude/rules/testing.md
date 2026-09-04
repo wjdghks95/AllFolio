@@ -12,3 +12,8 @@ paths:
 ## BigDecimal 비교
 
 `BigDecimal` 비교는 `.compareTo()` 사용 (`.equals()`는 scale 차이로 실패 가능).
+단, `compareTo`/`isEqualByComparingTo`만 쓰면 스케일(자리수) 버그는 못 잡는다 — 금융 필드를 검증할 땐 최소 1건은 정확한 문자열(`isEqualTo("1000000")`)로 스케일까지 단언할 것(Task 023 실측).
+
+## Resilience4j CircuitBreaker 테스트 격리
+
+같은 Spring 컨텍스트를 공유하는 통합 테스트에서 CircuitBreaker(`slidingWindowSize` 등)의 실패 카운트가 테스트 간에 누적된다(Task 023 실측) — 관련 `CircuitBreakerRegistry` 인스턴스를 `@BeforeEach`에서 `reset()`할 것.
