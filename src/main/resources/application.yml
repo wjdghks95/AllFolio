@@ -12,6 +12,10 @@ spring:
     url: jdbc:postgresql://localhost:5432/allfolio
     username: allfolio
     password: allfolio
+  data:
+    redis:
+      host: localhost
+      port: 6379
   http:
     client:
       connect-timeout: 2s
@@ -38,6 +42,14 @@ allfolio:
   stock:
     base-url: https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService
     service-key: ${ALLFOLIO_STOCK_SERVICE_KEY:}
+  price-cache:
+    coin-fresh-ttl: 10s
+    stock-fresh-ttl: 12h
+    cash-usd-fresh-ttl: 12h
+    stale-ceiling: 24h
+  price-throttle:
+    limit: 1
+    window: 1s
 
 resilience4j:
   circuitbreaker:

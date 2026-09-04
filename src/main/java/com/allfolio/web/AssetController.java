@@ -1,6 +1,6 @@
 package com.allfolio.web;
 
-import com.allfolio.domain.Price;
+import com.allfolio.domain.PricedQuote;
 import com.allfolio.domain.service.AssetService;
 import com.allfolio.domain.service.PriceService;
 import com.allfolio.web.dto.AssetListResponse;
@@ -12,6 +12,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -66,10 +67,14 @@ public class AssetController {
         return assetService.getAsset(userId(authentication), id);
     }
 
+    /** stale(캐시 폴백) 응답은 에러가 아닌 성공 응답이므로 206 Partial Content로 구분한다. */
     @GetMapping("/{id}/price")
-    public PriceResponse getPrice(@PathVariable UUID id, Authentication authentication) {
-        Price price = priceService.getPrice(userId(authentication), id);
-        return new PriceResponse(price.amount().toPlainString(), price.currency(), price.asOf());
+    public ResponseEntity<PriceResponse> getPrice(@PathVariable UUID id, Authentication authentication) {
+        PricedQuote quote = priceService.getPrice(userId(authentication), id);
+        PriceResponse body = new PriceResponse(quote.price().amount().toPlainString(), quote.price().currency(),
+                quote.price().asOf(), quote.stale());
+        HttpStatus status = quote.stale() ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK;
+        return ResponseEntity.status(status).body(body);
     }
 
     @PutMapping("/{id}/holdings")

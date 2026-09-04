@@ -5,6 +5,7 @@ import com.allfolio.domain.exception.AvgPriceRequiredException;
 import com.allfolio.domain.exception.EmailAlreadyExistsException;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.InvalidCredentialsException;
+import com.allfolio.domain.exception.PriceRateLimitExceededException;
 import com.allfolio.domain.exception.PriceUnavailableException;
 import com.allfolio.domain.exception.RefreshTokenInvalidException;
 import com.allfolio.web.dto.ErrorResponse;
@@ -198,8 +199,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
-     * 외부 시세 API 최종 실패 또는 Circuit Breaker Open (Task 021). 캐시가 없어 직전 시세로 대체 응답할 수 없다.
-     * 원인 예외(cause)에 커넥션 거부·5xx·타임아웃·파싱 실패 등 실제 장애 원인이 담겨 있으므로 함께 로깅한다.
+     * 외부 시세 API 최종 실패 또는 Circuit Breaker Open (Task 021). 캐시에 stale 폴백 값이 있으면
+     * PriceService가 이 예외를 여기까지 전파하지 않고 206으로 대신 응답한다 — 이 핸들러까지 도달했다는
+     * 것은 폴백할 캐시조차 없었다는 뜻이다(Task 022).
      */
     @ExceptionHandler(ExternalPriceApiException.class)
     public ResponseEntity<ErrorResponse> handleExternalPriceApi(ExternalPriceApiException e) {
@@ -207,6 +209,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of("EXTERNAL_API_DOWN", e.getMessage()));
+    }
+
+    /** 캐시 미스/스테일 상태에서 사용자당 시세 조회 요청 한도를 초과했을 때(Task 022). */
+    @ExceptionHandler(PriceRateLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> handlePriceRateLimitExceeded(PriceRateLimitExceededException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("PRICE_RATE_LIMITED", e.getMessage()));
     }
 
     /**

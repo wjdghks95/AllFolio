@@ -45,6 +45,9 @@ dependencies {
     implementation("io.github.resilience4j:resilience4j-spring-boot4:2.4.0")
     implementation("org.springframework.boot:spring-boot-restclient")
 
+    // Redis 캐시·Throttling (Task 022) — Lettuce가 기본 클라이언트, BOM 관리 대상이라 버전 명시 불필요
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
+
     // Test
     // Testcontainers 버전은 Spring Boot 4.1 BOM이 관리하는 2.x를 그대로 사용한다.
     // (구 1.x를 별도 BOM으로 고정하면 Docker Engine 29+와 API 버전 협상이 깨진다 — Step 2에서 실측 확인)

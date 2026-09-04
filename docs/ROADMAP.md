@@ -353,7 +353,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ **STOCK(국내 주식) 시세는 이번 Task 범위에서 완전히 제외됐다** — **단, 아래 「[후속] STOCK 시세 연동 완료」 항목에서 번복됨.** 이 문단 시점에는 유효했던 결정이나, 같은 Task 안에서 사용자가 벤더를 확정하며 이어서 STOCK 클라이언트를 실제로 구현했다. 착수 전 계획은 업비트·KIS·환율 3개였으나, 착수 중 사용자가 KIS 오픈API 개인 발급 키의 약관("시세정보는 계좌 보유 개인이 본인 투자 목적에 한해 이용, 제3자 제공 불가")을 재확인해 다중 사용자 서비스에는 애초에 쓸 수 없었음을 발견했다. 대안 조사 결과 KRX Open API(상업적 이용 금지)·코스콤 오픈API(법인만 이용 가능, 개인사업자도 불가)·Twelve Data 무료 플랜(제3자 표시 금지, 유료도 표시 범위 불명확)이 전부 부적합했고, 공공데이터포털(금융위원회 증권상품시세정보, CC-Zero 라이선스, 전일 종가 기준)은 법적으로는 문제없으나 실시간이 아니라는 이유로 사용자가 보류를 결정했다. 유료 벤더(FnGuide·DeepSearch·알파스퀘어 등)는 실제 계약 조건 확인이 필요해 사용자가 직접 연락 중이며, 벤더가 정해지면 STOCK 클라이언트 구현을 후속 Task로 착수한다 — `PriceService`가 클라이언트별로 독립된 구조라 STOCK 클라이언트 추가 시 다른 코드는 건드릴 필요가 없다. STOCK·CASH(KRW) 자산에 시세를 요청하면 둘 다 `PriceUnavailableException`(400 `PRICE_NOT_APPLICABLE`, 서로 다른 메시지로 로그 구분 가능)으로 응답한다.
   - ✅ 업비트·환율 모두 이번 Task에서는 WireMock으로만 검증했고 실서버 연결은 후속 과제로 남겼다 — 둘 다 API 키가 필요 없어 기술적으로는 즉시 실연동이 가능하지만, KIS(실키 미발급)와 세 클라이언트를 동일한 방식으로 다루기 위해 일부러 함께 미뤘다.
   - ✅ Resilience4j `resilience4j-spring-boot4:2.4.0`의 Spring Boot 4.1 호환성을 착수 즉시 실측(`./gradlew dependencies`로 하위 모듈 트리 확인) — 구 PRD 시점엔 "미확정"이었던 리스크가 해소됐음을 확인했고, Retry 전용 축소안은 불필요했다. 다만 CB 파라미터 기본값(`minimumNumberOfCalls=100`)으로는 회로가 열리는 데 100번 호출이 필요해 테스트가 비현실적이었다 — `application.yml`에 `resilience4j.circuitbreaker.instances.{upbit,exchange-rate}`를 `slidingWindowSize=4`로 명시 설정해, 테스트를 가능하게 하는 동시에 실제 운영 튜닝까지 겸해 해소했다.
-  - ✅ Fallback은 Redis 캐시(Task 022)가 아직 없어 "장애 시 직전 시세 재사용"이 아니라 "장애를 503 `EXTERNAL_API_DOWN`으로 명확히 응답"하는 수준으로 한정했다. "Stale 시세" 표시는 Task 022 이후 범위다.
+  - ✅ Fallback은 이 Task 시점엔 Redis 캐시가 아직 없어 "장애 시 직전 시세 재사용"이 아니라 "장애를 503 `EXTERNAL_API_DOWN`으로 명확히 응답"하는 수준으로 한정했다. **(현행화, Task 022에서 해소)** Redis 캐시·"Stale 시세"(`isStale`/206) 표시가 Task 022에서 실제로 구현됐다 — 캐시에 값이 없을 때만 이 문단의 503 경로가 남는다.
   - ✅ 환율 API(`fawazahmed0/exchange-api`)의 실제 엔드포인트를 착수 중 재확인해 계획 단계의 잘못된 가정(단일 통화쌍 응답 엔드포인트가 존재한다는 가정)을 정정했다 — 실제로는 `usd.json` 하나뿐이고 USD 기준 전체 환율표(수백 개 통화 키)를 반환하므로, `Map<String, BigDecimal>`로 받아 `krw` 키만 추출하도록 구현했다.
   - ✅ 구현 중 발견한 Spring Boot 4 함정 1건을 `CLAUDE.md` 「Spring Boot 4 특이사항」 표에 추가: `spring-boot-starter-web`만으로는 `RestClientAutoConfiguration`이 로드되지 않아 `RestClient.Builder` 빈이 없다는 `NoSuchBeanDefinitionException`이 남는다 — `spring-boot-restclient` 모듈 별도 필요.
   - ✅ 테스트 개수: 백엔드 124개(Task 019 기준) → **146개**(+22: `PriceTest` 3·`PricePropertiesTest` 2·`UpbitPriceClientTest` 3·`ExchangeRateClientTest` 3·`PriceServiceTest` 5·`AssetPriceIntegrationTest` 5·`PriceClientCircuitBreakerTest` 1). 매 서브태스크마다 `--rerun-tasks`로 캐시가 아닌 실제 재실행 결과를 직접 확인했고, 전체 스위트도 최종적으로 강제 재실행해 회귀 없음을 확인했다.
@@ -373,9 +373,25 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - Resilience4j CB 파라미터(`failureRateThreshold` 등)는 실측 트래픽 없이 보수적 기본값으로 설정됨 — 운영 관측 후 조정 필요
     - `allfolio.price.fetch.duration` 메트릭에 대한 Prometheus 히스토그램 설정(`management.metrics.distribution.percentiles-histogram`)이 아직 없음(시뮬레이터의 `allfolio.simulation.duration`만 설정돼 있음) — 필요해지면 추가
 
-- **Task 022: Redis 캐시 및 요청 Throttling**
-  - Redis 8.8. Stale 응답은 `isStale: true`/`PRICE_STALE` 206으로 명시
-  - Lettuce `INCREX` 지원 여부 착수 전 실측 필요
+- **Task 022: Redis 캐시 및 요청 Throttling** ✅ — 완료 (2026-09-02)
+  - ✅ `infra/cache/PriceCacheStore`(Redis read-through 캐시)와 `infra/cache/PriceThrottle`(Lua 스크립트 기반 원자적 카운터)를 신설했다. `PriceService`가 둘을 오케스트레이션한다: 소유권 조회(캐시 키가 자산의 ticker/currency에 의존해 선행 필요 — 계획 단계의 "캐시 먼저" 가정을 실제 구현 시 정정) → 캐시 조회(fresh면 Throttle 없이 즉시 반환) → Throttle 확인 → 외부 클라이언트 호출 → 성공 시 캐시 저장/실패 시 stale 값 폴백, 폴백할 캐시조차 없으면 기존과 동일하게 503. 캐시 키는 사용자 정보 없는 시장 데이터 식별자(`price:{assetType}:{ticker}`, CASH는 `price:CASH:{currency}`)라 여러 사용자가 같은 종목을 조회해도 캐시를 공유한다.
+  - ✅ 자산 유형별 freshTtl·stale 폴백 한계를 사용자 확정 정책대로 설정: COIN(업비트 실시간) 10초, STOCK·CASH-USD(공공데이터포털 EOD·환율, 일 단위 갱신) 12시간, staleCeiling(Redis 최종 만료) 24시간, 사용자당 Throttle 한도 초당 1건 — `allfolio.price-cache`/`allfolio.price-throttle`로 application.yml에 노출해 운영 중 조정 가능. **캐시 히트(외부 API 미호출)는 Throttle 소모 대상에서 제외** — Throttling의 목적(외부 API 남용 방지)과 정확히 일치시키기 위한 사용자 확정 정책.
+  - ✅ ROADMAP이 계획 단계에서 언급한 Lettuce `INCREX` 지원 여부 실측 결과: Redis에는 INCR+EXPIRE를 원자적으로 묶은 그런 명령이 애초에 존재하지 않았다(redis.io 공식 rate-limiter 튜토리얼 등으로 확인) — Lua 스크립트로 두 명령을 하나의 원자적 실행 단위로 묶는 표준 방식으로 확정했다. count==1(윈도우의 첫 호출)일 때만 만료시간을 걸어 고정 윈도우로 동작시킨다. 초 단위 `EXPIRE`가 아닌 밀리초 단위 `PEXPIRE`를 쓰는데, window가 1초 미만이면 `EXPIRE`의 초 단위 인자가 0으로 잘려 키가 즉시 삭제되는 버그를 테스트로 실측했기 때문이다.
+  - ✅ 구현 중 Spring Boot 4 함정 1건을 추가 발견해 `.claude/rules/spring-boot-4.md`에 기록: Spring Boot 4.1이 기본 JSON 라이브러리를 Jackson 3(`tools.jackson.*`)로 전환해 `com.fasterxml.jackson.databind.ObjectMapper`(Jackson 2) 빈이 더 이상 자동 등록되지 않는다 — Spring Data Redis의 `Jackson2JsonRedisSerializer`(deprecated)는 이 빈을 찾지 못해 `NoSuchBeanDefinitionException`이 남았고, Jackson 3 기반 `JacksonJsonRedisSerializer`로 교체해 해결했다.
+  - ✅ Redis 8.8 Testcontainers 이미지 가용 여부를 실측 확인(`redis:8.8`/`redis:8.8-alpine` 모두 정상 pull·기동) — ROADMAP 「Phase 3 착수 전」 확인 항목이 해소됐다. `docker-compose.yml`의 주석 처리된 redis 블록도 해제했다.
+  - ✅ `GET /v1/assets/{id}/price` 응답에 `isStale` 필드를 추가하고 stale 응답은 206 Partial Content로 구분했다(에러가 아닌 성공 응답이라 `{code,message,timestamp}` 포맷을 쓰지 않음 — ROADMAP의 'PRICE_STALE' 표현은 이 필드/상태코드 조합을 가리키는 것으로 해석). Throttle 한도 초과는 신규 `PriceRateLimitExceededException` → 429 `PRICE_RATE_LIMITED`로 매핑했다.
+  - ✅ `AssetPriceIntegrationTest`에 캐시 히트(WireMock 호출 횟수로 외부 API 미호출 검증)·stale 폴백(206)·Throttle 초과(429) 3가지 엔드투엔드 시나리오를 추가했다. 검증 기준에 따라 캐시·Throttle 로직을 임시로 무력화해 이 3개 시나리오만 정확히 실패함을 확인(교차 검증)한 뒤 `git diff`로 흔적 없이 원복했음을 확인했다.
+  - ✅ 구현 중 발견한 테스트 인프라 회귀와 해결: stale 시나리오를 빠르게 검증하려고 설정이 다른(짧은 freshTtl) 별도 Spring 컨텍스트를 만들었더니, 여러 컨텍스트가 공유 PostgreSQL Testcontainer의 동시 연결 수 제한을 넘겨 무관한 `UpbitPriceClientTest`가 `FATAL: sorry, too many clients already`로 깨지는 것을 실측했다 — 새 컨텍스트를 만들지 않고 기존 `AssetPriceIntegrationTest` 컨텍스트를 재사용(기본 freshTtl 10초를 실제로 대기)하는 방식으로 되돌려 해결했다.
+  - ✅ 테스트 개수: 170개(신규 파일 `PriceCacheStoreTest` 3·`PriceThrottleTest` 2 + 기존 파일 확장 `PricePropertiesTest` +2·`PriceServiceTest` +3·`AssetPriceIntegrationTest` +3, 총 +13). 참고: Task 021 완료 기록의 151개는 이 Task 착수 시점 실측 총합(157개)과 차이가 있었다 — Task 021 STOCK 후속 작업 중 늘어난 일부 테스트(`PriceClientCircuitBreakerTest`·`ExchangeRateClientTest`·`PricePropertiesTest`)가 그 기록에 온전히 반영되지 않았던 것으로 보인다. 매 서브태스크마다 `--rerun-tasks`로 강제 재실행했고, 전체 스위트도 여러 차례 재실행해 회귀 없음을 확인했다.
+  - ✅ `code-reviewer` 에이전트로 완료 후 독립 검증(2026-09-04) — Major 2건 발견 즉시 수정:
+    - CASH(KRW)는 캐시에 절대 저장되지 않아 매번 캐시 미스가 나는데, Throttle 소모가 그보다 먼저 일어나 반복 요청 시 400 `PRICE_NOT_APPLICABLE` 대신 429 `PRICE_RATE_LIMITED`가 나가고, 사용자 단위 Throttle이라 다른 정상 자산 조회까지 막는 문제가 있었다 — `PriceService.getPrice()`에서 CASH(KRW) 판정을 캐시 조회·Throttle보다 앞으로 옮겨 해결
+    - Redis 장애 시 `PriceCacheStore`/`PriceThrottle`의 예외가 그대로 전파돼 이 엔드포인트가 이 표(200/206/400/404/429/503)에 없는 500을 반환하던 문제 — 캐시 조회 실패는 캐시 미스로, 캐시 저장 실패는 무시, Throttle 확인 실패는 fail-open(허용)으로 처리하도록 `DataAccessException`을 잡아 방어
+    - Minor 8건도 함께 반영: 테스트에 남아있던 "새 컨텍스트를 안 만든다"는 서술을 실제로 맞게 고침(`PriceThrottleTest`가 짧은 window를 얻으려 `@DynamicPropertySource`로 만들던 별도 컨텍스트를 제거하고 기본값 1초를 그대로 사용), `PriceCacheStoreTest`/`PriceServiceTest`의 BigDecimal 비교를 `.compareTo()` 기준으로 강화, `PriceThrottle`의 `RedisScript`를 `static final`로 캐싱, 완전히 중복이던 `CacheLookup`(항상 `!PricedQuote.stale()`과 동일한 `fresh` 필드만 얹고 있었음)을 제거하고 `PriceCacheStore.find()`가 `Optional<PricedQuote>`를 바로 반환하도록 단순화, `CLAUDE.md`/`PRD.md`의 "다음은 Task 022" 문구를 Task 023 기준으로 갱신
+  - ⚠️ 남은 갭:
+    - freshTtl·staleCeiling·Throttle 한도는 실측 트래픽 없이 합리적 추정치로 설정됨 — 운영 관측 후 조정 필요
+    - 캐시 워밍업(콜드 스타트) 전략 없음 — 배포 직후에는 모든 요청이 캐시 미스로 시작
+    - "설정이 다른 Spring 테스트 컨텍스트가 늘어날수록 공유 PostgreSQL 연결이 누적되는" 구조적 취약점 자체는 여전히 남아있다(`PriceThrottleTest`가 만들던 회피 가능한 컨텍스트 1개는 제거했지만, `AssetPriceIntegrationTest` 등 WireMock 포트가 서로 달라 불가피하게 갈라지는 컨텍스트들은 그대로다) — 테스트용 Hikari 풀 크기 축소 등 근본적인 인프라 개선은 별도 검토 필요
+    - 사용자당 초당 1건 Throttle 한도가 Task 023(포트폴리오 평가 시 보유 자산 수만큼 시세를 한 번에 조회)과 충돌할 가능성 — Task 023 착수 전 정책 재검토 필요
 
 - **Task 023: 포트폴리오 평가금액·비중·손익 (F005b)**
   - Task 013의 `null` 필드 채움 + Task 009 화면 반영
@@ -426,7 +442,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 | `DELETE` | `/v1/assets/{id}` | 204 / 404 | `ON DELETE CASCADE`로 holdings·transactions 함께 삭제 |
 | `GET` | `/v1/portfolio` | 200 | Task 013 범위(F005a)는 취득원가만, `evaluationKrw`·`unrealizedPnl`·`weight`는 `null` |
 | `POST` | `/v1/simulate/avg-price` | 200 | DB 저장 없음 |
-| `GET` | `/v1/assets/{id}/price` | 200 / 400 / 404 / 503 | 외부 시세 단건 조회(STOCK/COIN/CASH-USD). 타 유저 접근 시 404, STOCK·CASH(KRW) 자산에 요청 시 400 `PRICE_NOT_APPLICABLE`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN` (Task 021) |
+| `GET` | `/v1/assets/{id}/price` | 200 / 206 / 400 / 404 / 429 / 503 | 외부 시세 단건 조회(STOCK/COIN/CASH-USD). 타 유저 접근 시 404, STOCK·CASH(KRW) 자산에 요청 시 400 `PRICE_NOT_APPLICABLE`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN`(Task 021). Redis 캐시 stale 폴백 시 206 + 응답 본문 `isStale:true`, 사용자당 초당 1건 Throttle 초과 시 429 `PRICE_RATE_LIMITED`(Task 022) |
 
 **Bean Validation 규칙**
 - `ticker`: 1~20자, 공백 불가
@@ -552,6 +568,8 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 
 **구현된 코드 (Task 021)**: `PRICE_NOT_APPLICABLE`(400, STOCK·CASH(KRW) 자산에 시세를 요청 — 서로 다른 메시지로 로그 구분 가능하나 코드는 동일), `EXTERNAL_API_DOWN`(503, 외부 시세 API 장애 또는 Circuit Breaker Open. 응답 파싱/매칭 실패(예: 존재하지 않는 티커)는 CB 실패 집계에서 제외되지만 클라이언트 응답 코드는 동일하게 503)
 
+**구현된 코드 (Task 022)**: `PRICE_RATE_LIMITED`(429, 캐시 미스/스테일 상태에서 사용자당 초당 1건 Throttle 한도 초과 — 캐시 히트는 이 한도를 소모하지 않음). 캐시 stale 폴백은 에러가 아닌 성공 응답이라 이 표의 `{code,message,timestamp}` 포맷 대신 206 + 응답 본문 `isStale:true`로 표현한다
+
 ---
 
 ## 금융 정밀도 규칙
@@ -607,8 +625,8 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 ## Phase 전환 시 선행 확인 사항
 
 **Phase 3 착수 전 (Task 021~022 관련)**
-- Lettuce 클라이언트의 `INCREX` 명령 지원 버전 확인 (미지원 시 Lua Script Fallback 검토)
-- Redis 8.8 Testcontainers 이미지 가용 여부 확인
+- ✅ **(Task 022에서 해소)** Lettuce의 "`INCREX`" 지원 여부 확인 — 실측 결과 Redis에는 INCR+EXPIRE를 원자적으로 묶은 그런 명령 자체가 존재하지 않았다. Lua Script로 두 명령을 원자적으로 묶는 표준 방식으로 확정
+- ✅ **(Task 022에서 해소)** Redis 8.8 Testcontainers 이미지 가용 여부 확인 — `redis:8.8`/`redis:8.8-alpine` 모두 정상 pull·기동 확인
 - F005b·F007(실시간 차트)·외부 API 연동의 상세 기술 명세는 본 저장소에 문서로 남아있지 않다. 필요 시 `git show cf24471:docs/PRD.md`로 구 PRD v1.2.0(업비트/KIS WebSocket 연동, SSE 이벤트 스키마, 환율 API, `price_snapshots` 파티셔닝 포함)을 열람해 참고할 것
 
 **Task 004 착수 시**
