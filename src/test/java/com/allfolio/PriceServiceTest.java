@@ -37,6 +37,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -68,7 +69,8 @@ class PriceServiceTest {
     private PriceThrottle priceThrottle;
 
     private final PriceCacheProperties priceCacheProperties = new PriceCacheProperties(
-            Duration.ofSeconds(10), Duration.ofHours(12), Duration.ofHours(12), Duration.ofHours(24));
+            Duration.ofSeconds(10), Duration.ofHours(12), Duration.ofHours(12), Duration.ofHours(24),
+            Duration.ofSeconds(30));
 
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
@@ -230,5 +232,87 @@ class PriceServiceTest {
         Asset asset = Asset.of(user, "BTC", "비트코인", assetType, currency);
 
         when(assetRepository.findByIdAndUser_Id(eq(assetId), eq(userId))).thenReturn(Optional.of(asset));
+    }
+
+    /**
+     * quoteForPortfolio()는 GET /v1/portfolio(Task 023) 전용 경로 — 소유권 검증은 호출자 책임이라
+     * assetRepository를 거치지 않고, 이미 확보한 Asset 엔티티를 직접 받는다.
+     */
+    private Asset newAsset(AssetType assetType, String currency) {
+        User user = User.of("trader@example.com", "hash");
+        return Asset.of(user, "BTC", "비트코인", assetType, currency);
+    }
+
+    @Test
+    void quoteForPortfolioReturnsEmptyForCashKrwWithoutCallingAnyExternalClient() {
+        Asset cashKrw = newAsset(AssetType.CASH, "KRW");
+
+        Optional<PricedQuote> quote = priceService.quoteForPortfolio(cashKrw);
+
+        assertThat(quote).isEmpty();
+        verifyNoInteractions(upbitPriceClient, stockPriceClient, exchangeRateClient, priceCacheStore, priceThrottle);
+    }
+
+    @Test
+    void quoteForPortfolioReturnsEmptyWhenExternalApiFailsInsteadOfThrowing() {
+        Asset coin = newAsset(AssetType.COIN, "KRW");
+        when(upbitPriceClient.getPrice("BTC")).thenThrow(new ExternalPriceApiException("업비트 조회 실패"));
+
+        Optional<PricedQuote> quote = priceService.quoteForPortfolio(coin);
+
+        assertThat(quote).isEmpty();
+    }
+
+    @Test
+    void quoteForPortfolioNeverConsumesThrottleAcrossRepeatedCalls() {
+        Asset coin = newAsset(AssetType.COIN, "KRW");
+        when(upbitPriceClient.getPrice("BTC"))
+                .thenReturn(new Price(new BigDecimal("123456789.1"), "KRW", Instant.now()));
+
+        priceService.quoteForPortfolio(coin);
+        priceService.quoteForPortfolio(coin);
+        priceService.quoteForPortfolio(coin);
+
+        verify(priceThrottle, never()).tryAcquire(any());
+    }
+
+    /**
+     * 실패한 조회는 부정 캐싱된다(Task 023 Major 2) — 같은 자산을 반복 조회해도 첫 호출만 외부
+     * 클라이언트를 부르고, 그 이후는(부정 캐시 TTL 이내) 외부 호출 없이 즉시 empty를 반환해야 한다.
+     */
+    @Test
+    void quoteForPortfolioMarksFailureAndSkipsExternalCallOnSubsequentCalls() {
+        Asset coin = newAsset(AssetType.COIN, "KRW");
+        when(upbitPriceClient.getPrice("BTC")).thenThrow(new ExternalPriceApiException("업비트 조회 실패"));
+        // 실제 Redis 없이 마커 저장/조회를 흉내낸다 — markFailed() 호출 이후부터 hasRecentFailure()가 true.
+        when(priceCacheStore.hasRecentFailure("price:COIN:BTC")).thenReturn(false, true, true);
+
+        Optional<PricedQuote> first = priceService.quoteForPortfolio(coin);
+        Optional<PricedQuote> second = priceService.quoteForPortfolio(coin);
+        Optional<PricedQuote> third = priceService.quoteForPortfolio(coin);
+
+        assertThat(first).isEmpty();
+        assertThat(second).isEmpty();
+        assertThat(third).isEmpty();
+        verify(upbitPriceClient, times(1)).getPrice("BTC");
+        verify(priceCacheStore).markFailed("price:COIN:BTC");
+    }
+
+    /** 부정 캐시 TTL이 지나면(hasRecentFailure가 다시 false로 바뀌면) 재시도한다. */
+    @Test
+    void quoteForPortfolioRetriesExternalCallAfterNegativeCacheExpires() {
+        Asset coin = newAsset(AssetType.COIN, "KRW");
+        when(upbitPriceClient.getPrice("BTC"))
+                .thenThrow(new ExternalPriceApiException("업비트 조회 실패"))
+                .thenReturn(new Price(new BigDecimal("123456789.1"), "KRW", Instant.now()));
+        // 첫 호출: 실패 이력 없음 → 외부 호출 시도. 두 번째 호출: TTL 만료로 다시 실패 이력 없음 → 재시도.
+        when(priceCacheStore.hasRecentFailure("price:COIN:BTC")).thenReturn(false, false);
+
+        Optional<PricedQuote> first = priceService.quoteForPortfolio(coin);
+        Optional<PricedQuote> second = priceService.quoteForPortfolio(coin);
+
+        assertThat(first).isEmpty();
+        assertThat(second).isPresent();
+        verify(upbitPriceClient, times(2)).getPrice("BTC");
     }
 }

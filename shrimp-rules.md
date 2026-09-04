@@ -16,8 +16,8 @@
 
 ## Project Phase Status
 
-- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정), Task 007(공통 컴포넌트·디자인 시스템), Task 008(인증 화면), Task 009(포트폴리오 홈 화면), Task 010(자산 등록 화면), Task 011(자산 상세 화면), Task 012(자산 CRUD API), Task 013(포트폴리오 홈 API), Task 014(Observability 최소 셋업), Task 015(물타기 시뮬레이터), Task 016(금융 정밀도·도메인 통합 테스트), Task 017(MVP 로컬 실행 문서화), Task 018(프론트-백엔드 실데이터 연동), Task 019(인증 강화 — Refresh Token 및 로그아웃)
-- **우선순위**: Task 020(E2E 통합 테스트, Playwright MCP) — Phase 3 착수 단계
+- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정), Task 007(공통 컴포넌트·디자인 시스템), Task 008(인증 화면), Task 009(포트폴리오 홈 화면), Task 010(자산 등록 화면), Task 011(자산 상세 화면), Task 012(자산 CRUD API), Task 013(포트폴리오 홈 API), Task 014(Observability 최소 셋업), Task 015(물타기 시뮬레이터), Task 016(금융 정밀도·도메인 통합 테스트), Task 017(MVP 로컬 실행 문서화), Task 018(프론트-백엔드 실데이터 연동), Task 019(인증 강화 — Refresh Token 및 로그아웃), Task 020(E2E 통합 테스트, Playwright MCP), Task 021(외부 시세 API 연동 — 업비트·공공데이터포털 주식·환율), Task 022(Redis 캐시 및 요청 Throttling), Task 023(포트폴리오 평가금액·비중·손익)
+- **우선순위**: Task 024(거래 이력 Transactions API) — Phase 3 마무리 단계
 - 상세 Task 명세 → `docs/ROADMAP.md`
 
 ---
@@ -143,7 +143,7 @@ domain.service → infra (허용: JwtIssuer 등)
 
 | Method | Path | 비고 |
 |---|---|---|
-| `GET` | `/v1/portfolio` | Phase 2에서 `evaluationKrw`·`unrealizedPnl`·`weight`는 `null`(Task 023에서 채움) |
+| `GET` | `/v1/portfolio` | Task 023부터 `evaluationKrw`·`unrealizedPnl`·`weight`·`totalEvaluationKrw`·`totalUnrealizedPnl`을 실제 시세로 채움. 단건 조회용 Throttle 미적용(`PriceService.quoteForPortfolio()` 경로), 일부 자산의 시세 조회가 실패해도 항상 200이고 그 항목의 3개 필드만 `null` |
 | `POST` | `/v1/simulate/avg-price` | DB 저장 없음(Holding 단건 조회 후 In-Memory 계산만), P99 ≤ 5ms |
 
 ### 구현된 엔드포인트 (Task 019)

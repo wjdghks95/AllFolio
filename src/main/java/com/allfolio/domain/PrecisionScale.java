@@ -9,6 +9,9 @@ public final class PrecisionScale {
     /** quantity는 자산유형·통화 무관 항상 8자리(GET /v1/portfolio·시뮬레이터 expectedQuantity 공통 규칙). */
     public static final int QUANTITY_SCALE = 8;
 
+    /** 비중(%) 스케일(docs/ROADMAP.md Task 023). HALF_UP 반올림. */
+    public static final int WEIGHT_SCALE = 2;
+
     private PrecisionScale() {
     }
 

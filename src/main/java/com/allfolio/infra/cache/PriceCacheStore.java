@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -22,12 +23,16 @@ public class PriceCacheStore {
 
     private static final Logger log = LoggerFactory.getLogger(PriceCacheStore.class);
 
+    private static final String FAILED_KEY_PREFIX = "price:failed:";
+
     private final RedisTemplate<String, PriceCacheEntry> redisTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
     private final PriceCacheProperties properties;
 
     public PriceCacheStore(RedisTemplate<String, PriceCacheEntry> priceCacheRedisTemplate,
-            PriceCacheProperties properties) {
+            StringRedisTemplate stringRedisTemplate, PriceCacheProperties properties) {
         this.redisTemplate = priceCacheRedisTemplate;
+        this.stringRedisTemplate = stringRedisTemplate;
         this.properties = properties;
     }
 
@@ -62,6 +67,30 @@ public class PriceCacheStore {
             redisTemplate.opsForValue().set(key, entry, properties.staleCeiling());
         } catch (DataAccessException e) {
             log.warn("Redis 캐시 저장 실패 — 무시하고 계속 진행 key={}", key, e);
+        }
+    }
+
+    /**
+     * 시세 조회 실패(존재하지 않는 티커 등)를 짧은 TTL로 부정 캐싱한다(Task 023 Major 2). 실제 시세 데이터가
+     * 아니라 존재 여부만 필요하므로 PriceCacheEntry 직렬화 대신 StringRedisTemplate로 별도 키 prefix에
+     * 아무 문자열이나 저장한다. 저장 실패는 조용히 무시한다 — 부정 캐싱은 최적화일 뿐이라 Redis 장애가
+     * 시세 조회 자체를 막으면 안 된다.
+     */
+    public void markFailed(String key) {
+        try {
+            stringRedisTemplate.opsForValue().set(FAILED_KEY_PREFIX + key, "1", properties.negativeTtl());
+        } catch (DataAccessException e) {
+            log.warn("Redis 실패 마커 저장 실패 — 무시하고 계속 진행 key={}", key, e);
+        }
+    }
+
+    /** 마커 조회 실패는 fail-open으로 "실패 이력 없음"(false)으로 간주한다 — save()/find()와 동일한 원칙. */
+    public boolean hasRecentFailure(String key) {
+        try {
+            return Boolean.TRUE.equals(stringRedisTemplate.hasKey(FAILED_KEY_PREFIX + key));
+        } catch (DataAccessException e) {
+            log.warn("Redis 실패 마커 조회 실패 — 실패 이력 없음으로 처리 key={}", key, e);
+            return false;
         }
     }
 }

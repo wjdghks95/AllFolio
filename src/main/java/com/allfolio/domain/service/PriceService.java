@@ -18,6 +18,8 @@ import com.allfolio.infra.price.StockPriceClient;
 import com.allfolio.infra.price.UpbitPriceClient;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.RoundingMode;
@@ -33,6 +35,8 @@ import java.util.UUID;
  */
 @Service
 public class PriceService {
+
+    private static final Logger log = LoggerFactory.getLogger(PriceService.class);
 
     private final AssetRepository assetRepository;
     private final UpbitPriceClient upbitPriceClient;
@@ -92,25 +96,71 @@ public class PriceService {
                 return cached.get();
             }
 
-            if (!priceThrottle.tryAcquire(userId)) {
-                throw new PriceRateLimitExceededException("시세 조회 요청이 너무 잦습니다. 잠시 후 다시 시도하세요.");
-            }
-
-            try {
-                Price rawPrice = fetchRawPrice(asset);
-                Price scaledPrice = scale(rawPrice, asset);
-                priceCacheStore.save(cacheKey, scaledPrice);
-                return new PricedQuote(scaledPrice, false);
-            } catch (ExternalPriceApiException e) {
-                if (cached.isPresent()) {
-                    return new PricedQuote(cached.get().price(), true);
-                }
-                throw e;
-            }
+            return resolve(userId, asset, cacheKey, cached, true);
         } finally {
             // 404/400/429/503 등 예외 경로에서도 계측이 빠지면 안 된다 — 특히 외부 API 타임아웃(3초)으로
             // 실패하는 느린 호출이 메트릭에서 통째로 사라지는 것을 방지한다.
             sample.stop(meterRegistry.timer("allfolio.price.fetch.duration", "source", source));
+        }
+    }
+
+    /**
+     * `GET /v1/portfolio`(Task 023) 전용 조회. 소유권 검증은 호출자가 이미 본인 소유 Asset을 들고 있다고
+     * 가정해 생략하고, Throttle(사용자당 초당 1건)도 적용하지 않는다 — 사용자가 보유한 자산 수만큼 한 번에
+     * 조회해야 하는 포트폴리오 화면 특성상 단건 조회용 Throttle을 그대로 적용하면 자산 2개 이상부터
+     * 즉시 걸린다(사용자 확정 정책). CASH(KRW)와 어떤 예외 상황이든(외부 API 장애 포함) 호출자에게
+     * 예외를 전파하지 않고 Optional.empty()로 흡수한다 — 자산 하나의 시세 실패가 나머지 자산의 정상
+     * 응답을 막으면 안 된다(사용자 확정 정책). 계측(Timer.Sample)은 붙이지 않는다(후속 과제).
+     *
+     * <p>Throttle이 없는 대신, 실패한 조회는 짧은 TTL로 부정 캐싱한다(Task 023 Major 2) — 존재하지
+     * 않는 티커로 등록된 자산이 있으면 GET /v1/portfolio를 반복 호출할 때마다 외부 API가 상한 없이
+     * 불리는 문제를 막는다. 단건 조회 API({@link #getPrice})는 이미 Throttle이 있어 대상이 아니다.
+     */
+    public Optional<PricedQuote> quoteForPortfolio(Asset asset) {
+        if (asset.getAssetType() == AssetType.CASH && !"USD".equals(asset.getCurrency())) {
+            return Optional.empty();
+        }
+
+        String cacheKey = cacheKeyFor(asset);
+        if (priceCacheStore.hasRecentFailure(cacheKey)) {
+            return Optional.empty();
+        }
+
+        try {
+            Duration freshTtl = freshTtlFor(asset.getAssetType());
+            Optional<PricedQuote> cached = priceCacheStore.find(cacheKey, freshTtl);
+            if (cached.isPresent() && !cached.get().stale()) {
+                return cached;
+            }
+
+            return Optional.of(resolve(null, asset, cacheKey, cached, false));
+        } catch (RuntimeException e) {
+            log.warn("포트폴리오 시세 조회 실패: assetId={}, ticker={}", asset.getId(), asset.getTicker(), e);
+            priceCacheStore.markFailed(cacheKey);
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 캐시 미스/스테일 상태에서 실제 외부 API를 호출해 값을 확보하는 공통 경로. enforceThrottle=true일
+     * 때만 Throttle을 소모한다(단건 조회 API 전용 제약 — quoteForPortfolio()는 이 검사를 건너뛴다).
+     */
+    private PricedQuote resolve(UUID userId, Asset asset, String cacheKey, Optional<PricedQuote> cached,
+            boolean enforceThrottle) {
+        if (enforceThrottle && !priceThrottle.tryAcquire(userId)) {
+            throw new PriceRateLimitExceededException("시세 조회 요청이 너무 잦습니다. 잠시 후 다시 시도하세요.");
+        }
+
+        try {
+            Price rawPrice = fetchRawPrice(asset);
+            Price scaledPrice = scale(rawPrice, asset);
+            priceCacheStore.save(cacheKey, scaledPrice);
+            return new PricedQuote(scaledPrice, false);
+        } catch (ExternalPriceApiException e) {
+            if (cached.isPresent()) {
+                return new PricedQuote(cached.get().price(), true);
+            }
+            throw e;
         }
     }
 

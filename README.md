@@ -159,7 +159,7 @@ curl -s http://localhost:8080/v1/portfolio \
   -H "Authorization: Bearer $TOKEN" | jq
 ```
 
-응답 예시(`PortfolioResponse`) — `quantity`는 항상 8자리, `avgPrice`/`cost`/`totalCostByCurrency`는 시뮬레이션 응답과 같은 통화별 소수 자리수 규칙(KRW는 0자리)을 따릅니다.
+응답 예시(`PortfolioResponse`) — `quantity`는 항상 8자리, `avgPrice`/`cost`/`totalCostByCurrency`는 시뮬레이션 응답과 같은 통화별 소수 자리수 규칙(KRW는 0자리)을 따릅니다. `evaluationKrw`/`unrealizedPnl`/`weight`는 외부 시세로 계산한 값이라 아래 숫자는 예시일 뿐, 실제로 curl을 실행하는 시점의 실시간 시세(이 예시는 삼성전자 75,000원 가정)에 따라 달라집니다.
 
 ```json
 {
@@ -173,20 +173,22 @@ curl -s http://localhost:8080/v1/portfolio \
       "quantity": "10.00000000",
       "avgPrice": "70000",
       "cost": "700000",
-      "evaluationKrw": null,
-      "unrealizedPnl": null,
-      "weight": null
+      "evaluationKrw": "750000",
+      "unrealizedPnl": "50000",
+      "weight": "42.86"
     }
   ],
   "totalCostByCurrency": { "KRW": "1700000" },
-  "totalEvaluationKrw": null,
-  "totalUnrealizedPnl": null
+  "totalEvaluationKrw": "1750000",
+  "totalUnrealizedPnl": "50000"
 }
 ```
 
+`ALLFOLIO_STOCK_SERVICE_KEY`(공공데이터포털 주식시세 API 키)를 설정하지 않았다면 STOCK 시세 조회만 실패합니다 — 이 경우 위 응답에서 STOCK 항목의 `evaluationKrw`/`unrealizedPnl`/`weight`만 `null`로 남고 나머지 필드·응답 자체(200)는 그대로 정상입니다(자산 하나의 시세 실패가 전체 조회를 막지 않는 부분 실패 허용 정책).
+
 ## 알아두면 좋은 점
 
-- **`null`로 나오는 필드는 버그가 아닙니다.** `evaluationKrw`, `unrealizedPnl`, `weight`, `currentWeight`, `expectedWeight`, `totalEvaluationKrw`, `totalUnrealizedPnl`은 외부 시세·환율 연동(`docs/ROADMAP.md` Task 023, Phase 3)이 끝나기 전까지 항상 `null`입니다. 시세 없이 거짓 숫자를 내보내지 않기 위한 설계입니다.
+- **`null`로 나오는 필드는 버그가 아닙니다.** `GET /v1/portfolio`의 `evaluationKrw`/`unrealizedPnl`/`weight`(자산별)·`totalEvaluationKrw`/`totalUnrealizedPnl`(합계)은 이제 실제 시세로 채워지지만, **그 자산의 시세 조회가 실패하면 그 자산만** 세 필드가 `null`로 남습니다(부분 실패 허용 — 나머지 자산과 응답 자체는 정상). `POST /v1/simulate/avg-price`의 `currentWeight`/`expectedWeight`는 이 값을 계산하려면 보유 자산 수만큼 시세를 추가로 조회해야 해 시뮬레이터의 성능 목표(P99 ≤ 5ms)와 충돌하므로 의도적으로 항상 `null`입니다(`docs/ROADMAP.md` Task 023 「남은 갭」 참고). 시세 없이 거짓 숫자를 내보내지 않기 위한 설계입니다.
 - **에러 응답은 항상 3개 필드 고정**입니다: `{code, message, timestamp}`. 자주 보게 될 코드는 다음과 같습니다.
 
   | 코드 | 상태 | 상황 |

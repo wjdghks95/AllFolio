@@ -416,10 +416,13 @@ export default function AssetDetailPage() {
         <Card title="상세 정보" testId="asset-detail-info">
           {/* portfolioFetchFailed: GET /v1/portfolio 호출 자체가 실패했을 때만 보여준다.
               대상 항목이 그냥 없는 경우(§ 정상 케이스)와는 원인이 달라, 아래 취득원가 등
-              파생 필드가 "—"인 이유를 여기서 먼저 밝힌다. */}
+              파생 필드가 "—"인 이유를 여기서 먼저 밝힌다.
+              색은 alarm(먹자주)을 쓴다 — loss(청)는 "하락"이라는 다른 축의 색이라 조회 실패가
+              가격 하락으로 읽힌다(docs/DESIGN.md §2-3 hue 분리). 같은 카드 아래쪽에 들어오는
+              "시세를 불러오지 못해…" 주석과도 같은 색이어야 한 종류의 사건으로 읽힌다. */}
           {portfolioFetchFailed ? (
             <p
-              className="mb-3 text-xs leading-5 text-loss"
+              className="mb-3 text-xs leading-5 text-alarm"
               data-testid="asset-detail-portfolio-fetch-failed"
             >
               일부 정보를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.
@@ -480,11 +483,16 @@ export default function AssetDetailPage() {
             />
           </div>
 
-          {/* 총 자산 합계 카드의 주석과 같은 말을 쓴다 — 같은 이유로 비어 있는 값이라면
-              화면마다 다른 문장으로 설명하지 않는다 (docs/DESIGN.md §6-2). */}
-          <p className="mt-3 text-xs leading-5 text-ink-soft">
-            평가금액·평가손익·비중은 시세를 연동하면 채워집니다.
-          </p>
+          {/* Phase 2에는 이 셋이 언제나 비어 있어 "시세를 연동하면 채워집니다"를 늘 달아 두었지만,
+              시세가 들어온 지금(Task 023) 그 문장은 값이 채워진 화면에서 스스로를 부정한다
+              (docs/DESIGN.md §9가 걷어내기로 예고한 문구). 지금 셋이 비어 있는 이유는 하나뿐이다 —
+              이 종목의 시세를 못 가져왔다. 그 사실만, 그 경우에만 말한다.
+              portfolioFetchFailed일 때는 카드 맨 위가 이미 원인을 말했으므로 겹쳐 말하지 않는다. */}
+          {evaluationKrw === null && !portfolioFetchFailed ? (
+            <p className="mt-3 text-xs leading-5 text-alarm" data-testid="asset-detail-unpriced-note">
+              이 종목의 시세를 불러오지 못해 평가금액·평가손익·비중을 계산하지 못했습니다.
+            </p>
+          ) : null}
         </Card>
 
         {/* F007: 시세 차트 자체는 Phase 4 범위다. 지금 이 카드가 그리는 것은 평단선(§5 시그니처)
@@ -538,8 +546,12 @@ export default function AssetDetailPage() {
                 </>
               ) : null}
             </div>
+            {/* "시세를 연동하면"이라고 쓸 수 없게 됐다 — 바로 위 카드가 실제 시세로 계산한 평가금액을
+                이미 보여주고 있어, 같은 화면에서 두 문장이 서로를 부정한다. 아직 없는 것은 시세 연동이
+                아니라 **가격의 흐름을 그리는 차트**이므로(docs/DESIGN.md §9 — Task 025 범위),
+                없는 것의 이름을 정확히 부른다. */}
             <p className="mt-3 text-xs leading-5 text-ink-soft">
-              시세 차트는 시세를 연동하면 이 자리에 채워집니다. 지금은 평단가 기준선만 그립니다.
+              가격 흐름 차트는 준비 중입니다. 지금은 평단가 기준선만 그립니다.
             </p>
           </Card>
         )}

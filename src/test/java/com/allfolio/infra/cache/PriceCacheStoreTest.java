@@ -61,4 +61,19 @@ class PriceCacheStoreTest extends AbstractIntegrationTest {
 
         assertThat(lookup).isEmpty();
     }
+
+    /** 부정 캐싱(Task 023 Major 2) — markFailed() 직후에는 같은 키에 대해 hasRecentFailure()가 true. */
+    @Test
+    void hasRecentFailureReturnsTrueRightAfterMarkFailed() {
+        String key = "price:TEST:" + UUID.randomUUID();
+
+        priceCacheStore.markFailed(key);
+
+        assertThat(priceCacheStore.hasRecentFailure(key)).isTrue();
+    }
+
+    @Test
+    void hasRecentFailureReturnsFalseForUnknownKey() {
+        assertThat(priceCacheStore.hasRecentFailure("price:TEST:" + UUID.randomUUID())).isFalse();
+    }
 }

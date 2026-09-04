@@ -321,9 +321,17 @@ export default function PortfolioPage() {
 
   const totalPnl = formatSignedAmount(totalUnrealizedPnl, { currency: 'KRW' });
 
-  // 표시 상태 플래그(시각 전용). 값이 없을 때 히어로를 축소하고 "시세 연동 전" 표식을 붙인다 —
+  // 표시 상태 플래그(시각 전용). 값이 없을 때 히어로를 축소하고 상태 표식을 붙인다 —
   // 42px짜리 "—" 하나만 떠 있으면 값이 없는 것이 아니라 화면이 깨진 것으로 읽힌다 (docs/DESIGN.md §6-2).
+  //
+  // Task 023(시세 연동)부터 이 상태의 의미가 바뀌었다. 서버는 시세 조회에 성공한 자산만으로 총액을
+  // 내므로(PortfolioService.listPortfolio), 총액이 null이라는 것은 "아직 연동 전"이 아니라
+  // **보유한 모든 자산의 시세 조회가 실패했다**는 뜻이다. 표식 문구도 그 사실을 말한다.
   const hasTotalEvaluation = totalEvaluationKrw !== null;
+
+  // 시세를 못 가져온 자산 수. 그 자산들은 서버 총액 계산에서 빠져 있으므로, 히어로 숫자가
+  // "가진 전부"가 아니라는 사실을 사용자에게 알려야 한다 — 말하지 않으면 총액이 조용히 작아진다.
+  const unpricedCount = items.filter((item) => item.evaluationKrw === null).length;
 
   // 투자 자산 장부는 주식·코인 두 구획으로 나눈다. 두 장의 장부로 쪼개지 않는 이유는
   // 둘 다 "시세로 평가되는 자산"이라 현금과의 경계(§6-2)만큼 성격이 갈리지 않기 때문이다.
@@ -407,7 +415,7 @@ export default function PortfolioPage() {
                 글자가 낱자로 흩어진다 — 한글 표식은 본문 자면(sans)에 기본 자간으로 둔다. */}
             {hasTotalEvaluation ? null : (
               <span className="rounded-control bg-ink/8 px-2 py-1 text-[11px] leading-4 font-medium text-ink-soft">
-                시세 연동 전
+                시세 조회 실패
               </span>
             )}
           </div>
@@ -426,10 +434,22 @@ export default function PortfolioPage() {
             </span>
           </div>
 
+          {/* 환산 규칙은 언제나 참이라 늘 적는다. 뒤 문장("시세를 연동하면 채워집니다")은 Phase 2
+              한정 주석이었고, 시세가 실제로 들어온 지금은 화면에 찍힌 숫자와 정면으로 어긋난다 —
+              docs/DESIGN.md §9가 Task 023에서 걷어내기로 예고한 문구다. 대신 이 자리에서 말해야 할
+              것은 "이 총액이 전부가 아닐 수도 있다"는 사실 하나뿐이고, 그 일이 실제로 일어났을
+              때만 말한다. */}
           <p className="mt-4 text-xs leading-5 text-ink-soft">
-            통화가 다른 자산은 KRW로 환산해 이 총액에 더합니다. 평가금액·평가손익은 시세를 연동하면
-            채워집니다.
+            통화가 다른 자산은 KRW로 환산해 이 총액에 더합니다.
           </p>
+          {/* 전부 실패했을 때는 이 줄을 내린다 — 그때는 총액 자체가 없어서 "이 총액에서 빠졌다"가
+              가리킬 곳이 없고, 숫자 옆 `시세 조회 실패` 표식이 이미 같은 말을 끝냈다. */}
+          {hasTotalEvaluation && unpricedCount > 0 ? (
+            <p className="mt-1.5 text-xs leading-5 text-alarm" data-testid="portfolio-unpriced-note">
+              시세를 불러오지 못한 자산 <span className="font-mono">{unpricedCount}</span>건은 이
+              총액에서 빠졌습니다.
+            </p>
+          ) : null}
         </Card>
       </div>
 

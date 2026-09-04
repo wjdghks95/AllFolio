@@ -47,6 +47,9 @@ allfolio:
     stock-fresh-ttl: 12h
     cash-usd-fresh-ttl: 12h
     stale-ceiling: 24h
+    # Task 023 Major 2: 시세 조회 실패(존재하지 않는 티커 등) 부정 캐싱 TTL. 30초 — 너무 짧으면 남용
+    # 방지 효과가 없고, 너무 길면 티커가 나중에 정상 등록돼도 한동안 계속 실패로 응답한다.
+    negative-ttl: 30s
   price-throttle:
     limit: 1
     window: 1s

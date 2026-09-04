@@ -72,7 +72,7 @@ npm run dev   # Vite 개발 서버, 기본 포트 5173
 
 ## 아키텍처 개요
 
-AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. Phase 1(애플리케이션 골격 구축)과 Phase 2(UI/UX 완성 + 백엔드 도메인 구현)가 완료됐고(2026-08-27), 현재는 **Phase 3 (실데이터 연동 + 외부 시세 API + Redis 캐시)** 진행 중입니다 — Task 022(Redis 캐시·요청 Throttling)까지 완료됐고, 다음은 Task 023(포트폴리오 평가금액·비중·손익)입니다. 진행 상황은 [`docs/ROADMAP.md`](docs/ROADMAP.md) 「개발 단계」 절 참조.
+AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. Phase 1(애플리케이션 골격 구축)과 Phase 2(UI/UX 완성 + 백엔드 도메인 구현)가 완료됐고(2026-08-27), 현재는 **Phase 3 (실데이터 연동 + 외부 시세 API + Redis 캐시)** 진행 중입니다 — Task 023(포트폴리오 평가금액·비중·손익)까지 완료됐고, 다음은 Task 024(거래 이력 Transactions API)입니다. 진행 상황은 [`docs/ROADMAP.md`](docs/ROADMAP.md) 「개발 단계」 절 참조.
 
 ### 핵심 기술 스택
 

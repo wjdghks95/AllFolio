@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-09-01
+**최종 수정:** 2026-09-04
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~4와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -391,11 +391,28 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - freshTtl·staleCeiling·Throttle 한도는 실측 트래픽 없이 합리적 추정치로 설정됨 — 운영 관측 후 조정 필요
     - 캐시 워밍업(콜드 스타트) 전략 없음 — 배포 직후에는 모든 요청이 캐시 미스로 시작
     - "설정이 다른 Spring 테스트 컨텍스트가 늘어날수록 공유 PostgreSQL 연결이 누적되는" 구조적 취약점 자체는 여전히 남아있다(`PriceThrottleTest`가 만들던 회피 가능한 컨텍스트 1개는 제거했지만, `AssetPriceIntegrationTest` 등 WireMock 포트가 서로 달라 불가피하게 갈라지는 컨텍스트들은 그대로다) — 테스트용 Hikari 풀 크기 축소 등 근본적인 인프라 개선은 별도 검토 필요
-    - 사용자당 초당 1건 Throttle 한도가 Task 023(포트폴리오 평가 시 보유 자산 수만큼 시세를 한 번에 조회)과 충돌할 가능성 — Task 023 착수 전 정책 재검토 필요
+    - ✅ **(Task 023에서 해소)** 사용자당 초당 1건 Throttle 한도가 Task 023(포트폴리오 평가 시 보유 자산 수만큼 시세를 한 번에 조회)과 충돌할 가능성 — Throttle을 `GET /v1/assets/{id}/price` 단건 엔드포인트 전용 제약으로 범위를 좁히는 것으로 확정(사용자 확정 정책, Task 023 항목 참고)
 
-- **Task 023: 포트폴리오 평가금액·비중·손익 (F005b)**
-  - Task 013의 `null` 필드 채움 + Task 009 화면 반영
-  - 비중 스케일 2, HALF_UP
+- **Task 023: 포트폴리오 평가금액·비중·손익 (F005b)** ✅ — 완료 (2026-09-04)
+  - ✅ Task 013이 계약에만 넣어두고 항상 `null`로 내보내던 5개 필드(`PortfolioItemResponse`의 `evaluationKrw`·`unrealizedPnl`·`weight`, `PortfolioResponse`의 `totalEvaluationKrw`·`totalUnrealizedPnl`)를 Task 021~022가 만든 시세 연동(`PriceService`)+Redis 캐시를 **그대로 재사용해** 실제 값으로 채웠다. 새 외부 클라이언트·새 캐시 계층을 만들지 않았다 — Task 021이 `PriceService`를 웹 계층 비의존으로 설계해둔 의도(도메인 값 객체 `Price`/`PricedQuote` 반환)가 여기서 회수됐다.
+  - ✅ **Throttle 범위 재정의(사용자 확정 정책)**: `GET /v1/portfolio`에는 Task 022의 "사용자당 초당 1건" Throttle을 적용하지 않고, Throttle을 `GET /v1/assets/{id}/price` 단건 엔드포인트 **전용 제약**으로 범위를 좁혔다. 포트폴리오는 보유 자산 수만큼 시세를 한 번에 조회해야 하므로 기존 한도를 그대로 적용하면 자산이 2개 이상인 사용자는 사실상 매번 429를 겪는다(Task 022가 「남은 갭」으로 남긴 이월 항목의 해소). 구현은 `PriceService`에 신규 `quoteForPortfolio(Asset): Optional<PricedQuote>`를 추가하고, 기존 `getPrice(userId, assetId)`는 시그니처·동작 그대로 두는 방식이다 — 캐시조회~외부호출~stale 폴백~캐시저장 공통 경로만 `resolve(..., enforceThrottle)` private 헬퍼로 추출해 두 진입점이 공유한다(Throttle 소모 여부만 플래그로 갈린다).
+  - ✅ **부분 실패 허용(사용자 확정 정책)**: 보유 자산 일부의 시세 조회가 실패해도(429/503/Circuit Breaker Open/파싱 실패 등) `GET /v1/portfolio`는 **항상 200**을 반환한다. `quoteForPortfolio()`는 어떤 예외든 `Optional.empty()`로 흡수하고(실패는 `log.warn`으로만 남김), 실패한 자산만 `evaluationKrw`/`unrealizedPnl`/`weight`가 `null`로 남는다. `totalEvaluationKrw`/`totalUnrealizedPnl`, 그리고 각 자산 `weight`의 분모는 **시세 조회에 성공한 자산들만으로** 계산한다 — 실패한 자산을 0원으로 취급하면 총액과 비중이 조용히 왜곡되기 때문. 성공한 자산이 하나도 없으면 두 합계는 `null`이다. `quoteForPortfolio()`는 CASH(KRW)도 외부 호출 없이 즉시 빈 값을 반환한다(시세 조회 대상이 아니라 `quantity` 자체가 평가금액).
+  - ✅ **`TransactionTemplate` 채택(설계 결정)**: `PortfolioService.listPortfolio()`를 "DB 조회(트랜잭션 안) → 시세 조회(트랜잭션 밖에서 자산별 순회)" 2단계로 재구성했다. `PriceService`는 외부 API 호출 중 DB 커넥션이 점유되는 것을 막으려 의도적으로 트랜잭션을 두르지 않는 설계라, DB 조회 트랜잭션이 먼저 끝난 뒤에 호출해야 한다. 처음엔 DB 조회 부분만 private 메서드로 떼고 `@Transactional`을 붙였으나 **Spring AOP의 self-invocation 한계**(같은 빈 내부 호출은 프록시를 거치지 않아 트랜잭션이 예외 없이 조용히 무시된다)로 실제로는 동작하지 않았다 — 클래스 분리 대신 `TransactionTemplate`(read-only)으로 DB 조회 블록만 명시적으로 감싸는 방식으로 확정했다. 중간 상태는 private record `ItemDraft`로 옮겨 트랜잭션 밖에서 재사용한다.
+  - ✅ KRW 환산 규칙: STOCK/COIN/CASH(KRW)는 시세가 이미 원화라 그대로 쓰고, **CASH(USD)만** 조회한 환율(환율 시세 자체가 "1달러 = x원" 형태의 원화 환산값)로 평가금액과 취득원가를 **함께** 환산한다 — `cost`는 USD 스케일로 저장돼 있어 평가금액만 환산하면 손익이 통화가 뒤섞인 값이 된다. 평가금액·손익은 KRW 정수 스케일(scale 0, HALF_UP), 비중은 `domain/PrecisionScale`에 신설한 `WEIGHT_SCALE = 2`(HALF_UP)로 계산한다. `weight`는 전체 합계가 확정된 뒤에야 계산 가능해 항목별 계산(`priceItem`)과 분리된 두 번째 패스(`withWeight`)로 둔다.
+  - ✅ 통합 테스트에 WireMock 3개(업비트·공공데이터포털·환율)를 붙여 `PortfolioIntegrationTest`에 3개 시나리오를 추가했다: (a) 자산 유형이 섞인 포트폴리오의 평가금액·손익·비중·합계 정상 계산 (b) 자산 5개(Throttle 한도인 초당 1건을 크게 초과)를 한 번에 조회해도 **429 없이 전부 처리** (c) 자산 하나만 시세 실패 시 그 항목만 `null`이고 나머지 항목·합계·비중은 정상. `PortfolioServiceTest`(신규, 단위 3개)·`PriceServiceTest`(+3: CASH(KRW) 즉시 빈 값·외부 API 실패 시 예외 대신 빈 값·반복 호출해도 Throttle 미소모)까지 총 +9개.
+  - ✅ 테스트 개수: 179개(신규 파일 `PortfolioServiceTest` 3 + 기존 파일 확장 `PriceServiceTest` +3·`PortfolioIntegrationTest` +3, 총 +9). 구현 중 실제 **테스트 격리 버그**를 발견해 함께 수정했다 — `PortfolioIntegrationTest`가 공유하는 단일 Spring 컨텍스트에서 Resilience4j CircuitBreaker(`upbit`/`exchange-rate`/`stock`)의 실패 카운트가 테스트 사이에 누적돼, 부분 실패 시나리오를 돌린 뒤 정상 시나리오가 Open 상태를 물려받아 깨졌다. `@BeforeEach`에서 WireMock `resetAll()`과 함께 세 CircuitBreaker를 `reset()`하도록 해 해결했다.
+  - ✅ 프론트엔드는 실데이터로 검증만 하고 최소 조정에 그쳤다 — `PortfolioPage.tsx`/`AssetDetailPage.tsx`는 Task 018에서 이미 null/non-null 양쪽 렌더링이 구현돼 있어 새 로직이 필요 없었다. 실제 백엔드+브라우저로 확인한 결과 렌더링은 정상이었고, 대신 **실데이터와 모순되는 문구 4곳**을 고쳤다: 총액 옆 `시세 연동 전` 표식 → `시세 조회 실패`(서버가 성공 자산만으로 총액을 내므로 총액 `null`은 "연동 전"이 아니라 "전부 실패"를 뜻한다), 합계 카드의 "평가금액·평가손익은 시세를 연동하면 채워집니다"(값이 찍힌 화면에서 스스로를 부정) 삭제 후 **부분 실패 시에만** "시세를 불러오지 못한 자산 N건은 이 총액에서 빠졌습니다" 조건부 안내 추가, 상세 화면의 같은 문구를 "이 종목의 시세를 불러오지 못해…" 조건부 안내로 교체, 차트 자리 문구를 "가격 흐름 차트는 준비 중입니다"로(아직 없는 것은 시세 연동이 아니라 차트 자체 — Task 025 범위). 조회 실패 색은 `loss`(청, "하락")가 아닌 `alarm`을 쓴다 — 조회 실패가 가격 하락으로 읽히지 않도록. `docs/DESIGN.md`도 함께 갱신됐다.
+  - ✅ `code-reviewer` 에이전트 독립 검증(2026-09-04) — Blocker 0건. Major 3건 발견, 전부 수정 완료:
+    - **(수정 완료)** COIN 자산의 `unrealizedPnl`이 소수 8자리로 잘못 직렬화되는 스케일 버그. `evaluationKrw`(스케일 0)에서 COIN `cost`(스케일 8)를 빼면 `BigDecimal.subtract()`가 더 큰 스케일을 따라가 `"1000000"`이 아니라 `"1000000.00000000"`이 나갔다. `priceItem()`의 if/else 분기 이후 단일 지점에서 `unrealizedPnl`을 스케일 0(HALF_UP)으로 재정규화해 해결. 신규 단언(`isEqualByComparingTo` 대신 정확한 문자열 `isEqualTo`)이 스케일까지 잡는지 뮤테이션 테스트(정규화 코드 임시 제거 → 실패 확인 → 원복)로 실증
+    - **(수정 완료)** Throttle을 뺀 뒤 대체 상한이 없어, 존재하지 않는 티커로 등록한 자산이 있으면 `GET /v1/portfolio` 반복 호출마다 외부 API가 상한 없이 불릴 수 있던 문제(`TickerNotFoundException`이 Circuit Breaker 실패 집계에서 제외돼 회로도 안 열림). `PriceCacheStore`에 짧은 TTL(30초) 부정 캐싱(`markFailed`/`hasRecentFailure`, `StringRedisTemplate` 기반)을 추가해 `quoteForPortfolio()` 전용으로 적용(단건 조회 API `getPrice()`는 기존 Throttle이 있어 대상 아님)
+    - **(수정 완료)** STOCK/COIN을 KRW가 아닌 통화(예: USD)로 등록하면 `unrealizedPnl`이 KRW 평가금액에서 USD 원가를 빼는 통화 혼합 값이 되던 문제 — 시세는 항상 KRW인데(업비트 KRW 마켓·국내 종가) 원가는 자산 통화로 저장돼 있어서다. 실제 등록 화면이 STOCK도 KRW/USD 2지선다를 허용해 도달 가능한 케이스였다(`PortfolioIntegrationTest`의 기존 AAPL 테스트가 이미 이 조합을 검증 대상으로 삼고 있었음). `unrealizedPnl`은 자산 통화가 KRW일 때만 계산하고 그 외엔 `null`로 남기도록 수정 — `evaluationKrw`는 통화와 무관하게 유효한 값이라 그대로 계산되고 `weight`에도 정상 반영된다
+    - Minor 8건은 이번엔 보류 — 환차손익 표시 불가(CASH-USD 구조상 항상 0), stale 시세 여부가 포트폴리오 응답에 미표시, 예외 흡수 범위(`RuntimeException` 광범위 catch), 프론트 신규 조건부 문구 2곳 테스트 부재, 문서 2곳(`frontend/src/api/types.ts`·`SimulateAvgPriceResponse` Javadoc) 잔여 구문 등 — 다음 착수 시 재검토
+    - 재검증: 테스트 개수 179개 → **184개**(+5: `PriceServiceTest` +2·`PortfolioIntegrationTest` +1·`PriceCacheStoreTest` +2). `./gradlew test --rerun-tasks`(전체 스위트) 184개 전부 통과, `AssetPriceIntegrationTest`(단건 조회 API) 별도 재실행으로 부정 캐싱 추가가 기존 Throttle/CASH(KRW) 400 시나리오를 깨지 않았음을 확인
+  - ⚠️ 남은 갭:
+    - **시뮬레이터 `currentWeight`/`expectedWeight`는 이번 범위에서 제외**(사용자 확정, 후속 과제). 이 두 값을 채우려면 분모인 전체 포트폴리오 평가금액이 필요하고, 그러려면 `POST /v1/simulate/avg-price` 한 번에 보유 자산 수만큼 외부 시세를 조회해야 해 기존 "물타기 시뮬레이터 P99 ≤ 5ms(Holding 단건 DB 조회 + In-Memory 계산, 외부 API 없음)" 성능 목표(`domain/CLAUDE.md`·아래 「성능 KPI」)와 구조적으로 충돌한다. 착수 시 (a) KPI를 완화할지 (b) 비중만 별도 엔드포인트/캐시로 뺄지부터 정해야 한다
+    - 자산이 많은 사용자는 시세를 **순차(순회) 조회**하므로 캐시가 비어 있는 콜드 스타트에서 응답이 느려질 수 있다 — 병렬화(Virtual Threads 기반 fan-out)는 이번 범위 밖으로 두었다. 캐시가 더워진 뒤에는 대부분 Redis 히트로 끝난다
+    - 프론트 검증 중, 실 종목(예: `005380` 현대차)이 `ALLFOLIO_STOCK_SERVICE_KEY`를 정상 로드한 상태에서도 시세 조회에 실패하는 현상을 관측했다 — 부분 실패 정책 덕에 화면은 정상 동작(해당 항목만 `null`)했다. 원인은 STOCK 시세 클라이언트(Task 021, 공공데이터포털) 소관이라 이번엔 손대지 않았고 **후속 확인이 필요하다**(`stock-price-api` 에이전트 소관)
+    - `quoteForPortfolio()`에는 `getPrice()`가 갖고 있는 계측(`allfolio.price.fetch.duration` Timer)을 붙이지 않았다 — 포트폴리오 경로의 시세 조회 지연은 현재 메트릭에 잡히지 않는다
 
 - **Task 024: 거래 이력(Transactions) API**
   - Task 006 결정 #2에 따라 자산 등록 시 `BUY` 1건만 자동 기록되므로(보유 수정은 미기록), 이 Task는 (a) 누적된 이력 조회 API와 (b) 사용자가 실제 매매·배당을 직접 입력하는 API를 함께 구현한다
@@ -440,7 +457,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 | `GET` | `/v1/assets/{id}` | 200 / 404 | 타 유저 접근 시 404 (ID 유출 방지) |
 | `PUT` | `/v1/assets/{id}/holdings` | 200 / 409 | 낙관적 잠금 `version` 필수, 충돌 시 `HOLDING_CONFLICT` |
 | `DELETE` | `/v1/assets/{id}` | 204 / 404 | `ON DELETE CASCADE`로 holdings·transactions 함께 삭제 |
-| `GET` | `/v1/portfolio` | 200 | Task 013 범위(F005a)는 취득원가만, `evaluationKrw`·`unrealizedPnl`·`weight`는 `null` |
+| `GET` | `/v1/portfolio` | 200 | 취득원가(Task 013, F005a) + `evaluationKrw`·`unrealizedPnl`·`weight`·합계 2개를 실제 시세로 계산(Task 023, F005b). 단건 조회용 Throttle 미적용, 일부 자산의 시세 조회가 실패해도 항상 200이고 그 항목의 3개 필드만 `null` |
 | `POST` | `/v1/simulate/avg-price` | 200 | DB 저장 없음 |
 | `GET` | `/v1/assets/{id}/price` | 200 / 206 / 400 / 404 / 429 / 503 | 외부 시세 단건 조회(STOCK/COIN/CASH-USD). 타 유저 접근 시 404, STOCK·CASH(KRW) 자산에 요청 시 400 `PRICE_NOT_APPLICABLE`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN`(Task 021). Redis 캐시 stale 폴백 시 206 + 응답 본문 `isStale:true`, 사용자당 초당 1건 Throttle 초과 시 429 `PRICE_RATE_LIMITED`(Task 022) |
 
@@ -511,13 +528,17 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
     { "assetId": "0198...", "ticker": "005930", "name": "삼성전자",
       "assetType": "STOCK", "currency": "KRW",
       "quantity": "10.00000000", "avgPrice": "60000", "cost": "600000",
-      "evaluationKrw": null, "unrealizedPnl": null, "weight": null }
+      "evaluationKrw": "700000", "unrealizedPnl": "100000", "weight": "100.00" }
   ],
   "totalCostByCurrency": { "KRW": "600000" },
-  "totalEvaluationKrw": null,
-  "totalUnrealizedPnl": null
+  "totalEvaluationKrw": "700000",
+  "totalUnrealizedPnl": "100000"
 }
 ```
+
+위 예시는 시세가 70,000원일 때다(10주 × 70,000 = 700,000, 손익 = 700,000 − 600,000 = 100,000). 보유 자산이 이 하나뿐이라 `weight`는 `"100.00"`이다 — 비중은 scale 2·HALF_UP이고(`PrecisionScale.WEIGHT_SCALE`), 분모는 **시세 조회에 성공한 자산들의 평가금액 합계**다. `evaluationKrw`·`unrealizedPnl`·합계 2개는 KRW 정수 스케일(scale 0, HALF_UP)이다.
+
+`evaluationKrw`/`unrealizedPnl`/`weight`가 `null`로 내려오는 경우는 **그 자산의 시세 조회가 실패했을 때뿐이다**(Task 023의 부분 실패 허용 정책 — 응답 자체는 항상 200). 성공한 자산이 하나도 없으면 `totalEvaluationKrw`/`totalUnrealizedPnl`도 `null`이 된다. `totalCostByCurrency`는 시세와 무관하게 언제나 채워진다.
 
 `quantity`는 자산유형·통화와 무관하게 항상 8자리 scale로 내려온다(시뮬레이터 `expectedQuantity`와 동일 규칙). `avgPrice`·`cost`는 자산유형/통화별 「금융 정밀도 규칙」(COIN 8자리, 그 외 통화 기준)을 따른다 — 이 스케일 결정은 `GET /v1/portfolio`에만 적용되며, `GET /v1/assets`(Task 012)는 여전히 DB `NUMERIC(28,8)` 왕복 스케일을 그대로 노출한다(위 Task 013 항목의 「남은 갭」 참고).
 
@@ -525,9 +546,9 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 
 `totalCostByCurrency`는 `items`에 담긴 모든 자산의 취득원가를 통화별로 합산한 값이다(위 예시는 자산 1건뿐이라 KRW 값이 그 자산의 `cost`와 같다). 자산이 둘 이상이거나 USD 자산이 섞이면 통화별 키가 함께 늘어난다 — 다중 자산·다중 통화 예시는 `frontend/src/pages/PortfolioPage.test.tsx`의 `portfolioResponseFixture` 참고.
 
-`totalCostByCurrency`가 통화별 Map인 이유: 취득원가 합계를 단일 `totalCostKrw`로 두면 USD 자산이 섞였을 때 환율 없이는 정확한 값을 낼 수 없다. Task 023(환율 연동) 전까지 거짓 숫자를 내보내지 않기 위해 통화별로 나눠 담는다.
+`totalCostByCurrency`가 통화별 Map인 이유: 취득원가 합계를 단일 `totalCostKrw`로 두면 USD 자산이 섞였을 때 환율 없이는 정확한 값을 낼 수 없다. Task 023에서 환율이 연동된 뒤에도 **취득원가는 KRW로 환산하지 않고** 통화별로 나눠 담는다 — 과거 매수 시점의 원가를 오늘 환율로 환산하면 환차손익이 취득원가에 섞여 들어가기 때문이다(환율 환산은 평가금액·손익에만 적용된다).
 
-`evaluationKrw`뿐 아니라 `unrealizedPnl`(`PortfolioItem`·`totalUnrealizedPnl` 둘 다)도 **항상 KRW 환산액**이다 — 원자산 통화(`currency`)가 아니다. PRD F005가 "전체 자산을 KRW 기준으로 환산해 평가금액·비중(%)·미실현 손익 표시"라고 명시하므로, 세 값(평가금액·비중·손익) 모두 같은 환산 기준을 따른다. `evaluationKrw`만 필드명에 `Krw`가 붙어 있어 헷갈리기 쉬우니, Task 023 구현 시 `unrealizedPnl`도 동일하게 KRW 스케일(정수)로 계산해야 한다.
+`evaluationKrw`뿐 아니라 `unrealizedPnl`(`PortfolioItem`·`totalUnrealizedPnl` 둘 다)도 **항상 KRW 환산액**이다 — 원자산 통화(`currency`)가 아니다. PRD F005가 "전체 자산을 KRW 기준으로 환산해 평가금액·비중(%)·미실현 손익 표시"라고 명시하므로, 세 값(평가금액·비중·손익) 모두 같은 환산 기준을 따른다. `evaluationKrw`만 필드명에 `Krw`가 붙어 있어 헷갈리기 쉬운 지점이다. CASH(USD) 자산은 손익을 낼 때 취득원가도 같은 환율로 환산한 뒤 빼야 원화 기준 손익이 나온다(Task 023 구현).
 
 ### 시뮬레이터 응답 예시
 
@@ -544,7 +565,7 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 
 **골든 케이스**: 기존 평단 60,000원 × 10주 + 추가 55,000원 × 5주 → `(600,000 + 275,000) / 15 = 58,333.33...` → HALF_UP, scale 0 → **58,333원**. `expectedQuantity`는 추가 매수 반영 후 총 보유 수량(10 + 5 = 15)이며, 통화/자산 종류와 무관하게 항상 8자리 scale로 내려온다. 백엔드 Task 015(시뮬레이터 API) 구현 시 이 필드를 포함해야 한다.
 
-`currentWeight`/`expectedWeight`는 포트폴리오 내 비중(%)이다. 분모가 전체 포트폴리오 평가금액인데, 평가금액은 외부 시세가 있어야 계산되므로(F005b) Phase 1~2에서는 `null`이고 Task 023(외부 시세 연동 후) 이후 채워진다.
+`currentWeight`/`expectedWeight`는 포트폴리오 내 비중(%)이다. 분모가 전체 포트폴리오 평가금액이라 외부 시세가 있어야 계산되는데(F005b), **Task 023에서도 채우지 않고 `null`로 남겼다**(사용자 확정) — 이 한 번의 호출에 보유 자산 수만큼 외부 시세 조회가 딸려 오면 아래 「성능 KPI」의 "시뮬레이터 P99 ≤ 5ms(DB 단건 조회 + In-Memory 계산)"와 정면으로 충돌하기 때문이다. 후속 과제(Task 023 「남은 갭」 참고).
 
 ---
 
