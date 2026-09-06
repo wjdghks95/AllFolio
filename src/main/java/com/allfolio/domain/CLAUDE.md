@@ -29,3 +29,10 @@
 ## 낙관적 잠금(Optimistic Lock) 수동 검증 주의
 
 같은 트랜잭션에서 방금 읽은 엔티티의 `version`은 항상 최신값이라, Hibernate의 자동 `@Version` 검사만으로는 "클라이언트가 과거에 읽은 값" 기준 충돌을 잡지 못한다. 갱신 서비스 메서드에서 `entity.getVersion() != request.version()`을 직접 비교해 다르면 `ObjectOptimisticLockingFailureException`을 던질 것(409 응답으로 매핑). 엔티티 갱신 직후 `repository.flush()`를 호출해 응답에 증가된 `version`이 나가도록 보장할 것 (flush 누락 시 응답에 증가 전 값이 나가는 버그 실측됨).
+
+엔티티의 `update()` 계열 메서드는 값이 기존과 동일해도 무조건 `updatedAt`을 갱신하고 dirty checking으로 `version`까지 증가시킨다 — 값이 안 바뀌는 케이스(예: DIVIDEND 거래)는 `update()` 호출 자체를 건너뛸 것(Task 024 실측, `Holding.update()`).
+
+## 커서 페이지네이션(Cursor Pagination)
+
+- 커서에 `Instant`를 인코딩할 때 `toEpochMilli()`로 절삭하지 말 것 — DB 컬럼이 `TIMESTAMPTZ`(마이크로초)면 같은 밀리초 내 여러 행이 순회에서 조용히 누락된다. `epochSecond`+`nano`를 함께 인코딩할 것(Task 024 실측, `TransactionService`)
+- 커서 디코딩(파싱) 실패를 방치하지 말 것 — 방치하면 잘못된 클라이언트 입력이 500으로 샌다. 전용 도메인 예외로 감싸 `GlobalExceptionHandler`가 400 `VALIDATION_ERROR`로 매핑하게 할 것(Task 024, `InvalidCursorException` 패턴)
