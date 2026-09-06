@@ -133,7 +133,7 @@ psql -h localhost -U allfolio -d allfolio
 
 `/execute-task`(또는 execute-task 스킬)로 shrimp-task-manager 태스크를 실행할 때는 Claude Code(코디네이터)가 직접 구현하지 않고, 태스크가 속한 영역에 맞는 서브에이전트(Agent 도구)에게 위임해 진행한다. 영역별 담당 에이전트는 `shrimp-rules.md`의 「Agent Routing」 절을 따른다(예: 백엔드 로직→`senior-backend`, 프론트엔드 구조·동작→`senior-frontend`, 프론트 시각 레이어→`ui-ux-designer`, DB 마이그레이션·엔티티 스키마→`database`, 코드 리뷰→`code-reviewer`, Playwright MCP E2E→`qa-e2e`, ROADMAP.md·shrimp-rules.md 등 로드맵 문서화→`development-planner`). 태스크가 여러 영역에 걸치면 영역별로 나눠 순서대로 위임한다.
 
-**예외 — README.md**: 루트 `README.md` 갱신은 에이전트에게 위임하지 않고 코디네이터가 직접 처리한다(사용자 확정, 2026-09-04). ROADMAP.md 등 다른 문서보다 짧고 성격이 다른 온보딩 문서라 별도 에이전트를 거칠 만큼 무겁지 않다는 판단이다.
+**예외 — README.md · ROADMAP.md**: 루트 `README.md`와 `docs/ROADMAP.md` 갱신은 에이전트에게 위임하지 않고 코디네이터가 직접 처리한다(README.md는 사용자 확정 2026-09-04, ROADMAP.md는 사용자 확정 2026-09-04로 development-planner 위임 규칙에서 예외로 전환). README.md는 다른 문서보다 짧고 성격이 다른 온보딩 문서라 별도 에이전트를 거칠 만큼 무겁지 않다는 판단이었고, ROADMAP.md는 Task 024부터 코디네이터가 직접 갱신하는 쪽으로 사용자가 규칙을 변경했다.
 
 ## 규칙 파일 위치
 
