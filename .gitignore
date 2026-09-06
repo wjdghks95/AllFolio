@@ -15,6 +15,7 @@ Thumbs.db
 build/
 .gradle/
 out/
+bin/
 
 # Environment
 .env
@@ -29,3 +30,4 @@ frontend/*.log
 # MCP 도구 산출물
 shrimp_data/
 .playwright-mcp/
+.serena/
