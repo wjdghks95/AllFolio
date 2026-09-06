@@ -3,10 +3,14 @@ package com.allfolio.web;
 import com.allfolio.domain.PricedQuote;
 import com.allfolio.domain.service.AssetService;
 import com.allfolio.domain.service.PriceService;
+import com.allfolio.domain.service.TransactionService;
 import com.allfolio.web.dto.AssetListResponse;
 import com.allfolio.web.dto.AssetResponse;
 import com.allfolio.web.dto.CreateAssetRequest;
+import com.allfolio.web.dto.CreateTransactionRequest;
 import com.allfolio.web.dto.PriceResponse;
+import com.allfolio.web.dto.TransactionListResponse;
+import com.allfolio.web.dto.TransactionResponse;
 import com.allfolio.web.dto.UpdateHoldingRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -42,10 +46,13 @@ public class AssetController {
 
     private final AssetService assetService;
     private final PriceService priceService;
+    private final TransactionService transactionService;
 
-    public AssetController(AssetService assetService, PriceService priceService) {
+    public AssetController(AssetService assetService, PriceService priceService,
+            TransactionService transactionService) {
         this.assetService = assetService;
         this.priceService = priceService;
+        this.transactionService = transactionService;
     }
 
     @PostMapping
@@ -75,6 +82,21 @@ public class AssetController {
                 quote.price().asOf(), quote.stale());
         HttpStatus status = quote.stale() ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK;
         return ResponseEntity.status(status).body(body);
+    }
+
+    @GetMapping("/{id}/transactions")
+    public TransactionListResponse listTransactions(@PathVariable UUID id,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int limit,
+            @RequestParam(required = false) String cursor,
+            Authentication authentication) {
+        return transactionService.listTransactions(userId(authentication), id, cursor, limit);
+    }
+
+    @PostMapping("/{id}/transactions")
+    @ResponseStatus(HttpStatus.CREATED)
+    public TransactionResponse createTransaction(@PathVariable UUID id,
+            @Valid @RequestBody CreateTransactionRequest request, Authentication authentication) {
+        return transactionService.createTransaction(userId(authentication), id, request);
     }
 
     @PutMapping("/{id}/holdings")

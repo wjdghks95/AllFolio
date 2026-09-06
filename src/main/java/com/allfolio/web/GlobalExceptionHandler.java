@@ -4,7 +4,9 @@ import com.allfolio.domain.exception.AssetNotFoundException;
 import com.allfolio.domain.exception.AvgPriceRequiredException;
 import com.allfolio.domain.exception.EmailAlreadyExistsException;
 import com.allfolio.domain.exception.ExternalPriceApiException;
+import com.allfolio.domain.exception.InsufficientHoldingQuantityException;
 import com.allfolio.domain.exception.InvalidCredentialsException;
+import com.allfolio.domain.exception.InvalidCursorException;
 import com.allfolio.domain.exception.PriceRateLimitExceededException;
 import com.allfolio.domain.exception.PriceUnavailableException;
 import com.allfolio.domain.exception.RefreshTokenInvalidException;
@@ -188,6 +190,22 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of("VALIDATION_ERROR", e.getMessage()));
+    }
+
+    /** GET /v1/assets/{id}/transactions의 cursor 파라미터가 파싱 불가능한 값일 때 (docs/ROADMAP.md Task 024). */
+    @ExceptionHandler(InvalidCursorException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCursor(InvalidCursorException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("VALIDATION_ERROR", e.getMessage()));
+    }
+
+    /** POST /v1/assets/{id}/transactions에서 SELL 수량이 현재 보유 수량을 초과할 때 (docs/ROADMAP.md Task 024). */
+    @ExceptionHandler(InsufficientHoldingQuantityException.class)
+    public ResponseEntity<ErrorResponse> handleInsufficientHoldingQuantity(InsufficientHoldingQuantityException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("INSUFFICIENT_QUANTITY", e.getMessage()));
     }
 
     /** CASH(KRW) 자산에 대한 조회 요청 — avg_price=1 고정값 자체가 이미 평가금액이라 시세 조회 대상이 아니다. */

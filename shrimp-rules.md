@@ -16,8 +16,8 @@
 
 ## Project Phase Status
 
-- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정), Task 007(공통 컴포넌트·디자인 시스템), Task 008(인증 화면), Task 009(포트폴리오 홈 화면), Task 010(자산 등록 화면), Task 011(자산 상세 화면), Task 012(자산 CRUD API), Task 013(포트폴리오 홈 API), Task 014(Observability 최소 셋업), Task 015(물타기 시뮬레이터), Task 016(금융 정밀도·도메인 통합 테스트), Task 017(MVP 로컬 실행 문서화), Task 018(프론트-백엔드 실데이터 연동), Task 019(인증 강화 — Refresh Token 및 로그아웃), Task 020(E2E 통합 테스트, Playwright MCP), Task 021(외부 시세 API 연동 — 업비트·공공데이터포털 주식·환율), Task 022(Redis 캐시 및 요청 Throttling), Task 023(포트폴리오 평가금액·비중·손익)
-- **우선순위**: Task 024(거래 이력 Transactions API) — Phase 3 마무리 단계
+- **완료**: Task 001(스캐폴딩), Task 002(DB 스키마), Task 003(JWT 인증), Task 004(프론트 라우팅 골격), Task 005(엔티티·리포지토리·DTO 타입 정의), Task 006(API 계약 확정), Task 007(공통 컴포넌트·디자인 시스템), Task 008(인증 화면), Task 009(포트폴리오 홈 화면), Task 010(자산 등록 화면), Task 011(자산 상세 화면), Task 012(자산 CRUD API), Task 013(포트폴리오 홈 API), Task 014(Observability 최소 셋업), Task 015(물타기 시뮬레이터), Task 016(금융 정밀도·도메인 통합 테스트), Task 017(MVP 로컬 실행 문서화), Task 018(프론트-백엔드 실데이터 연동), Task 019(인증 강화 — Refresh Token 및 로그아웃), Task 020(E2E 통합 테스트, Playwright MCP), Task 021(외부 시세 API 연동 — 업비트·공공데이터포털 주식·환율), Task 022(Redis 캐시 및 요청 Throttling), Task 023(포트폴리오 평가금액·비중·손익), Task 024(거래 이력 Transactions API) — Phase 3 전체 완료
+- **우선순위**: Phase 4 착수 — Task 025(SSE 실시간 시세 스트리밍 및 실시간 차트)
 - 상세 Task 명세 → `docs/ROADMAP.md`
 
 ---

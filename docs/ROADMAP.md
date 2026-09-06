@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-09-04
+**최종 수정:** 2026-09-06
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~4와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -290,7 +290,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ `null`로 내려오는 필드(`evaluationKrw`/`unrealizedPnl`/`weight`/`currentWeight`/`expectedWeight`/`totalEvaluationKrw`/`totalUnrealizedPnl`)가 Task 023(Phase 3) 전까지 의도된 설계임을 README에 명시, 에러 응답 포맷(`{code,message,timestamp}`)과 대표 코드 표도 포함
   - 코드·설정 파일은 변경하지 않은 순수 문서화 Task(검증에 쓴 `bootRun` 프로세스는 종료해 8080 포트 정리)
 
-### Phase 3: 핵심 기능 구현 (실데이터 연동 및 외부 시세)
+### Phase 3: 핵심 기능 구현 (실데이터 연동 및 외부 시세) ✅ 완료 (2026-09-06)
 
 - **Task 018: 프론트–백엔드 실데이터 연동** ✅ — 완료 (2026-08-30)
   - ✅ `frontend/src/api/assetApi.ts` 신규 — `getAsset`/`createAsset`/`updateHolding`/`deleteAsset`/`getPortfolio`/`simulateAvgPrice` 6개 함수. 공통 헬퍼 `authorizedRequest()`가 `tokenStorage.getToken()`으로 얻은 토큰을 `Authorization: Bearer` 헤더에 자동 주입, 실패 응답은 `authApi.ts`의 `ApiError(code, message)`를 재사용(신규 에러 클래스 없음). `GET /v1/assets`(커서 페이지네이션 목록)를 이번 3개 화면 어디도 쓰지 않아 `listAssets()`는 구현하지 않음(CLAUDE.md 「Simplicity First」) — 전용 단위 테스트 파일도 `authApi.ts`와 동일하게 두지 않고, 호출 화면의 fetch 모킹 테스트가 간접 검증하는 기존 컨벤션을 따름
@@ -414,8 +414,22 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - 프론트 검증 중, 실 종목(예: `005380` 현대차)이 `ALLFOLIO_STOCK_SERVICE_KEY`를 정상 로드한 상태에서도 시세 조회에 실패하는 현상을 관측했다 — 부분 실패 정책 덕에 화면은 정상 동작(해당 항목만 `null`)했다. 원인은 STOCK 시세 클라이언트(Task 021, 공공데이터포털) 소관이라 이번엔 손대지 않았고 **후속 확인이 필요하다**(`stock-price-api` 에이전트 소관)
     - `quoteForPortfolio()`에는 `getPrice()`가 갖고 있는 계측(`allfolio.price.fetch.duration` Timer)을 붙이지 않았다 — 포트폴리오 경로의 시세 조회 지연은 현재 메트릭에 잡히지 않는다
 
-- **Task 024: 거래 이력(Transactions) API**
+- **Task 024: 거래 이력(Transactions) API** ✅ — 완료 (2026-09-06)
   - Task 006 결정 #2에 따라 자산 등록 시 `BUY` 1건만 자동 기록되므로(보유 수정은 미기록), 이 Task는 (a) 누적된 이력 조회 API와 (b) 사용자가 실제 매매·배당을 직접 입력하는 API를 함께 구현한다
+  - ✅ `GET /v1/assets/{id}/transactions`·`POST /v1/assets/{id}/transactions` 2개 엔드포인트 신규 구현. 컨트롤러는 새로 만들지 않고 기존 `AssetController`에 `TransactionService`를 세 번째 협력자로 추가(`GET /v1/assets/{id}/price`가 `PriceService`를 쓰는 Task 021 선례와 동일 패턴)
+  - ✅ POST는 `holdings.quantity`/`avgPrice`에도 반영된다: BUY는 가중평균 재계산(`SimulationService`와 동일 공식을 로컬 구현), SELL은 차감(초과 시 신규 `InsufficientHoldingQuantityException` → 400 `INSUFFICIENT_QUANTITY`), DIVIDEND는 holdings 완전 불변(`holding.update()` 호출 자체를 건너뛰어 `version`/`updatedAt`도 불변 — code-reviewer 실측으로 발견된 버그를 수정하며 확정). CASH 자산은 요청 `price`와 무관하게 `avgPrice` `1` 유지(Task 006 결정 #1과 동일 규칙)
+  - ✅ **tradedAt 사용자 직접 입력(설계 결정)**: 자동 생성 BUY(Task 012)와 달리 이 API는 사용자가 과거 거래를 그대로 기록할 수 있도록 `tradedAt`을 요청 필드로 받는다. 그 결과 커서 페이지네이션을 `id` 단일값(Task 012 패턴)이 아닌 `(traded_at DESC, id DESC)` 복합 커서로 신규 구현 — 커서는 `"<epochSecond>.<nano>_<uuid>"` 형태의 불투명 문자열로 나노초까지 정밀도를 보존한다(최초 구현은 밀리초로 절삭해 같은 밀리초 내 거래가 순회에서 누락되는 버그가 있었음 — 아래 code-reviewer 항목 참고)
+  - ✅ **낙관적 잠금 자동 검사 위임(설계 결정, code-reviewer 검증 완료)**: 이 API는 클라이언트로부터 `version`을 받지 않는다 — `PUT /v1/assets/{id}/holdings`(Task 012)와 달리 클라이언트가 과거에 읽은 절대값이 아닌 BUY/SELL **델타**만 보내고, 서버가 트랜잭션 안에서 최신 holding을 읽어 재계산하기 때문에 "과거 읽기 기준 충돌" 개념 자체가 없다. Hibernate의 `@Version` 자동 검사만으로 동시 갱신을 잡을 수 있다는 판단이며, `HOLDING_CONFLICT` 409 핸들러(Task 012)를 신규 코드 없이 재사용한다
+  - ✅ `TransactionIntegrationTest` 신규(Testcontainers, 11케이스) — BUY 가중평균·SELL 차감·초과매도 400·DIVIDEND 완전 불변(quantity/avgPrice/version)·소유권 격리 404·커서 페이지네이션·자산 등록 시 자동 BUY 포함·CASH avgPrice 고정·잘못된 cursor 400을 검증. 금융 필드는 `.claude/rules/testing.md` 규칙대로 최소 1건(BUY 가중평균)을 문자열 정확 비교로 스케일까지 단언
+  - ✅ `code-reviewer` 에이전트 독립 검증(2026-09-06, 서버 기동 + curl 실측) — Blocker 0건. 검증 핵심 대상이던 낙관적 잠금 설계 판단은 동시 SELL 20건 실측(성공 2건, 409 18건, lost update 없음)으로 타당성 확인. Major 2건 발견, 전부 수정 완료:
+    - **(수정 완료)** 커서가 `Instant.toEpochMilli()`로 밀리초까지만 인코딩돼, `transactions.traded_at`(TIMESTAMPTZ, 마이크로초 정밀도)의 같은 밀리초 내 여러 거래가 타이브레이크 조건(`tradedAt` 정확 일치)에서 누락됨(4건 중 2건 소실 실측). `epochSecond`+`nano`를 모두 담는 형식으로 전환해 나노초까지 보존
+    - **(수정 완료)** 잘못된 cursor 값(구분자 없음·숫자 아님·UUID 형식 아님 등)이 파싱 예외 그대로 전파돼 500 `INTERNAL_ERROR`로 새던 문제(대조군 `GET /v1/assets`는 400). 신규 `InvalidCursorException`으로 감싸 기존 `VALIDATION_ERROR` 코드로 400 응답(새 에러 코드 추가 없음, `AvgPriceRequiredException` 핸들러와 동일 패턴)
+    - 사용자 확인 후 Minor였던 DIVIDEND의 `holding.version`/`updatedAt` 증가 버그(값은 불변인데 `holding.update()` 호출로 dirty checking이 발생)도 함께 수정
+    - Minor 4건은 보류: 커서 조건이 인덱스 범위가 아닌 Filter로 처리돼 페이지 조회가 사실상 O(N)인 성능 이슈(마이그레이션 필요, `database` 에이전트 소관), POST/GET 응답 스케일 불일치(Task 012·013이 이미 「남은 갭」으로 등재한 기존 문제를 그대로 승계 — 신규 결함 아님), 동시성 회귀 테스트 부재(수동 curl 실측으로 대체), 요청 범위와 무관한 `.gitignore`/`CLAUDE.md` 변경(diff에 혼입됐으나 의도된 별개 변경으로 확인)
+    - 재검증: `TransactionIntegrationTest` 11/11 통과(회귀 테스트 3건 추가분 포함), 전체 스위트(`./gradlew test --rerun-tasks`) 195개 전부 통과, 회귀 없음
+  - ⚠️ 남은 갭:
+    - 커서 페이지네이션의 타이브레이크 조건이 인덱스 범위 조건이 아닌 Filter로 처리돼 페이지 수가 많아지면 사실상 O(N) 스캔이다(위 code-reviewer Minor). 성능 개선(행 값 비교 `(t.tradedAt, t.id) < (:t, :id)` + 복합 인덱스)은 마이그레이션을 동반해 이번 Task 범위 밖 — 다음 착수 시 `database` 에이전트 소관으로 재검토
+    - `POST` 응답(요청 스케일 그대로)과 `GET` 목록 응답(DB `NUMERIC(28,8)` 왕복 스케일)의 표기 차이는 Task 012·013이 이미 등재한 기존 갭을 이 API도 그대로 승계한다 — 신규 결함은 아니며 처리 방향은 여전히 미정
 
 ### Phase 4: 고급 기능 및 최적화
 
@@ -457,6 +471,8 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 | `GET` | `/v1/assets/{id}` | 200 / 404 | 타 유저 접근 시 404 (ID 유출 방지) |
 | `PUT` | `/v1/assets/{id}/holdings` | 200 / 409 | 낙관적 잠금 `version` 필수, 충돌 시 `HOLDING_CONFLICT` |
 | `DELETE` | `/v1/assets/{id}` | 204 / 404 | `ON DELETE CASCADE`로 holdings·transactions 함께 삭제 |
+| `GET` | `/v1/assets/{id}/transactions` | 200 / 400 / 404 | 자산별 거래 이력, `(traded_at DESC, id DESC)` 복합 커서 페이지네이션(`limit` 기본 20/max 100, `cursor`). 타 유저 접근 시 404, 잘못된 `cursor` 값은 400 `VALIDATION_ERROR`(Task 024) |
+| `POST` | `/v1/assets/{id}/transactions` | 201 / 400 / 404 | BUY/SELL/DIVIDEND 직접 입력, 응답에 갱신된 holding 포함. BUY는 가중평균 재계산, SELL은 차감(초과 시 400 `INSUFFICIENT_QUANTITY`), DIVIDEND는 holdings 완전 불변. CASH 자산은 `price` 요청값과 무관하게 `avgPrice` `1` 유지, 타 유저 접근 시 404(Task 024) |
 | `GET` | `/v1/portfolio` | 200 | 취득원가(Task 013, F005a) + `evaluationKrw`·`unrealizedPnl`·`weight`·합계 2개를 실제 시세로 계산(Task 023, F005b). 단건 조회용 Throttle 미적용, 일부 자산의 시세 조회가 실패해도 항상 200이고 그 항목의 3개 필드만 `null` |
 | `POST` | `/v1/simulate/avg-price` | 200 | DB 저장 없음 |
 | `GET` | `/v1/assets/{id}/price` | 200 / 206 / 400 / 404 / 429 / 503 | 외부 시세 단건 조회(STOCK/COIN/CASH-USD). 타 유저 접근 시 404, STOCK·CASH(KRW) 자산에 요청 시 400 `PRICE_NOT_APPLICABLE`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN`(Task 021). Redis 캐시 stale 폴백 시 206 + 응답 본문 `isStale:true`, 사용자당 초당 1건 Throttle 초과 시 429 `PRICE_RATE_LIMITED`(Task 022) |
@@ -468,6 +484,10 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 - `avgPrice`(`POST /v1/assets`): STOCK/COIN은 `> 0` 필수, CASH는 `null` 허용(서버가 `1`로 강제 삽입) — `AvgPriceRequiredUnlessCash` 클래스 레벨 제약으로 검증 (Task 006 결정 #1)
 - `avgPrice`(`PUT /v1/assets/{id}/holdings`): 대상 자산이 CASH면 요청값을 무시하고 `1`을 유지, 그 외 자산에서 `null`이면 `POST`와 동일하게 400 `VALIDATION_ERROR`(대상 자산의 assetType은 서버가 경로 `{id}`로 조회해 판단하므로 `CreateAssetRequest`처럼 클래스 레벨 제약으로는 표현할 수 없다 — Task 012 서비스 로직에서 검증)
 - `version`(`PUT /v1/assets/{id}/holdings`): 필수, 상세 조회 응답의 값을 그대로 반환
+- `txType`(`POST /v1/assets/{id}/transactions`): 필수, `BUY`/`SELL`/`DIVIDEND` 중 하나 (Task 024)
+- `price`(`POST /v1/assets/{id}/transactions`): CASH 자산이면 `null` 허용(서버가 `1`로 강제), 그 외엔 `> 0` 필수 — `null`이면 400 `VALIDATION_ERROR`(신규 코드 없이 `AvgPriceRequiredException` 재사용, Task 024)
+- `quantity`(`POST /v1/assets/{id}/transactions`): `> 0` 필수, `NUMERIC(28,8)` 범위 (Task 024)
+- `tradedAt`(`POST /v1/assets/{id}/transactions`): 필수, 과거 시각 허용 — 사용자가 과거 거래를 직접 기록할 수 있어야 하므로 미래/과거 제약을 두지 않는다 (Task 024)
 
 **금액·수량은 JSON에서 문자열로 직렬화** (부동소수 손실 방지). `assetType` 등 enum은 대문자 문자열로 직렬화(`"STOCK"`).
 
@@ -591,6 +611,8 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 
 **구현된 코드 (Task 022)**: `PRICE_RATE_LIMITED`(429, 캐시 미스/스테일 상태에서 사용자당 초당 1건 Throttle 한도 초과 — 캐시 히트는 이 한도를 소모하지 않음). 캐시 stale 폴백은 에러가 아닌 성공 응답이라 이 표의 `{code,message,timestamp}` 포맷 대신 206 + 응답 본문 `isStale:true`로 표현한다
 
+**구현된 코드 (Task 024)**: `INSUFFICIENT_QUANTITY`(400, `POST /v1/assets/{id}/transactions`에서 SELL 수량이 현재 보유 수량 초과). 잘못된 `cursor` 값은 신규 코드를 추가하지 않고 기존 `VALIDATION_ERROR`로 응답한다(`InvalidCursorException`, `AvgPriceRequiredException`과 동일 패턴)
+
 ---
 
 ## 금융 정밀도 규칙
@@ -621,7 +643,7 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 | # | 쟁점 | 확인된 사실 | 확정 |
 |---|---|---|---|
 | 1 | CASH 자산 등록 | `holdings`에 `CHECK (avg_price > 0)` — 현금에는 평단가 개념이 없어 `0`을 넣으면 INSERT 실패 | 화면에서 평단가 입력란을 숨기고, `CreateAssetRequest.avgPrice`는 CASH일 때 `null`을 허용한다. 서버는 `assetType == CASH`면 `avgPrice=1`을 강제 삽입한다(`AvgPriceRequiredUnlessCash` 클래스 레벨 검증, Task 012에서 구현). CHECK 제약은 그대로 둔다 — 완화하면 STOCK/COIN의 0 평단가 오입력까지 함께 통과하게 된다 |
-| 2 | `transactions` 기록 여부 | F001(자산 등록)·F003(자산 수정) 어디에도 `transactions` INSERT 경로가 정의돼 있지 않음 | 자산 **등록 시에만** `BUY` 1건을 자산·Holding과 같은 트랜잭션으로 기록한다(Task 012). 보유 **수정**(F003)은 기록하지 않는다 — 수정은 실매매가 아닌 오류 정정일 수도 있어, 수정을 그대로 거래로 남기면 이력이 실제 매매와 달라진다. Task 024가 사용자 직접 거래 입력 API로 이 갭을 메운다 |
+| 2 | `transactions` 기록 여부 | F001(자산 등록)·F003(자산 수정) 어디에도 `transactions` INSERT 경로가 정의돼 있지 않음 | 자산 **등록 시에만** `BUY` 1건을 자산·Holding과 같은 트랜잭션으로 기록한다(Task 012). 보유 **수정**(F003)은 기록하지 않는다 — 수정은 실매매가 아닌 오류 정정일 수도 있어, 수정을 그대로 거래로 남기면 이력이 실제 매매와 달라진다. **✅ Task 024에서 해소** — `POST /v1/assets/{id}/transactions`로 사용자가 BUY/SELL/DIVIDEND를 직접 기록할 수 있다 |
 | 3 | 종목 중복 등록 | `assets`에 `(user_id, ticker)` UNIQUE 없음 — 같은 종목을 여러 번 등록 가능 | **허용한다.** UNIQUE 제약을 추가하지 않으므로 이 Task에 Flyway 마이그레이션이 없다. 총 자산 화면(구 포트폴리오 화면)은 같은 티커가 여러 줄로 나타날 수 있음을 전제로 설계한다(Task 009, 투자/현금 자산 그룹 안에서도 별도 행 유지) |
 | 4 | 자산 삭제 시 이력 소실 | `holdings`·`transactions`의 FK가 `ON DELETE CASCADE` — 자산 삭제(F004) 시 거래 이력도 함께 사라짐 | 하드 삭제를 유지한다(소프트 삭제로 전환하지 않음). Task 011의 삭제 확인 팝업에 "보유 정보와 거래 이력이 함께 삭제되며 복구할 수 없습니다" 경고 문구를 포함해 최소 완화한다 |
 
