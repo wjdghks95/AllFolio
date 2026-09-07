@@ -18,6 +18,8 @@ import {
   formatSignedAmount,
   formatWeight,
   scaleFor,
+  toEditableAmount,
+  toEditableQuantity,
 } from '../lib/money';
 import { Dec, toScaledString } from '../lib/big';
 import {
@@ -175,10 +177,13 @@ export default function AssetDetailPage() {
   const [editSubmitError, setEditSubmitError] = useState<string | null>(null);
 
   // 자산 조회가 완료된 시점에만 수정 폼의 초깃값을 채운다 — 마운트 시점엔 asset이 아직 없다.
+  // 서버 값(asset.quantity/avgPrice)은 NUMERIC(28,8) 컬럼을 그대로 문자열화한 것이라 항상
+  // 소수 8자리다(예: "20.00000000") — 주식·현금처럼 실제로는 정수인 값도 그대로 넣으면
+  // 편집 입력란에 코인과 같은 소수점이 보인다. toEditable*로 무의미한 후행 0을 지우고 채운다.
   useEffect(() => {
     if (!asset) return;
-    setEditQuantity(asset.quantity);
-    setEditAvgPrice(asset.assetType !== 'CASH' ? asset.avgPrice : null);
+    setEditQuantity(toEditableQuantity(asset.quantity));
+    setEditAvgPrice(asset.assetType !== 'CASH' ? toEditableAmount(asset.avgPrice) : null);
   }, [asset]);
 
   // 삭제 확인 다이얼로그(F004). deleteSubmitting은 연타 방지용 — 확인 버튼을 disabled 처리해

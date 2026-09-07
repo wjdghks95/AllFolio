@@ -1,7 +1,7 @@
 package com.allfolio.domain;
 
 /**
- * 「금융 정밀도 규칙」(docs/ROADMAP.md): 코인은 통화 무관 8자리, 그 외엔 통화 기준(KRW 0/USD 4/기타 2).
+ * 「금융 정밀도 규칙」(docs/ROADMAP.md): 코인은 통화 무관 8자리, 그 외엔 통화 기준(KRW 0/USD 2/기타 2).
  * PortfolioService/SimulationService가 각자 복제해 갖고 있던 로직을 통합한다(docs/ROADMAP.md Task 016).
  */
 public final class PrecisionScale {
@@ -26,7 +26,7 @@ public final class PrecisionScale {
     public static int scaleForCurrency(String currency) {
         return switch (currency) {
             case "KRW" -> 0;
-            case "USD" -> 4;
+            case "USD" -> 2;
             default -> 2;
         };
     }

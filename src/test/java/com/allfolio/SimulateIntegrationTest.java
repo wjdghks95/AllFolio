@@ -139,9 +139,9 @@ class SimulateIntegrationTest extends AbstractIntegrationTest {
                 .bodyJson().extractingPath("$.code").asString().isEqualTo("VALIDATION_ERROR");
     }
 
-    /** USD는 「금융 정밀도 규칙」상 scale 4 — KRW(0)/COIN(8)과 다른 분기가 실제로 타는지 확인한다. */
+    /** USD는 「금융 정밀도 규칙」상 scale 2 — KRW(0)/COIN(8)과 다른 분기가 실제로 타는지 확인한다. */
     @Test
-    void simulatingUsdAssetUsesFourDecimalScale() {
+    void simulatingUsdAssetUsesTwoDecimalScale() {
         String assetId = idOf(createAsset(tokenA, stockRequest("AAPL", "애플", "10", "150.1234", "USD")));
 
         MvcTestResult result = authorizedPost("/v1/simulate/avg-price", tokenA,
@@ -149,8 +149,8 @@ class SimulateIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(result).hasStatusOk();
         Map<String, Object> body = bodyOf(result);
-        assertThat(body.get("currentAvgPrice")).isEqualTo("150.1234");
-        assertThat(body.get("expectedAvgPrice")).isEqualTo("153.7448");
+        assertThat(body.get("currentAvgPrice")).isEqualTo("150.12");
+        assertThat(body.get("expectedAvgPrice")).isEqualTo("153.74");
         assertThat(body.get("expectedQuantity")).isEqualTo("15.00000000");
     }
 

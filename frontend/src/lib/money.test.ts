@@ -6,6 +6,8 @@ import {
   formatWeight,
   NULL_DISPLAY,
   scaleFor,
+  toEditableAmount,
+  toEditableQuantity,
 } from './money'
 
 describe('scaleFor', () => {
@@ -17,8 +19,8 @@ describe('scaleFor', () => {
     expect(scaleFor({ currency: 'KRW' })).toBe(0)
   })
 
-  it('USD는 4', () => {
-    expect(scaleFor({ currency: 'USD' })).toBe(4)
+  it('USD는 2', () => {
+    expect(scaleFor({ currency: 'USD' })).toBe(2)
   })
 
   it('미지 통화는 2로 폴백한다 (throw 금지)', () => {
@@ -31,12 +33,20 @@ describe('formatAmount', () => {
     expect(formatAmount('6476733.92', { currency: 'KRW' })).toBe('6,476,734')
   })
 
-  it('USD는 소수 4자리를 유지한다', () => {
-    expect(formatAmount('182.5', { currency: 'USD' })).toBe('182.5000')
+  it('USD는 소수 2자리를 유지한다', () => {
+    expect(formatAmount('182.5', { currency: 'USD' })).toBe('182.50')
   })
 
-  it('COIN은 소수 8자리를 그대로 유지한다', () => {
+  it('COIN은 소수부가 있으면 8자리를 그대로 유지한다', () => {
     expect(formatAmount('0.05123456', { currency: 'USD', assetType: 'COIN' })).toBe('0.05123456')
+  })
+
+  it('COIN이라도 값이 정수면 후행 0을 지운다', () => {
+    expect(formatAmount('100000000', { currency: 'KRW', assetType: 'COIN' })).toBe('100,000,000')
+  })
+
+  it('COIN은 소수부가 있어도 후행 0만 지운다 (정규식이 소수부까지 지우면 이 값에서 잡힌다)', () => {
+    expect(formatAmount('10.50000000', { currency: 'KRW', assetType: 'COIN' })).toBe('10.5')
   })
 
   it('null은 — 를 반환한다', () => {
@@ -61,6 +71,28 @@ describe('formatQuantity', () => {
 
   it('그룹핑 후에도 소수부는 그대로 유지한다', () => {
     expect(formatQuantity('0.05123456')).toBe('0.05123456')
+  })
+})
+
+describe('toEditableQuantity', () => {
+  it('후행 0을 지우되 값은 반올림하지 않는다', () => {
+    expect(toEditableQuantity('20.00000000')).toBe('20')
+    expect(toEditableQuantity('10.50000000')).toBe('10.5')
+  })
+})
+
+describe('toEditableAmount', () => {
+  it('통화별 표시 스케일로 반올림하지 않는다 — KRW/USD도 소수 원본값을 그대로 보존한다', () => {
+    // code-reviewer M3 회귀 테스트. scaleFor 기준(KRW 0/USD 2)으로 반올림하면
+    // "70000.5" -> "70001", "182.5555" -> "182.56"처럼 수정 폼에 반올림된 값이 채워지고,
+    // 사용자가 그 값을 그대로 제출하면 평단가가 조용히 바뀌는 데이터 손실이 된다.
+    expect(toEditableAmount('70000.50000000')).toBe('70000.5')
+    expect(toEditableAmount('182.55550000')).toBe('182.5555')
+  })
+
+  it('후행 0만 지운다', () => {
+    expect(toEditableAmount('80000000.00000000')).toBe('80000000')
+    expect(toEditableAmount('182.50000000')).toBe('182.5')
   })
 })
 

@@ -149,15 +149,15 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
         assertThat(cash.get("quantity")).isEqualTo("1500000.00000000");
         assertThat(cash.get("avgPrice")).isEqualTo("1");
         Map<String, Object> aapl = itemByTicker(items, "AAPL");
-        assertThat(aapl.get("cost")).isEqualTo("2190.0000");
+        assertThat(aapl.get("cost")).isEqualTo("2190.00");
         assertThat(aapl.get("quantity")).isEqualTo("12.00000000");
-        assertThat(aapl.get("avgPrice")).isEqualTo("182.5000");
+        assertThat(aapl.get("avgPrice")).isEqualTo("182.50");
 
         // 통화별 합계는 스케일이 큰 COIN 원가(4201233.92000000)가 섞여도 통화 스케일(KRW 0자리)로
         // 반올림된다 — 600000+175500+4201233.92+1500000=6476733.92 → HALF_UP, scale 0 → 6476734.
         Map<String, String> totalCostByCurrency = totalCostByCurrencyOf(body);
         assertThat(totalCostByCurrency.get("KRW")).isEqualTo("6476734");
-        assertThat(totalCostByCurrency.get("USD")).isEqualTo("2190.0000");
+        assertThat(totalCostByCurrency.get("USD")).isEqualTo("2190.00");
     }
 
     /**
@@ -345,8 +345,9 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
     }
 
     /**
-     * STOCK/COIN 시세는 자산의 currency와 무관하게 항상 KRW 환산액(업비트 KRW 마켓, 국내 시세)이다.
-     * 자산을 USD로 등록하면(currency=USD, cost는 USD 스케일 4로 저장) evaluationKrw(KRW)와 cost(USD)의
+     * STOCK/COIN 시세는 자산의 currency와 무관하게 항상 KRW 환산액이다(STOCK은 국내 시세라 원화,
+     * COIN은 USD면 PriceService.coinPrice()가 환율로 KRW 환산해서 돌려준다).
+     * 자산을 USD로 등록하면(currency=USD, cost는 USD 스케일 2로 저장) evaluationKrw(KRW)와 cost(USD)의
      * 통화 단위가 맞지 않아 unrealizedPnl을 신뢰성 있게 계산할 수 없으므로 null로 남아야 한다(Task 023
      * Major 3, "거짓 숫자를 내보내지 않는다" 원칙). evaluationKrw 자체는 유효한 값이라 정상 계산되고,
      * weight도 다른 자산과의 비중 분모(evaluationKrw 기준)에 정상 포함되어야 한다.

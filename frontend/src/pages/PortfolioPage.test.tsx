@@ -244,6 +244,24 @@ describe('PortfolioPage', () => {
     expect(row.textContent).not.toContain('비중');
   });
 
+  it('CASH 행은 "잔액"만 보여주고 평가금액·수량·손익 라벨은 없다', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    mockPortfolioResponse(fetchMock, portfolioResponseFixture);
+    renderPortfolioPage();
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('portfolio-item-0198f2a1-0004-7c3a-8f21-000000000004'),
+      ).toBeTruthy(),
+    );
+    const row = screen.getByTestId('portfolio-item-0198f2a1-0004-7c3a-8f21-000000000004');
+    expect(row.textContent).toContain('잔액');
+    expect(row.textContent).not.toContain('평가금액');
+    expect(row.textContent).not.toContain('수량');
+    expect(row.textContent).not.toContain('손익');
+  });
+
   it('history state에 flash가 있으면 배너가 뜨고, 화면에 계속 남아 있는다', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

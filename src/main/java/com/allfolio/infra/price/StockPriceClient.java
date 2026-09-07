@@ -8,11 +8,14 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * 공공데이터포털 "금융위원회_주식시세정보"(getStockSecuritiesInfoService) 클라이언트.
@@ -38,13 +41,30 @@ public class StockPriceClient {
 
     private static final DateTimeFormatter BAS_DT_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final Pattern PERCENT_ENCODED = Pattern.compile("%[0-9A-Fa-f]{2}");
 
     private final RestClient restClient;
     private final String serviceKey;
 
     public StockPriceClient(RestClient.Builder restClientBuilder, StockProperties properties) {
         this.restClient = restClientBuilder.baseUrl(properties.baseUrl()).build();
-        this.serviceKey = properties.serviceKey();
+        this.serviceKey = decodeIfAlreadyEncoded(properties.serviceKey());
+    }
+
+    // 공공데이터포털은 발급 키를 "인코딩 키"(이미 URL-인코딩됨, 예: "=="가 "%3D%3D")와 "디코딩 키"
+    // (원문 그대로, Base64라 리터럴 "+"/"="를 포함할 수 있음) 두 형식으로 나눠 제공한다. RestClient의
+    // {serviceKey} 템플릿 변수는 넘겨받은 값을 "아직 인코딩 안 된 원문"으로 보고 자체적으로 한 번
+    // 인코딩하므로, 두 형식을 구분 없이 그대로 넘기면 인코딩 키는 이중 인코딩("등록되지 않은
+    // 서비스키" 인증 실패, curl 직접 호출로 재현 확인)되고, 반대로 디코딩 키를 여기서 무조건
+    // URLDecoder로 한 번 더 돌리면 리터럴 "+"가 공백으로 바뀌어 역시 깨진다.
+    //
+    // Base64 알파벳(A-Z a-z 0-9 + / =)에는 "%"가 절대 나오지 않으므로, "%XX" 패턴이 있으면 그 자체가
+    // "이미 인코딩된 키"라는 확실한 신호다 — 그때만 디코딩해서 원문으로 되돌리고, 아니면 원문(디코딩
+    // 키 또는 특수문자 없는 평문 키) 그대로 둬 RestClient가 처음이자 유일하게 인코딩하게 한다.
+    static String decodeIfAlreadyEncoded(String serviceKey) {
+        return PERCENT_ENCODED.matcher(serviceKey).find()
+                ? URLDecoder.decode(serviceKey, StandardCharsets.UTF_8)
+                : serviceKey;
     }
 
     @CircuitBreaker(name = "stock", fallbackMethod = "fallback")

@@ -29,9 +29,9 @@ class BigDecimalPrecisionTest {
     @ParameterizedTest
     @CsvSource({
             "STOCK, KRW, 0",
-            "STOCK, USD, 4",
+            "STOCK, USD, 2",
             "CASH, KRW, 0",
-            "CASH, USD, 4",
+            "CASH, USD, 2",
             "COIN, KRW, 8",
             "COIN, USD, 8",
             "STOCK, JPY, 2",
@@ -43,7 +43,7 @@ class BigDecimalPrecisionTest {
     @ParameterizedTest
     @CsvSource({
             "KRW, 0",
-            "USD, 4",
+            "USD, 2",
             "JPY, 2",
     })
     void scaleForCurrencyIgnoresAssetType(String currency, int expectedScale) {

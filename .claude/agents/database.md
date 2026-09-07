@@ -45,7 +45,7 @@ Phase가 넘어가면 그 항목이 곧 담당 업무가 된다. 유예와 금�
 | `asset_type`/`tx_type`은 CHECK 제약으로 값 도메인 강제 | PRD 「🗄️ 데이터 모델」 |
 | 모든 시각 컬럼은 `TIMESTAMPTZ` (`TIMESTAMP` 아님) | PRD 「🗄️ 데이터 모델」 |
 | 엔티티는 `@Column(columnDefinition = "NUMERIC(28,8)")`로 1:1 매핑 | `ddl-auto: validate` |
-| 스케일/반올림: KRW 0 / USD 4 / 코인 8 / 비중 2, 전부 `HALF_UP` | ROADMAP 「금융 정밀도 규칙」 |
+| 스케일/반올림: KRW 0 / USD 2 / 코인 8 / 비중 2, 전부 `HALF_UP` | ROADMAP 「금융 정밀도 규칙」 |
 
 ## UUID PK 방침 (V1에서 실측 확정됨)
 

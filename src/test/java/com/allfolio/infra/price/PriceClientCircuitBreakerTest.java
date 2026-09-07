@@ -79,7 +79,7 @@ class PriceClientCircuitBreakerTest extends AbstractIntegrationTest {
 
         // minimumNumberOfCalls(4)만큼 실제로 호출 — 전부 WireMock까지 요청이 간다.
         for (int i = 0; i < 4; i++) {
-            assertThatThrownBy(() -> upbitPriceClient.getPrice("KRW-BTC"))
+            assertThatThrownBy(() -> upbitPriceClient.getPrice("KRW-BTC", "KRW"))
                     .isInstanceOf(ExternalPriceApiException.class);
         }
 
@@ -87,7 +87,7 @@ class PriceClientCircuitBreakerTest extends AbstractIntegrationTest {
         assertThat(circuitBreaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
 
         // Open 상태에서의 5번째 호출도 예외는 나지만, 실제로는 WireMock에 요청이 가지 않아야 한다.
-        assertThatThrownBy(() -> upbitPriceClient.getPrice("KRW-BTC"))
+        assertThatThrownBy(() -> upbitPriceClient.getPrice("KRW-BTC", "KRW"))
                 .isInstanceOf(ExternalPriceApiException.class);
 
         wireMockServer.verify(4, getRequestedFor(urlEqualTo("/v1/ticker?markets=KRW-BTC")));
@@ -107,7 +107,7 @@ class PriceClientCircuitBreakerTest extends AbstractIntegrationTest {
                         .withBody("[]")));
 
         for (int i = 0; i < 6; i++) {
-            assertThatThrownBy(() -> upbitPriceClient.getPrice("KRW-NOPE"))
+            assertThatThrownBy(() -> upbitPriceClient.getPrice("KRW-NOPE", "KRW"))
                     .isInstanceOf(TickerNotFoundException.class);
         }
 

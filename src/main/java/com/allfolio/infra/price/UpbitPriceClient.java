@@ -28,9 +28,10 @@ public class UpbitPriceClient {
     }
 
     @CircuitBreaker(name = "upbit", fallbackMethod = "fallback")
-    public Price getPrice(String ticker) {
+    public Price getPrice(String ticker, String currency) {
+        String market = normalizeMarket(ticker, currency);
         List<UpbitTickerResponse> response = restClient.get()
-                .uri("/v1/ticker?markets={ticker}", ticker)
+                .uri("/v1/ticker?markets={market}", market)
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {
                 });
@@ -43,10 +44,39 @@ public class UpbitPriceClient {
         }
 
         BigDecimal tradePrice = response.get(0).tradePrice();
-        return new Price(tradePrice, "KRW", Instant.now());
+        // 응답 통화는 넘겨받은 currency 인자가 아니라 실제로 조회한 마켓 접두어에서 도출한다.
+        // 이미 마켓 접두어가 포함된 티커(과거 데이터·직접 입력)는 자산의 currency 필드와
+        // 어긋날 수 있는데(예: ticker="KRW-BTC"인데 currency="USD"로 등록), currency 인자를
+        // 그대로 믿으면 원화 시세에 환율을 또 곱하거나 달러 시세를 원화로 잘못 표기하게 된다
+        // (code-reviewer M1 지적, 최대 약 1,300배 오차 실측).
+        return new Price(tradePrice, domainCurrencyOf(market), Instant.now());
     }
 
-    private Price fallback(String ticker, Throwable ex) {
+    // 사용자는 자산 등록 화면에서 코인 심볼만 입력한다("BTC") — 업비트 API가 요구하는
+    // "KRW-BTC" 마켓 코드 자체는 자산의 통화(currency)로부터 붙여준다. 이미 마켓 접두어가
+    // 포함된 티커(과거 데이터·직접 입력)는 그대로 존중해 이중으로 붙이지 않는다.
+    private String normalizeMarket(String ticker, String currency) {
+        return ticker.contains("-") ? ticker : upbitQuoteCurrency(currency) + "-" + ticker;
+    }
+
+    // 업비트는 "USD-BTC" 같은 달러 마켓을 지원하지 않는다 — 원화(KRW) 마켓과 스테이블코인
+    // (USDT) 마켓만 있다. 자산 통화가 USD면 사실상 동일 가치인 USDT 마켓으로 대신 조회한다.
+    // KRW/USD 외 통화(예: JPY — CreateAssetRequest의 currency 정규식은 임의의 3글자 통화를
+    // 허용한다)는 그대로 접두어로 써 "JPY-BTC"를 조회하는데, 업비트에 그런 마켓이 없어
+    // TickerNotFoundException으로 안전하게 실패한다(성공 응답을 조작해서 만들지 않는 한
+    // coinPrice()까지 도달하지 않는다) — 새 통화를 지원하려면 여기부터 고쳐야 한다.
+    private String upbitQuoteCurrency(String currency) {
+        return "USD".equals(currency) ? "USDT" : currency;
+    }
+
+    // 마켓 접두어(KRW-BTC의 "KRW")를 도메인 통화 개념으로 되돌린다 — USDT는 업비트 표기일 뿐
+    // 자산 통화로는 "USD"로 부른다(PrecisionScale 등 나머지 코드는 USDT를 모른다).
+    private String domainCurrencyOf(String market) {
+        String quotePrefix = market.substring(0, market.indexOf('-'));
+        return "USDT".equals(quotePrefix) ? "USD" : quotePrefix;
+    }
+
+    private Price fallback(String ticker, String currency, Throwable ex) {
         if (ex instanceof TickerNotFoundException tickerNotFoundException) {
             throw tickerNotFoundException;
         }

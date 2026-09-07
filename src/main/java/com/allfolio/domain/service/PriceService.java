@@ -22,6 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.util.Optional;
@@ -167,16 +168,48 @@ public class PriceService {
     /** CASH(KRW)는 getPrice() 진입 시점에 이미 걸러지므로 여기 도달하는 CASH는 항상 USD다. */
     private Price fetchRawPrice(Asset asset) {
         return switch (asset.getAssetType()) {
-            case COIN -> upbitPriceClient.getPrice(asset.getTicker());
+            case COIN -> coinPrice(asset);
             case STOCK -> stockPriceClient.getPrice(asset.getTicker());
             case CASH -> exchangeRateClient.getUsdKrwRate();
         };
     }
 
     /**
+     * 업비트 KRW 마켓은 이미 원화 시세라 그대로 쓴다. USD로 등록한 코인은 업비트에 실제로 존재하는
+     * USDT 마켓으로 대신 조회하므로(UpbitPriceClient), 받은 값은 달러 표시 시세다 — CASH(USD)와
+     * 동일한 환율(ExchangeRateClient)을 곱해 원화로 환산하지 않으면 evaluationKrw가 달러 숫자를
+     * 원화인 것처럼 그대로 노출한다(실측: 0.02 BTC가 "평가금액 1,587"로 찍히던 결함, 실제 환산
+     * 원화 평가금액의 1/1300 수준).
+     */
+    private Price coinPrice(Asset asset) {
+        Price upbitPrice = upbitPriceClient.getPrice(asset.getTicker(), asset.getCurrency());
+        if ("KRW".equals(upbitPrice.currency())) {
+            return upbitPrice;
+        }
+        BigDecimal krwAmount = upbitPrice.amount().multiply(cachedUsdKrwRate().amount());
+        return new Price(krwAmount, "KRW", upbitPrice.asOf());
+    }
+
+    /**
+     * USD 코인의 환율 조회를 CASH(USD)와 같은 캐시(price:CASH:USD, 12시간 freshTtl)에 태운다 —
+     * 그냥 exchangeRateClient를 직접 부르면 환율은 하루 단위로 갱신되는데도 COIN의 짧은
+     * freshTtl(10초) 주기로 매번 실호출이 나간다(code-reviewer M2 지적).
+     */
+    private Price cachedUsdKrwRate() {
+        String cacheKey = "price:CASH:USD";
+        Optional<PricedQuote> cached = priceCacheStore.find(cacheKey, priceCacheProperties.cashUsdFreshTtl());
+        if (cached.isPresent() && !cached.get().stale()) {
+            return cached.get().price();
+        }
+        Price exchangeRate = exchangeRateClient.getUsdKrwRate();
+        priceCacheStore.save(cacheKey, exchangeRate);
+        return exchangeRate;
+    }
+
+    /**
      * 스케일은 실제 반환 통화(rawPrice.currency()) 기준이어야 한다 — CASH(USD) 자산의 환율 시세는
      * 원화 환산값(currency=KRW)으로 오는데, asset.getCurrency()(USD)로 스케일을 계산하면
-     * currency=KRW인데 scale은 USD(4자리)가 되는 자기모순이 생긴다.
+     * currency=KRW인데 scale은 USD(2자리)가 되는 자기모순이 생긴다.
      */
     private Price scale(Price rawPrice, Asset asset) {
         int scale = PrecisionScale.scaleFor(asset.getAssetType(), rawPrice.currency());
@@ -189,9 +222,19 @@ public class PriceService {
     /** 캐시 키는 시장 데이터 식별자 기준(사용자 무관) — 같은 종목을 여러 사용자가 조회해도 캐시를 공유한다. */
     private String cacheKeyFor(Asset asset) {
         return switch (asset.getAssetType()) {
-            case COIN, STOCK -> "price:%s:%s".formatted(asset.getAssetType(), asset.getTicker());
+            case COIN -> "price:COIN:%s%s".formatted(asset.getTicker(), coinCurrencySuffix(asset));
+            case STOCK -> "price:STOCK:" + asset.getTicker();
             case CASH -> "price:CASH:" + asset.getCurrency();
         };
+    }
+
+    /**
+     * COIN은 같은 티커라도 통화별로 실제 조회 마켓(KRW/USDT)과 환산 결과가 달라서 캐시 키에도
+     * 통화를 반영해야 한다 — 안 그러면 "BTC"를 KRW로 등록한 자산과 USD로 등록한 자산이 캐시를
+     * 공유해 서로 다른 가격을 덮어쓴다. 기존 KRW 코인의 캐시 키는 그대로 유지한다(하위 호환).
+     */
+    private String coinCurrencySuffix(Asset asset) {
+        return "KRW".equals(asset.getCurrency()) ? "" : ":" + asset.getCurrency();
     }
 
     private Duration freshTtlFor(AssetType assetType) {

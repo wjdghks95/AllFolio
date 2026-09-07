@@ -90,6 +90,11 @@ function PortfolioItemRow({ item }: { item: PortfolioItem }) {
   // 통화·스케일로 잘못 찍힌다 — evaluationKrw에서 이미 한 번 겪은 버그와 같은 유형이다.
   const pnl = formatSignedAmount(item.unrealizedPnl, { currency: 'KRW' });
 
+  // CASH는 시세로 "평가"되는 자산이 아니라 보유액 자체가 값이다(PortfolioService — CASH(KRW)의
+  // evaluationKrw는 quantity 그대로, unrealizedPnl은 늘 0). 그래서 손익·수량은 항상 같은 말을
+  // 반복할 뿐이라 아예 보여주지 않고, 값의 이름도 "평가금액"이 아니라 "잔액"으로 부른다.
+  const isCash = item.assetType === 'CASH';
+
   return (
     <li>
       <Link
@@ -128,23 +133,27 @@ function PortfolioItemRow({ item }: { item: PortfolioItem }) {
                 무관하게 KRW 스케일(정수)로 표시한다 — item.currency/assetType을 넘기면
                 COIN 등에서 소수 8자리로 잘못 찍힌다 (docs/DESIGN.md §9 후속 과제였음). */}
             <Metric
-              label="평가금액"
+              label={isCash ? '잔액' : '평가금액'}
               value={formatAmount(item.evaluationKrw, { currency: 'KRW' })}
               valueClass="text-ink-soft"
             />
           </div>
 
-          {/* 아랫줄: 수량 ↔ 손익. 목록 행은 이 4개만 보여준다 —
-              나머지(평단가·취득원가·비중)는 행을 눌러 들어가는 자산 상세(Task 011)가 맡는다. */}
-          <div className="mt-1.5 flex items-baseline justify-between gap-3">
-            <Metric label="수량" value={formatQuantity(item.quantity)} />
-            <Metric
-              label="손익"
-              value={pnl.text}
-              mark={TONE_MARK[pnl.tone]}
-              valueClass={TONE_CLASS[pnl.tone]}
-            />
-          </div>
+          {/* 아랫줄: 수량 ↔ 손익. CASH는 위 잔액이 수량 그 자체이자 손익이 항상 0이라
+              같은 값을 라벨만 바꿔 두 번 적지 않는다 — 아랫줄 자체를 렌더하지 않는다.
+              그 외 자산은 이 4개만 보여준다 — 나머지(평단가·취득원가·비중)는 행을 눌러
+              들어가는 자산 상세(Task 011)가 맡는다. */}
+          {isCash ? null : (
+            <div className="mt-1.5 flex items-baseline justify-between gap-3">
+              <Metric label="수량" value={formatQuantity(item.quantity)} />
+              <Metric
+                label="손익"
+                value={pnl.text}
+                mark={TONE_MARK[pnl.tone]}
+                valueClass={TONE_CLASS[pnl.tone]}
+              />
+            </div>
+          )}
         </div>
 
         {/* 이동 표식은 이름 줄 오른쪽 끝에 둔다 — 세로 가운데에 두면

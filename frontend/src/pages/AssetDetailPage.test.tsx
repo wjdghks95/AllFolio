@@ -184,7 +184,7 @@ describe('AssetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('비트코인')).toBeTruthy());
     expect(screen.getByTestId('asset-detail-quantity').textContent).toContain('0.05123456');
     expect(screen.getByTestId('asset-detail-avg-price').textContent).toContain('82,000,000');
-    expect(screen.getByTestId('asset-detail-cost').textContent).toContain('4,201,233.92000000');
+    expect(screen.getByTestId('asset-detail-cost').textContent).toContain('4,201,233.92');
   });
 
   it('평가금액·평가손익·비중 등 null 필드는 "—"로 표시한다', async () => {

@@ -57,7 +57,7 @@ Phase가 넘어가면 그 항목이 곧 담당 업무가 된다. 유예와 금�
 | 규칙 | 근거 |
 |---|---|
 | 금융 연산에 `double`/`float` 금지, 예외 없이 `BigDecimal` | ROADMAP 「금융 정밀도 규칙」 |
-| 스케일·반올림: KRW 0 / USD 4 / 코인 8 / 비중 2, 전부 `HALF_UP` | ROADMAP 「금융 정밀도 규칙」 |
+| 스케일·반올림: KRW 0 / USD 2 / 코인 8 / 비중 2, 전부 `HALF_UP` | ROADMAP 「금융 정밀도 규칙」 |
 | `BigDecimal` 비교는 `.compareTo()` (`.equals()`는 scale 차이로 오탐) | `.claude/rules/testing.md` |
 | 에러 응답은 `{code, message, timestamp}` 3필드 고정, code는 ROADMAP 표의 값만 사용 | ROADMAP 「에러 응답 포맷」 |
 | 자산 단건 조회 시 **타 유저 소유는 403이 아니라 404** (ID 유출 방지) | ROADMAP Task 012 |

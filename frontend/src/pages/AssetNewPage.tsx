@@ -58,6 +58,8 @@ const PLACEHOLDER: Record<
   { ticker: string; name: string; quantity: string; avgPrice: string }
 > = {
   STOCK: { ticker: '005930', name: '삼성전자', quantity: '10', avgPrice: '71500' },
+  // 코인 심볼만 입력받는다("BTC") — 업비트가 요구하는 "KRW-BTC" 같은 마켓 코드 접두어는
+  // 서버가 이 자산의 currency(KRW/USD)로부터 자동으로 붙인다.
   COIN: { ticker: 'BTC', name: '비트코인', quantity: '0.5', avgPrice: '82000000' },
   // CASH는 평단가 칸 자체가 렌더되지 않으므로 avgPrice 예시는 쓰이지 않는다.
   CASH: { ticker: 'KRW', name: '원화 예수금', quantity: '1000000', avgPrice: '' },

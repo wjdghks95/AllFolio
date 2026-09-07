@@ -92,7 +92,7 @@ class PriceServiceTest {
     @Test
     void coinAssetRoutesToUpbitAndScalesToEightDecimals() {
         givenAsset(AssetType.COIN, "KRW");
-        when(upbitPriceClient.getPrice("BTC"))
+        when(upbitPriceClient.getPrice("BTC", "KRW"))
                 .thenReturn(new Price(new BigDecimal("123456789.1"), "KRW", Instant.now()));
 
         PricedQuote quote = priceService.getPrice(userId, assetId);
@@ -101,6 +101,65 @@ class PriceServiceTest {
         assertThat(quote.price().amount()).isEqualByComparingTo("123456789.10000000");
         assertThat(quote.price().amount().scale()).isEqualTo(8);
         verify(priceCacheStore).save(eq("price:COIN:BTC"), any(Price.class));
+    }
+
+    /**
+     * 회귀 방지: USD로 등록한 코인은 업비트 USDT 마켓에서 달러 시세를 받아온 뒤, CASH(USD)와
+     * 동일한 환율로 원화 환산까지 마쳐야 한다 — 환산을 빼먹으면 달러 숫자(79350)가 원화 평가금액인
+     * 것처럼 그대로 새어나간다(실측: 0.02 BTC가 "평가금액 1,587원"으로 잘못 찍히던 결함).
+     */
+    @Test
+    void coinUsdAssetConvertsUsdtQuoteToKrwUsingExchangeRate() {
+        givenAsset(AssetType.COIN, "USD");
+        when(upbitPriceClient.getPrice("BTC", "USD"))
+                .thenReturn(new Price(new BigDecimal("79350"), "USD", Instant.now()));
+        when(exchangeRateClient.getUsdKrwRate())
+                .thenReturn(new Price(new BigDecimal("1350"), "KRW", Instant.now()));
+
+        PricedQuote quote = priceService.getPrice(userId, assetId);
+
+        assertThat(quote.price().amount()).isEqualByComparingTo("107122500");
+        assertThat(quote.price().currency()).isEqualTo("KRW");
+        // COIN은 통화 무관 스케일 8 — 환산 후에도 유지돼야 한다.
+        assertThat(quote.price().amount().scale()).isEqualTo(8);
+        // 같은 티커라도 KRW 코인과 캐시를 공유하면 서로 다른 가격을 덮어쓰므로 키가 갈라져야 한다.
+        verify(priceCacheStore).save(eq("price:COIN:BTC:USD"), any(Price.class));
+        // CASH(USD)와 같은 캐시(price:CASH:USD)에도 환율을 저장해야 다음 COIN(USD) 조회가
+        // 재사용할 수 있다.
+        verify(priceCacheStore).save(eq("price:CASH:USD"), any(Price.class));
+    }
+
+    /**
+     * 회귀 방지(code-reviewer M2): 환율은 하루 단위로만 갱신되는데(CASH(USD) freshTtl 12시간)
+     * COIN(USD)이 매번 exchangeRateClient를 직접 부르면 COIN의 짧은 freshTtl(10초) 주기로
+     * 환율 API가 불필요하게 반복 호출된다. CASH(USD)가 이미 채워둔 캐시가 신선하면 그 값을
+     * 재사용해야 하고, exchangeRateClient는 아예 불리지 않아야 한다.
+     */
+    @Test
+    void coinUsdAssetReusesFreshCashUsdExchangeRateCache() {
+        givenAsset(AssetType.COIN, "USD");
+        when(upbitPriceClient.getPrice("BTC", "USD"))
+                .thenReturn(new Price(new BigDecimal("79350"), "USD", Instant.now()));
+        Price cachedRate = new Price(new BigDecimal("1350"), "KRW", Instant.now());
+        when(priceCacheStore.find(eq("price:CASH:USD"), any(Duration.class)))
+                .thenReturn(Optional.of(new PricedQuote(cachedRate, false)));
+
+        PricedQuote quote = priceService.getPrice(userId, assetId);
+
+        assertThat(quote.price().amount()).isEqualByComparingTo("107122500");
+        verifyNoInteractions(exchangeRateClient);
+    }
+
+    /** 업비트 KRW 마켓에서 이미 원화로 오는 코인은 환율 API를 아예 부르지 않아야 한다. */
+    @Test
+    void coinKrwAssetDoesNotCallExchangeRateClient() {
+        givenAsset(AssetType.COIN, "KRW");
+        when(upbitPriceClient.getPrice("BTC", "KRW"))
+                .thenReturn(new Price(new BigDecimal("123456789.1"), "KRW", Instant.now()));
+
+        priceService.getPrice(userId, assetId);
+
+        verifyNoInteractions(exchangeRateClient);
     }
 
     @Test
@@ -165,7 +224,7 @@ class PriceServiceTest {
     @Test
     void externalApiFailureStillRecordsFetchDurationMetric() {
         givenAsset(AssetType.COIN, "KRW");
-        when(upbitPriceClient.getPrice("BTC"))
+        when(upbitPriceClient.getPrice("BTC", "KRW"))
                 .thenThrow(new ExternalPriceApiException("업비트 조회 실패"));
 
         assertThatThrownBy(() -> priceService.getPrice(userId, assetId))
@@ -202,7 +261,7 @@ class PriceServiceTest {
         Price stalePrice = new Price(new BigDecimal("90000000.00000000"), "KRW", Instant.now());
         when(priceCacheStore.find(eq("price:COIN:BTC"), any(Duration.class)))
                 .thenReturn(Optional.of(new PricedQuote(stalePrice, true)));
-        when(upbitPriceClient.getPrice("BTC")).thenThrow(new ExternalPriceApiException("업비트 조회 실패"));
+        when(upbitPriceClient.getPrice("BTC", "KRW")).thenThrow(new ExternalPriceApiException("업비트 조회 실패"));
 
         PricedQuote quote = priceService.getPrice(userId, assetId);
 
@@ -256,7 +315,7 @@ class PriceServiceTest {
     @Test
     void quoteForPortfolioReturnsEmptyWhenExternalApiFailsInsteadOfThrowing() {
         Asset coin = newAsset(AssetType.COIN, "KRW");
-        when(upbitPriceClient.getPrice("BTC")).thenThrow(new ExternalPriceApiException("업비트 조회 실패"));
+        when(upbitPriceClient.getPrice("BTC", "KRW")).thenThrow(new ExternalPriceApiException("업비트 조회 실패"));
 
         Optional<PricedQuote> quote = priceService.quoteForPortfolio(coin);
 
@@ -266,7 +325,7 @@ class PriceServiceTest {
     @Test
     void quoteForPortfolioNeverConsumesThrottleAcrossRepeatedCalls() {
         Asset coin = newAsset(AssetType.COIN, "KRW");
-        when(upbitPriceClient.getPrice("BTC"))
+        when(upbitPriceClient.getPrice("BTC", "KRW"))
                 .thenReturn(new Price(new BigDecimal("123456789.1"), "KRW", Instant.now()));
 
         priceService.quoteForPortfolio(coin);
@@ -283,7 +342,7 @@ class PriceServiceTest {
     @Test
     void quoteForPortfolioMarksFailureAndSkipsExternalCallOnSubsequentCalls() {
         Asset coin = newAsset(AssetType.COIN, "KRW");
-        when(upbitPriceClient.getPrice("BTC")).thenThrow(new ExternalPriceApiException("업비트 조회 실패"));
+        when(upbitPriceClient.getPrice("BTC", "KRW")).thenThrow(new ExternalPriceApiException("업비트 조회 실패"));
         // 실제 Redis 없이 마커 저장/조회를 흉내낸다 — markFailed() 호출 이후부터 hasRecentFailure()가 true.
         when(priceCacheStore.hasRecentFailure("price:COIN:BTC")).thenReturn(false, true, true);
 
@@ -294,7 +353,7 @@ class PriceServiceTest {
         assertThat(first).isEmpty();
         assertThat(second).isEmpty();
         assertThat(third).isEmpty();
-        verify(upbitPriceClient, times(1)).getPrice("BTC");
+        verify(upbitPriceClient, times(1)).getPrice("BTC", "KRW");
         verify(priceCacheStore).markFailed("price:COIN:BTC");
     }
 
@@ -302,7 +361,7 @@ class PriceServiceTest {
     @Test
     void quoteForPortfolioRetriesExternalCallAfterNegativeCacheExpires() {
         Asset coin = newAsset(AssetType.COIN, "KRW");
-        when(upbitPriceClient.getPrice("BTC"))
+        when(upbitPriceClient.getPrice("BTC", "KRW"))
                 .thenThrow(new ExternalPriceApiException("업비트 조회 실패"))
                 .thenReturn(new Price(new BigDecimal("123456789.1"), "KRW", Instant.now()));
         // 첫 호출: 실패 이력 없음 → 외부 호출 시도. 두 번째 호출: TTL 만료로 다시 실패 이력 없음 → 재시도.
@@ -313,6 +372,6 @@ class PriceServiceTest {
 
         assertThat(first).isEmpty();
         assertThat(second).isPresent();
-        verify(upbitPriceClient, times(2)).getPrice("BTC");
+        verify(upbitPriceClient, times(2)).getPrice("BTC", "KRW");
     }
 }

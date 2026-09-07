@@ -65,7 +65,7 @@ senior-backend 소관"이라 보고하고 필요한 계약 변경 사항을 명�
 | 규칙 | 근거 |
 |---|---|
 | 금액·수량은 API 응답에서 **문자열**로 옴 → `parseFloat`/`Number()` 변환 금지, 문자열 기반 십진 라이브러리 또는 표시 전용 포맷터로 처리 | ROADMAP 「API 규격」 |
-| 포맷터 반올림은 ROADMAP 「금융 정밀도 규칙」 그대로 (KRW 0 / USD 4 / 코인 8 / 비중 2, HALF_UP). `toFixed()`는 HALF_EVEN 계열이라 HALF_UP과 다를 수 있음 — 십진 라이브러리 반올림 사용 | ROADMAP 「금융 정밀도 규칙」 |
+| 포맷터 반올림은 ROADMAP 「금융 정밀도 규칙」 그대로 (KRW 0 / USD 2 / 코인 8 / 비중 2, HALF_UP). `toFixed()`는 HALF_EVEN 계열이라 HALF_UP과 다를 수 있음 — 십진 라이브러리 반올림 사용 | ROADMAP 「금융 정밀도 규칙」 |
 | 에러 응답은 `{code, message, timestamp}` 3필드 고정 — `code` 기반 분기, UI 메시지 하드코딩 금지 | ROADMAP 「에러 응답 포맷」 |
 | API 경로는 `/v1/*` prefix. 개발 시 Vite 프록시(`localhost:8080`)로 same-origin 유지 — 앱 코드에 절대 URL 하드코딩 금지 | ROADMAP Task 004 |
 | JWT Access Token은 15분 만료(Refresh는 Task 019 이후). 401 응답 시 토큰 폐기 후 `/login` 리디렉션 | ROADMAP Task 003 남은 갭·Task 018 |
@@ -102,7 +102,7 @@ senior-backend 소관"이라 보고하고 필요한 계약 변경 사항을 명�
 - ROADMAP 「금융 정밀도 규칙」을 상수로 매핑:
   ```
   KRW → scale 0, HALF_UP
-  USD → scale 4, HALF_UP
+  USD → scale 2, HALF_UP
   COIN → scale 8, HALF_UP
   WEIGHT → scale 2, HALF_UP
   ```

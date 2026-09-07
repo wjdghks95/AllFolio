@@ -122,9 +122,11 @@ public class PortfolioService {
                     BigDecimal costKrw = draft.cost().multiply(krwAmount).setScale(0, RoundingMode.HALF_UP);
                     unrealizedPnl = evaluationKrw.subtract(costKrw);
                 } else if ("KRW".equals(asset.getCurrency())) {
-                    // STOCK/COIN 시세는 항상 KRW 환산액이라(업비트 KRW 마켓, 국내 시세), 자산 통화가
-                    // KRW가 아니면(cost가 다른 통화 스케일로 저장돼 있어) 손익을 신뢰성 있게 계산할 수
-                    // 없다 — null로 남긴다(Major 3, 거짓 숫자를 내보내지 않는다는 원칙).
+                    // STOCK/COIN 시세(quote.price())는 항상 KRW 환산액이다 — STOCK은 국내 시세라
+                    // 애초에 원화고, COIN은 USD 자산이면 PriceService.coinPrice()가 환율로 이미
+                    // KRW로 바꿔서 돌려준다. 그래도 자산 통화가 KRW가 아니면(cost가 다른 통화
+                    // 스케일로 저장돼 있어) 손익을 신뢰성 있게 계산할 수 없다 — null로 남긴다
+                    // (Major 3, 거짓 숫자를 내보내지 않는다는 원칙).
                     unrealizedPnl = evaluationKrw.subtract(draft.cost());
                 }
             }
