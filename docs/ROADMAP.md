@@ -1,7 +1,7 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-09-06
-**본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~4와 프론트엔드 트랙을 함께 포함한다.
+**최종 수정:** 2026-09-08
+**본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~5와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
 
@@ -36,7 +36,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 - **Vite**: 개발 중엔 수정된 파일만 즉시 반영(HMR)하고, 배포 시엔 `dist/`에 정적 파일로 뽑아낸다. Capacitor가 "정적 파일 묶음을 앱 WebView에 넣는" 방식이라 `dist/`가 변환 없이 그대로 입력이 된다.
 - **React 단독 SPA vs Next.js**: Next.js를 Capacitor에 넣으려면 `output: 'export'`로 정적화해야 하는데, 그 순간 Server Component 등 핵심 이점을 잃고 설정만 늘어난다. Spring Boot가 이미 API 서버라 SSR/BFF 계층도 중복이다.
 - **모노레포**: API 계약이 아직 안 굳었고 1인 개발이다. "응답에 필드 추가 + 화면 반영"을 한 커밋으로 묶어야 롤백이 가능하다. 저장소를 나누면 어떤 프론트 커밋이 어떤 백엔드 커밋과 짝인지 추적할 수단이 사라진다.
-- **배포 방식은 미결정**: 개발 중엔 Vite 개발 서버(5173)가 `/v1/*`만 8080(Spring Boot)으로 프록시하므로 브라우저 입장에서 같은 출처로 보여 CORS 설정이 필요 없다. 운영에서 JAR 하나로 합칠지 분리 호스팅할지는 Task 029에서 정한다.
+- **배포 방식은 미결정**: 개발 중엔 Vite 개발 서버(5173)가 `/v1/*`만 8080(Spring Boot)으로 프록시하므로 브라우저 입장에서 같은 출처로 보여 CORS 설정이 필요 없다. 운영에서 JAR 하나로 합칠지 분리 호스팅할지는 Task 032에서 정한다.
 
 ## 개발 워크플로우
 
@@ -50,7 +50,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 
 ## Phase 번호 대응표
 
-이전에는 `PHASE1_PLAN.md`(Phase 1)와 `CLAUDE.md`(Phase 2~4 개요)가 별도 번호 체계를 썼다. 본 문서는 템플릿 4단계(골격 → UI/UX 완성 → 핵심 기능 → 고급/최적화)로 재편했으므로, 기존 커밋 메시지("✨ feat: Phase 1 Step 3")나 소스 주석을 읽을 때 아래 표로 번역한다.
+이전에는 `PHASE1_PLAN.md`(Phase 1)와 `CLAUDE.md`(Phase 2~4 개요)가 별도 번호 체계를 썼다. 본 문서는 템플릿 4단계(골격 → UI/UX 완성 → 핵심 기능 → 고급/최적화)로 재편했으므로, 기존 커밋 메시지("✨ feat: Phase 1 Step 3")나 소스 주석을 읽을 때 아래 표로 번역한다. 이후 Task 024 완료 시점(2026-09-08)에 종목 검색 등록·미국 주식 시세(신규 Phase 4)가 기존 Phase 4 앞에 끼어들며 5단계로 늘었다 — 아래 표의 마지막 행 참고.
 
 | 기존 표기 | 새 표기 |
 |---|---|
@@ -63,8 +63,13 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
 | Phase 1 Step 7 (Observability) | Phase 2 / Task 014 |
 | Phase 1 Step 8 (문서 마감) | Phase 2 / Task 017 |
 | 기존 Phase 2 (외부 시세·Redis·F005b) | Phase 3 / Task 021~024 |
-| 기존 Phase 3 (SSE·Virtual Thread 부하) | Phase 4 / Task 025, 028 |
-| 기존 Phase 4 (Push·k6·하이브리드 앱) | Phase 4 / Task 026~029 |
+| 기존 Phase 3 (SSE·Virtual Thread 부하) | Phase 5 / Task 028, 031 |
+| 기존 Phase 4 (Push·k6·하이브리드 앱) | Phase 5 / Task 029~032 |
+
+**2026-09-08 Phase 재편**: 기존 「Phase 4: 고급 기능 및 최적화」(옛 Task 025~029)를 **Phase 5**로 미루고, 그
+번호 자리에 「Phase 4: 종목 검색 기반 등록 + 미국 주식 시세」(신규 Task 025~027)를 끼워 넣었다. 옛 Task
+025→028, 026→029, 027→030, 028→031, 029→032로 번호가 하나씩 밀렸다 — 소스 주석·문서에서 "Task 025(SSE)"처럼
+옛 번호를 보면 이 규칙으로 새 번호를 읽을 것.
 
 소스 코드 주석은 Phase 번호가 아닌 **Task 번호**로 표기한다. Task 번호는 001부터 연속된 고유값이라 Phase 재편과 무관하게 안정적이다.
 
@@ -171,7 +176,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ 시각·카피 다듬기(ui-ux-designer) — `docs/DESIGN.md` §6-3 "폼 화면 골격" 신설(v1.5.0): 폼 폭 448px 제한, 필드를 "자산 정보"/"보유 정보" 2묶음으로 분할, 조건부 필드(CASH 평단가)는 빈자리 대신 안내 밴드로 대체, flash 배너는 `h1` 위 본문 최상단에 배치
   - ✅ code-reviewer 독립 검증 후속 수정(Major 1건 + Minor 6건, 2026-08-21) — 통화 필드를 PRD F001 "KRW/USD 선택"에 맞춰 자유 입력(`TextField`)에서 `SegmentToggle` 기반 2지선다로 수정(Major). `AssetTypeToggle`을 제네릭 `SegmentToggle`로 일반화해 자산 유형·통화 두 필드가 공유. CASH↔STOCK 전환 시 평단가뿐 아니라 평단가 에러도 함께 리셋, `PortfolioPage`의 `Flash` 타입을 export해 `AssetNewPage`가 재사용, history 정리 effect의 `navigate` 호출에 `location.search` 보존. `AssetNewPage.test.tsx`·`PortfolioPage.test.tsx`에 회귀 케이스 각 1건 추가
   - ✅ code-reviewer 최종 통짜 재검증 후속 수정(Minor 11건, 2026-08-21) — `SegmentToggle`의 `data-testid` 접미사를 `option.value` 자동 파생(대문자 섞임)에서 호출부가 명시하는 kebab-case `testIdSuffix`로 변경, `SegmentToggle.test.tsx` 신규(3케이스), `ariaLabel`을 `aria-labelledby` 연결(`ariaLabelledBy` prop)로 교체, 도달 불가능한 `validateCurrency` 분기 제거, history 정리 effect의 `deps`를 exhaustive하게 채우고 근거가 부정확했던 oxlint 억제 주석 제거(실측 결과 억제 없이도 재실행 문제 없음 확인 — 앞 항목의 "억제 주석 유지" 판단을 이번에 재검토해 뒤집음). `AssetNewPage.test.tsx`에 CASH↔STOCK 왕복 시 평단가 에러 미재노출 케이스 추가(총 7케이스), 테스트 헬퍼명 `fillValidStockFields`→`fillCommonFields`
-  - ⚠️ **후속 과제 (백로그, 사용자 요청 2026-08-21)**: 티커·종목명 입력을 자유 텍스트가 아닌 **검색(자동완성)** 방식으로 바꾸고 싶다는 요청이 있었으나, 데이터 출처에 따라 구현 범위가 크게 달라져(프론트 내장 정적 목록 vs 신규 백엔드 검색 API vs 외부 시세 API 연동) 착수를 보류했다. 외부 시세 연동은 이미 Phase 3 Task 021 범위이므로, 착수 시점에 (a) 프론트 정적 목록으로 우선 자동완성만 붙일지 (b) Task 021과 묶어 실 검색으로 바로 갈지부터 정해야 한다
+  - ⚠️ **후속 과제 (백로그, 사용자 요청 2026-08-21)** → **Phase 4 Task 026·027로 착수 확정(2026-09-08)**: 티커·종목명 입력을 자유 텍스트가 아닌 **검색(자동완성)** 방식으로 바꾸고 싶다는 요청이 있었으나, 데이터 출처에 따라 구현 범위가 크게 달라져(프론트 내장 정적 목록 vs 신규 백엔드 검색 API vs 외부 시세 API 연동) 착수를 보류했다. 외부 시세 연동은 이미 Phase 3 Task 021 범위이므로, 착수 시점에 (a) 프론트 정적 목록으로 우선 자동완성만 붙일지 (b) Task 021과 묶어 실 검색으로 바로 갈지부터 정해야 한다
 
 - **Task 011: 자산 상세 화면 구현 (F002·F003·F004·F006·F007)** ✅ — 완료 (2026-08-21)
   - ✅ `frontend/src/pages/AssetDetailPage.tsx` — 상세 정보, 차트 영역(정적 더미), 물타기 시뮬레이터 폼, 수정 폼, 삭제 확인 팝업. Task 007~010과 동일하게 백엔드 API(Task 012·013·015) 미착수 상태라 실 호출 없이 `frontend/src/api/fixtures.ts` 더미 데이터와 `frontend/src/lib/simulate.ts` 순수 계산만으로 완성
@@ -252,7 +257,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - Minor 3건은 보류: 히스토그램 5ms 경계 보간 이슈(위 항목에 서술, Task 015 착수 시 판단), 로그인 실패 로그 주체 미기록(「남은 갭」), `userId` MDC 키가 실제 프로덕션 로그엔 아직 한 번도 안 찍힘(인증 성공 후 경로에 로그 문장이 아직 없을 뿐 결함 아님 — 정보성)
   - ⚠️ 남은 갭:
     - 로그인 실패 `AUDIT` 로그가 어떤 계정을 대상으로 한 실패인지 남기지 않는다(user enumeration 방지는 HTTP 응답 계약에 대한 요구이지 서버 내부 로그에 대한 요구는 아니므로 스펙 위반은 아님, code-reviewer도 판단 사항으로만 제시) — 브루트포스 탐지 필요성이 커지면 비밀번호 불일치 경로에 한해 `userId` 기록을 다음 착수 시 재검토
-    - 현재는 동기 필터 체인만 존재해(`grep`으로 `CompletableFuture`/`@Async`/`SseEmitter` 0건 확인) Virtual Thread 환경에서 MDC 누수가 없다. Phase 4 Task 025(SSE)에서 MVC 비동기 처리가 들어오면 `OncePerRequestFilter`가 비동기 디스패치 시작 시점에 체인을 빠져나가며 MDC를 지우므로 emitter 콜백에는 `traceId`가 없다 — 지금 고칠 사안은 아니고 Task 025 착수 시 재검토
+    - 현재는 동기 필터 체인만 존재해(`grep`으로 `CompletableFuture`/`@Async`/`SseEmitter` 0건 확인) Virtual Thread 환경에서 MDC 누수가 없다. Phase 5 Task 028(SSE)에서 MVC 비동기 처리가 들어오면 `OncePerRequestFilter`가 비동기 디스패치 시작 시점에 체인을 빠져나가며 MDC를 지우므로 emitter 콜백에는 `traceId`가 없다 — 지금 고칠 사안은 아니고 Task 028 착수 시 재검토
     - `MdcFilter`는 `OncePerRequestFilter`라 컨테이너 ERROR 디스패치(핸들러 없는 404 등)에는 기본적으로 재실행되지 않아 `traceId`가 비어있다 — `SecurityConfig`가 "보안 필터는 ERROR 디스패치에도 적용된다"고 명시한 것과는 비대칭. 실제로는 `GlobalExceptionHandler`가 대부분의 4xx/5xx를 REQUEST 디스패치 중에 처리해 `traceId`가 붙으므로 영향은 미미(2차 code-reviewer 확인) — 지금 고칠 사안은 아님
     - Task 015(시뮬레이터) 구현 시 `allfolio.simulation.duration` 이름으로 실제 `Timer`를 기록하는 프로덕션 코드(`@Timed` 또는 `Timer.record`)가 필요하다 — 이번엔 `MeterRegistry` 직접 호출로 설정이 살아있음만 검증했다
 
@@ -311,7 +316,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ⚠️ 남은 갭:
     - `GET /v1/assets`(커서 페이지네이션 목록) API를 소비하는 화면이 아직 없다 — `assetApi.ts`에 `listAssets()`를 만들지 않았으므로, 이 목록이 필요한 화면(예: Task 010 후속 과제인 티커 검색 자동완성)이 생기면 그때 추가한다
     - ✅ (해소) Task 019에서 401 발생 시 자동 갱신(refresh-and-retry)이 추가돼 재로그인 없이 세션이 유지된다
-    - 비-JSON 에러 응답 처리(위 Minor 보류 항목)는 발생 가능성이 낮아 미루되, 프록시/게이트웨이 계층이 생기는 Task 027(Capacitor) 이후 재검토
+    - 비-JSON 에러 응답 처리(위 Minor 보류 항목)는 발생 가능성이 낮아 미루되, 프록시/게이트웨이 계층이 생기는 Task 030(Capacitor) 이후 재검토
 
 - **Task 019: 인증 강화 — Refresh Token 및 로그아웃 (F010)** ✅ — 완료 (2026-08-30)
   - Task 003의 남은 갭 해소. 실시간 차트(F007)를 띄워두는 사용 패턴과 Access Token 15분 만료가 충돌하는 문제를, 재로그인 없이 자동 갱신하는 흐름으로 해결한다.
@@ -401,7 +406,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ KRW 환산 규칙: STOCK/COIN(KRW)/CASH(KRW)는 시세가 이미 원화라 그대로 쓰고, **CASH(USD)만** 조회한 환율(환율 시세 자체가 "1달러 = x원" 형태의 원화 환산값)로 평가금액과 취득원가를 **함께** 환산한다(2026-09-07 세션부터 COIN(USD)도 같은 환율로 평가금액만 환산 — 아래 「[후속] 코인 시세·USD 스케일 정정」 참고, cost는 여전히 미환산이라 unrealizedPnl은 계속 null) — `cost`는 USD 스케일로 저장돼 있어 평가금액만 환산하면 손익이 통화가 뒤섞인 값이 된다. 평가금액·손익은 KRW 정수 스케일(scale 0, HALF_UP), 비중은 `domain/PrecisionScale`에 신설한 `WEIGHT_SCALE = 2`(HALF_UP)로 계산한다. `weight`는 전체 합계가 확정된 뒤에야 계산 가능해 항목별 계산(`priceItem`)과 분리된 두 번째 패스(`withWeight`)로 둔다.
   - ✅ 통합 테스트에 WireMock 3개(업비트·공공데이터포털·환율)를 붙여 `PortfolioIntegrationTest`에 3개 시나리오를 추가했다: (a) 자산 유형이 섞인 포트폴리오의 평가금액·손익·비중·합계 정상 계산 (b) 자산 5개(Throttle 한도인 초당 1건을 크게 초과)를 한 번에 조회해도 **429 없이 전부 처리** (c) 자산 하나만 시세 실패 시 그 항목만 `null`이고 나머지 항목·합계·비중은 정상. `PortfolioServiceTest`(신규, 단위 3개)·`PriceServiceTest`(+3: CASH(KRW) 즉시 빈 값·외부 API 실패 시 예외 대신 빈 값·반복 호출해도 Throttle 미소모)까지 총 +9개.
   - ✅ 테스트 개수: 179개(신규 파일 `PortfolioServiceTest` 3 + 기존 파일 확장 `PriceServiceTest` +3·`PortfolioIntegrationTest` +3, 총 +9). 구현 중 실제 **테스트 격리 버그**를 발견해 함께 수정했다 — `PortfolioIntegrationTest`가 공유하는 단일 Spring 컨텍스트에서 Resilience4j CircuitBreaker(`upbit`/`exchange-rate`/`stock`)의 실패 카운트가 테스트 사이에 누적돼, 부분 실패 시나리오를 돌린 뒤 정상 시나리오가 Open 상태를 물려받아 깨졌다. `@BeforeEach`에서 WireMock `resetAll()`과 함께 세 CircuitBreaker를 `reset()`하도록 해 해결했다.
-  - ✅ 프론트엔드는 실데이터로 검증만 하고 최소 조정에 그쳤다 — `PortfolioPage.tsx`/`AssetDetailPage.tsx`는 Task 018에서 이미 null/non-null 양쪽 렌더링이 구현돼 있어 새 로직이 필요 없었다. 실제 백엔드+브라우저로 확인한 결과 렌더링은 정상이었고, 대신 **실데이터와 모순되는 문구 4곳**을 고쳤다: 총액 옆 `시세 연동 전` 표식 → `시세 조회 실패`(서버가 성공 자산만으로 총액을 내므로 총액 `null`은 "연동 전"이 아니라 "전부 실패"를 뜻한다), 합계 카드의 "평가금액·평가손익은 시세를 연동하면 채워집니다"(값이 찍힌 화면에서 스스로를 부정) 삭제 후 **부분 실패 시에만** "시세를 불러오지 못한 자산 N건은 이 총액에서 빠졌습니다" 조건부 안내 추가, 상세 화면의 같은 문구를 "이 종목의 시세를 불러오지 못해…" 조건부 안내로 교체, 차트 자리 문구를 "가격 흐름 차트는 준비 중입니다"로(아직 없는 것은 시세 연동이 아니라 차트 자체 — Task 025 범위). 조회 실패 색은 `loss`(청, "하락")가 아닌 `alarm`을 쓴다 — 조회 실패가 가격 하락으로 읽히지 않도록. `docs/DESIGN.md`도 함께 갱신됐다.
+  - ✅ 프론트엔드는 실데이터로 검증만 하고 최소 조정에 그쳤다 — `PortfolioPage.tsx`/`AssetDetailPage.tsx`는 Task 018에서 이미 null/non-null 양쪽 렌더링이 구현돼 있어 새 로직이 필요 없었다. 실제 백엔드+브라우저로 확인한 결과 렌더링은 정상이었고, 대신 **실데이터와 모순되는 문구 4곳**을 고쳤다: 총액 옆 `시세 연동 전` 표식 → `시세 조회 실패`(서버가 성공 자산만으로 총액을 내므로 총액 `null`은 "연동 전"이 아니라 "전부 실패"를 뜻한다), 합계 카드의 "평가금액·평가손익은 시세를 연동하면 채워집니다"(값이 찍힌 화면에서 스스로를 부정) 삭제 후 **부분 실패 시에만** "시세를 불러오지 못한 자산 N건은 이 총액에서 빠졌습니다" 조건부 안내 추가, 상세 화면의 같은 문구를 "이 종목의 시세를 불러오지 못해…" 조건부 안내로 교체, 차트 자리 문구를 "가격 흐름 차트는 준비 중입니다"로(아직 없는 것은 시세 연동이 아니라 차트 자체 — Task 028 범위). 조회 실패 색은 `loss`(청, "하락")가 아닌 `alarm`을 쓴다 — 조회 실패가 가격 하락으로 읽히지 않도록. `docs/DESIGN.md`도 함께 갱신됐다.
   - ✅ `code-reviewer` 에이전트 독립 검증(2026-09-04) — Blocker 0건. Major 3건 발견, 전부 수정 완료:
     - **(수정 완료)** COIN 자산의 `unrealizedPnl`이 소수 8자리로 잘못 직렬화되는 스케일 버그. `evaluationKrw`(스케일 0)에서 COIN `cost`(스케일 8)를 빼면 `BigDecimal.subtract()`가 더 큰 스케일을 따라가 `"1000000"`이 아니라 `"1000000.00000000"`이 나갔다. `priceItem()`의 if/else 분기 이후 단일 지점에서 `unrealizedPnl`을 스케일 0(HALF_UP)으로 재정규화해 해결. 신규 단언(`isEqualByComparingTo` 대신 정확한 문자열 `isEqualTo`)이 스케일까지 잡는지 뮤테이션 테스트(정규화 코드 임시 제거 → 실패 확인 → 원복)로 실증
     - **(수정 완료)** Throttle을 뺀 뒤 대체 상한이 없어, 존재하지 않는 티커로 등록한 자산이 있으면 `GET /v1/portfolio` 반복 호출마다 외부 API가 상한 없이 불릴 수 있던 문제(`TickerNotFoundException`이 Circuit Breaker 실패 집계에서 제외돼 회로도 안 열림). `PriceCacheStore`에 짧은 TTL(30초) 부정 캐싱(`markFailed`/`hasRecentFailure`, `StringRedisTemplate` 기반)을 추가해 `quoteForPortfolio()` 전용으로 적용(단건 조회 API `getPrice()`는 기존 Throttle이 있어 대상 아님)
@@ -438,28 +443,90 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - 커서 페이지네이션의 타이브레이크 조건이 인덱스 범위 조건이 아닌 Filter로 처리돼 페이지 수가 많아지면 사실상 O(N) 스캔이다(위 code-reviewer Minor). 성능 개선(행 값 비교 `(t.tradedAt, t.id) < (:t, :id)` + 복합 인덱스)은 마이그레이션을 동반해 이번 Task 범위 밖 — 다음 착수 시 `database` 에이전트 소관으로 재검토
     - `POST` 응답(요청 스케일 그대로)과 `GET` 목록 응답(DB `NUMERIC(28,8)` 왕복 스케일)의 표기 차이는 Task 012·013이 이미 등재한 기존 갭을 이 API도 그대로 승계한다 — 신규 결함은 아니며 처리 방향은 여전히 미정
 
-### Phase 4: 고급 기능 및 최적화
+### Phase 4: 종목 검색 기반 등록 + 미국 주식 시세
 
-- **Task 025: SSE 실시간 시세 스트리밍 및 실시간 차트 (F007)**
+Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건을 반영하는 단계(2026-09-08 결정). ① 자산 등록의
+티커·종목명 입력을 자유 텍스트에서 **검색(자동완성)**으로 바꾼다 — Task 010 완료 시점(2026-08-21)부터 백로그로
+남아 있던 과제로, 데이터 출처 미정이라 보류돼 있었다. ② 지금까지 STOCK 시세는 한국 주식(공공데이터포털)만
+지원해 **미국 주식은 조회 자체가 불가능**했는데, 이번에 Twelve Data로 신규 연동한다.
+
+**Twelve Data 벤더 조사 결과(계획 착수 전 확정 필요 사항, 실측 완료)**: 무료 플랜은 미국 주식·포렉스·
+암호화폐만 포함하고 **한국거래소(KRX)는 아예 포함되지 않는다**(Grow $29/월 이상부터). 그래서 한국 주식은
+지금 쓰는 공공데이터포털을 그대로 유지하고, 미국 주식만 신규로 Twelve Data를 붙인다 — Enterprise 플랜 결제
+시점에 한국 주식도 Twelve Data로 일원화할지 재검토한다(사용자 확정). 또한 무료 플랜 자체가 약관상
+**"Internal non-display usage"**(개발·평가·테스트 목적의 내부 사용만 허용, 최종 사용자 화면 표시·프로덕션
+사용 금지)로 명시돼 있어 **상용 배포에는 쓸 수 없다** — Enterprise 플랜은 최종 사용자 표시가 허용됨을
+사용자가 별도로 확인했다. 무료 플랜 호출 한도는 분당 8회·일 800회다.
+
+- **Task 025: 미국 주식(US STOCK) 시세 연동 — Twelve Data**
+  - `TwelveDataProperties`(`allfolio.twelvedata.base-url`, `api-key: ${ALLFOLIO_TWELVEDATA_API_KEY:}`) +
+    `TwelveDataClient`(`infra/price`) 신규. `GET /quote?symbol=&apikey=`로 시세 조회, 응답의 `close`를
+    `Price.amount`로 매핑. 실제 응답 필드는 무료 키 발급 후 실측해 `infra/price/CLAUDE.md`에 문서화한다
+    (공공데이터포털도 "숫자가 문자열로 온다" 같은 문서 밖 사실이 실측으로만 드러난 전례가 있다 — Task 021)
+  - `PriceService.fetchRawPrice`의 `STOCK` 분기를 통화로 재분기: `KRW → StockPriceClient`(공공데이터포털
+    유지), `USD → TwelveDataClient`. USD 시세는 `cachedUsdKrwRate()`로 원화 환산까지 마친 뒤 반환한다 —
+    빠뜨리면 평가금액에 달러 숫자가 원화인 것처럼 찍힌다(Task 023에서 코인 USDT 마켓에 동일 결함 실측)
+  - 캐시 키(`price:STOCK:{ticker}`)에 통화 접미사 추가(`:USD`, KRW는 하위 호환으로 접미사 없음 — COIN이
+    이미 쓰는 패턴). `PriceCacheProperties.stockUsFreshTtl`(`stock-us-fresh-ttl: 1m`, 사용자 확정) 신규 —
+    기존 `stockFreshTtl`(12h)은 공공데이터포털이 전일 종가 데이터라 하루 한 번만 갱신되는 데 맞춘 값이라
+    장중에도 갱신되는 미국 시세에는 그대로 못 쓴다. 1분은 무료 플랜 분당 8회 한도와의 절충값
+  - `resilience4j.circuitbreaker.instances.twelvedata` 추가(기존 `stock` 인스턴스와 동일 파라미터,
+    `TickerNotFoundException` ignore-exceptions 포함)
+  - `ALLFOLIO_STOCK_SERVICE_KEY`와 동일하게 미설정 시 부팅은 되고 US 주식 시세 조회만 실패하는 정책
+  - 담당: `senior-backend`
+
+- **Task 026: 통합 종목 검색 API**
+  - 신규 `GET /v1/assets/search?assetType=&currency=&q=`(인증 필요) — `STOCK+KRW`는 공공데이터포털
+    `likeItmsNm`/`likeSrtnCd`(종목명·종목코드 포함 검색, 담당: `stock-price-api`), `STOCK+USD`는 Twelve
+    Data `GET /symbol_search`, `COIN`은 업비트 `GET /v1/market/all`으로 라우팅
+  - 응답에 가격을 넣지 않는다 — 검색 결과 여러 건에 시세까지 붙이면 검색 한 번이 외부 API 다건 호출이 되어
+    무료 플랜 한도를 바로 소진한다. 시세는 등록 후 기존 `GET /v1/assets/{id}/price`가 담당
+  - 업비트 마켓 목록은 Redis에 긴 TTL로 캐싱 후 서버 필터링(검색 시 외부 호출 0회), Twelve Data 검색은
+    질의어 단위 캐싱
+  - 기존 `PriceThrottle`(사용자당 초당 1건)을 그대로 쓰지 않고 검색 전용 한도를 새로 둔다 — 자동완성에
+    그대로 걸면 두 글자만 쳐도 429가 난다
+  - 검색 결과 0건은 200 + 빈 배열(오류 아님), 외부 API 장애는 기존 `ExternalPriceApiException`(503) 재사용
+  - 담당: `senior-backend` + `stock-price-api`
+
+- **Task 027: 검색 기반 자산 등록 화면**
+  - `AssetNewPage.tsx`의 티커·종목명 `TextField` 2개를 검색 자동완성 컴포넌트(가칭 `SearchCombobox`, 신규)로
+    교체 — 선택 시 티커·종목명·통화 자동 채움. 프론트에 자동완성·드롭다운·디바운스 구현이 전무해 직접 구현
+  - `Field.tsx`의 라벨·에러·aria 배선을 재사용하되 `aria-expanded`/`aria-controls`/`aria-activedescendant`
+    (WAI-ARIA 콤보박스 패턴)는 새로 붙인다. 디바운스 300~400ms 필수(무료 플랜 분당 8회 한도)
+  - CASH는 검색 대상이 아니므로 기존 입력 방식 유지
+  - `assetApi.ts`에 `searchSymbols()` 추가(인증 래퍼가 파일 밖으로 export되지 않으므로 같은 파일 안에 작성).
+    `types.ts`에 검색 결과 타입 추가, `AssetNewPage.tsx`에만 있던 `Currency` 타입을 `types.ts`로 승격
+  - 기존 `AssetNewPage.test.tsx` 7케이스를 자유입력 전제에서 검색 선택 전제로 수정
+  - 담당: `senior-frontend` → `ui-ux-designer`
+
+- **배포 체크리스트 선행 조건**: Twelve Data 무료 플랜은 "Internal non-display usage"라 상용 배포 전 반드시
+  Enterprise 계약이 선행돼야 한다 — Task 032(배포 파이프라인)의 체크리스트에 반영할 것
+
+---
+
+### Phase 5: 고급 기능 및 최적화
+
+- **Task 028: SSE 실시간 시세 스트리밍 및 실시간 차트 (F007)**
   - 백엔드 SSE + 프론트 차트, 내 평단가 수평선
   - `price_snapshots` 파티셔닝
   - 이벤트 스키마는 구 PRD v1.2.0 §8.3 참조 필요 (`git show cf24471:docs/PRD.md`)
 
-- **Task 026: 푸시 알림 (FCM/APNs)**
+- **Task 029: 푸시 알림 (FCM/APNs)**
   - `device_tokens` 테이블, `revoked_at IS NULL` 부분 인덱스
 
-- **Task 027: Capacitor 하이브리드 앱 패키징**
+- **Task 030: Capacitor 하이브리드 앱 패키징**
   - Vite `dist/`를 WebView에 탑재
   - 앱은 `capacitor://` 출처에서 도는 별도 origin이라 개발 중 프록시로 우회하던 CORS 설정이 여기서 실제로 필요해진다.
   - 웹폰트(Instrument Sans · Gothic A1 · Reddit Mono) self-host 전환 검토 — `frontend/index.html`이 Google Fonts CDN에서 로드해, 오프라인/제한된 네트워크 환경에서 로드 실패 시 `--font-sans` 폴백으로 떨어질 수 있음
 
-- **Task 028: 부하 검증 및 성능 튜닝**
+- **Task 031: 부하 검증 및 성능 튜닝**
   - Virtual Thread 1,000+ 동시 SSE 커넥션, k6 벤치마크
 
-- **Task 029: 배포 파이프라인 및 운영 관측 체계**
+- **Task 032: 배포 파이프라인 및 운영 관측 체계**
   - CI/CD, 프론트 배포 방식 확정(JAR 통합 vs 분리 호스팅)
   - OpenTelemetry Bridge, Grafana Loki/Tempo
   - 인프라 벤더 미결정 유지 — 벤더 확정 시 (a) ADOT Collector에 exporter 추가(앱 코드 변경 없음) 또는 (b) `micrometer-registry-cloudwatch` 의존성 추가로 이중 발행 가능
+  - Twelve Data Enterprise 계약 체결 확인(Phase 4 선행 조건) — 무료 플랜 그대로 배포하면 약관 위반
 
 ---
 

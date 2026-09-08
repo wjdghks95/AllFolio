@@ -16,7 +16,7 @@ model: sonnet
 ## 역할 및 프로젝트 컨텍스트
 
 스택: Java 25 / Spring Boot 4.1 / Spring Security / Hibernate 7 / Micrometer / JUnit 5 + Testcontainers
-(Phase 3~: Redis, Resilience4j, WireMock / Phase 4: SSE, Virtual Thread 부하, k6)
+(Phase 3~: Redis, Resilience4j, WireMock / Phase 4: Twelve Data 연동, 통합 종목 검색 / Phase 5: SSE, Virtual Thread 부하, k6)
 
 권위 있는 스펙 출처 — 작업 시작 전 반드시 해당 섹션을 먼저 읽을 것. 스펙을 추측하지 말 것.
 - `docs/PRD.md` 「⚡ 기능 명세」 (F001~F010 기능 요구사항)
@@ -41,7 +41,8 @@ Phase가 넘어가면 그 항목이 곧 담당 업무가 된다. 유예와 금�
 | 1 | JWT 인증, 백엔드 도메인 타입 정의, API 계약 확정 | Task 003, 005, 006 |
 | 2 | 자산 CRUD, 포트폴리오 홈(취득원가 기준), Observability 기본, 물타기 시뮬레이터, 정밀도 테스트 | Task 012~016 |
 | 3 | 실데이터 연동, Refresh Token, 업비트/KIS/환율 연동, Redis 캐시·`INCREX` Throttling, `GET /v1/portfolio` 평가금액 확장, Transactions API | Task 018~019, 021~024 |
-| 4 | SSE(`SseEmitterRegistry`, `Last-Event-ID` 재전송, heartbeat), Virtual Thread 동시성, Push Gateway(FCM/APNs), k6 부하 스크립트 | Task 025~026, 028 |
+| 4 | 미국 주식 시세 연동(Twelve Data), 통합 종목 검색 API | Task 025~026 |
+| 5 | SSE(`SseEmitterRegistry`, `Last-Event-ID` 재전송, heartbeat), Virtual Thread 동시성, Push Gateway(FCM/APNs), k6 부하 스크립트 | Task 028~029, 031 |
 
 ## 역할 경계 (database 에이전트와의 분담)
 
@@ -71,7 +72,7 @@ Phase가 넘어가면 그 항목이 곧 담당 업무가 된다. 유예와 금�
 | 외부 API 키·시크릿은 환경변수(`KIS_APP_KEY` 등). 코드·설정 파일 하드코딩 금지 | `.claude/rules/financial-precision.md` 원칙 준용 |
 | 모든 외부 호출은 Circuit Breaker 경유 + Fallback 경로 명시. Redis 장애 시 DB 직접 조회 | ROADMAP Task 021~022 |
 | Stale 캐시 응답은 `isStale: true` / `PRICE_STALE` 206으로 표시. 조용히 낡은 값 반환 금지 | ROADMAP Task 022 |
-| SSE 이벤트 스키마(`id`=epoch ms, `event` 3종, heartbeat 주석)는 구 PRD v1.2.0 §8.3 열람 후 고정 | `git show cf24471:docs/PRD.md`, ROADMAP Task 025 |
+| SSE 이벤트 스키마(`id`=epoch ms, `event` 3종, heartbeat 주석)는 구 PRD v1.2.0 §8.3 열람 후 고정 | `git show cf24471:docs/PRD.md`, ROADMAP Task 028 |
 | 미검증 의존성은 착수 전 실측/공식 문서 확인 후 진행하고 결과를 보고 — Resilience4j의 Spring Boot 4 호환, Lettuce `INCREX` 지원, Structured Concurrency preview 플래그 | ROADMAP 「리스크 & 완화 전략」·「Phase 전환 시 선행 확인 사항」 |
 
 ## 계층별 체크리스트

@@ -4,7 +4,7 @@ description: |
   AllFolio의 React + Vite + TypeScript 프론트엔드 전담 에이전트.
   frontend/ 디렉터리의 라우팅·컴포넌트·API 클라이언트·상태 관리·스타일·
   컴포넌트 테스트를 담당한다.
-  Phase 1(라우팅 골격)부터 Phase 4(Capacitor 패키징·SSE 차트)까지 프론트엔드 트랙 전 구간을
+  Phase 1(라우팅 골격)부터 Phase 5(Capacitor 패키징·SSE 차트)까지 프론트엔드 트랙 전 구간을
   커버한다. Playwright MCP E2E(Task 020)는 별도 QA 에이전트 소관.
   백엔드 API 구현·엔드포인트 시그니처 변경은 senior-backend 소관.
 tools: Read, Grep, Glob, Edit, Write, Bash
@@ -15,7 +15,7 @@ model: sonnet
 
 ## 역할 및 프로젝트 컨텍스트
 
-스택: React 19 + Vite + TypeScript (SPA) / 이후 Capacitor (Phase 4 Task 027)
+스택: React 19 + Vite + TypeScript (SPA) / 이후 Capacitor (Phase 5 Task 030)
 테스트: Vitest + Testing Library (컴포넌트), Playwright MCP (E2E — 별도 QA 에이전트)
 
 권위 있는 스펙 출처 — 작업 시작 전 반드시 해당 섹션을 먼저 읽을 것. 스펙을 추측하지 말 것.
@@ -42,7 +42,8 @@ Phase가 넘어가면 그 항목이 곧 담당 업무가 된다. 유예와 금�
 | 1 | 프로젝트 셋업, 라우팅 골격, Vite 프록시, 인증 가드 | Task 004 |
 | 2-A | 인증·포트폴리오·자산 등록·상세 화면의 로직·상태·API 연동 (더미 데이터). 시각 표현·디자인 토큰은 **ui-ux-designer** 소관 | Task 007~011 |
 | 3 | 실데이터 연동(JWT 저장·주입·401 처리), 포트폴리오 평가금액 화면 반영 | Task 018, 023 화면 부분 |
-| 4 | SSE 실시간 차트(F007), Capacitor 하이브리드 패키징 | Task 025 프론트, Task 027 |
+| 4 | 검색 기반 자산 등록 화면(자동완성 콤보박스) | Task 027 |
+| 5 | SSE 실시간 차트(F007), Capacitor 하이브리드 패키징 | Task 028 프론트, Task 030 |
 
 E2E 테스트(Task 020)는 **별도 QA 에이전트** 소관 — 착수 시점에 신설한다.
 
@@ -74,7 +75,7 @@ senior-backend 소관"이라 보고하고 필요한 계약 변경 사항을 명�
 | 시크릿·환경별 값은 `.env.*`의 `VITE_*` 변수, 소스 코드 하드코딩 금지 | CLAUDE.md |
 | Task 018(실데이터 연동) 이전 화면은 **더미 데이터**로 완성. 실 API 연동을 앞당기지 않음 | ROADMAP Phase 2-A 원칙 |
 | Task 006 결정 사항 4건(CASH 평단가 처리·종목 중복·거래 이력 기록·삭제 이력 문구)은 확정 전 화면에 반영하지 않음. 미확정이면 사용자에게 확인 요청 | ROADMAP 「착수 전 결정 사항」 |
-| Capacitor(Task 027) 시점에는 `capacitor://` origin이 되어 개발 중 프록시로 우회하던 CORS가 실제 필요해짐 — 그 전까지 CORS 헤더 요구는 백엔드 스펙 이탈로 취급 | ROADMAP Task 027 |
+| Capacitor(Task 030) 시점에는 `capacitor://` origin이 되어 개발 중 프록시로 우회하던 CORS가 실제 필요해짐 — 그 전까지 CORS 헤더 요구는 백엔드 스펙 이탈로 취급 | ROADMAP Task 030 |
 
 ## 계층별 체크리스트
 

@@ -53,12 +53,12 @@ PK 기본값은 `uuidv7()`로 확정됐다 (`V1__init.sql`에서 PostgreSQL 18 �
 검증함). 신규 테이블도 원칙적으로 동일 적용하되, `price_snapshots`처럼 고빈도 INSERT가
 예상되는 테이블은 UUID 오버헤드를 피해 `BIGSERIAL`을 쓴다.
 
-## Phase 3~4 데이터 계층 (착수 시점에 ROADMAP.md 해당 Task로 세부 확인)
+## Phase 3~5 데이터 계층 (착수 시점에 ROADMAP.md 해당 Task로 세부 확인)
 
 | 항목 | 요지 | ROADMAP Task |
 |---|---|---|
-| `price_snapshots` | `BIGSERIAL` PK, `PARTITION BY RANGE (captured_at)`, 월별 파티션(pg_partman), 12개월 후 콜드 아카이브 | Task 025 |
-| `device_tokens` | `revoked_at IS NULL` 부분 인덱스로 활성 토큰만 조회 | Task 026 |
+| `price_snapshots` | `BIGSERIAL` PK, `PARTITION BY RANGE (captured_at)`, 월별 파티션(pg_partman), 12개월 후 콜드 아카이브 | Task 028 |
+| `device_tokens` | `revoked_at IS NULL` 부분 인덱스로 활성 토큰만 조회 | Task 029 |
 | `Holding.avg_price`/`quantity` 암호화 | `AttributeConverter`(AES-256-GCM) 적용 — 유예분 | ROADMAP 미배정 — 착수 시점에 별도 Task 필요 |
 | 탈퇴 시 물리 삭제 범위 | `users`/`assets`/`holdings`/`transactions`/`device_tokens`는 삭제, `price_snapshots`는 비개인정보이므로 유지 | ROADMAP 미배정 — 착수 시점에 별도 Task 필요 |
 | 백업·보존 정책 | PITR 15분 간격, `AUDIT` 로그 5년 보존 | ROADMAP 미배정 — 착수 시점에 별도 Task 필요 |

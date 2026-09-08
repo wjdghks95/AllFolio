@@ -21,7 +21,7 @@ Phase와 무관하게 이 저장소에서 계속 유효한 환경 제약입니�
 ## Virtual Threads 활성화
 
 `application.yml`에서 `spring.threads.virtual.enabled: true`로 설정되어 있습니다.
-- SSE 스트리밍(Phase 4, ROADMAP Task 025·028)에서 1,000+ 동시 커넥션 지원
+- SSE 스트리밍(Phase 5, ROADMAP Task 028·031)에서 1,000+ 동시 커넥션 지원
 - Thread 풀 기반 설정(`ThreadPoolTaskExecutor` 등) 제거 시 주의
 
 ## JPA Open-in-View 비활성화

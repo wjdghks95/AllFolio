@@ -72,7 +72,7 @@ npm run dev   # Vite 개발 서버, 기본 포트 5173
 
 ## 아키텍처 개요
 
-AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. Phase 1(애플리케이션 골격 구축)과 Phase 2(UI/UX 완성 + 백엔드 도메인 구현)가 완료됐고(2026-08-27), 현재는 **Phase 3 (실데이터 연동 + 외부 시세 API + Redis 캐시)** 진행 중입니다 — Task 023(포트폴리오 평가금액·비중·손익)까지 완료됐고, 다음은 Task 024(거래 이력 Transactions API)입니다. 진행 상황은 [`docs/ROADMAP.md`](docs/ROADMAP.md) 「개발 단계」 절 참조.
+AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. Phase 1(애플리케이션 골격 구축)·Phase 2(UI/UX 완성 + 백엔드 도메인 구현, 2026-08-27 완료)·Phase 3(실데이터 연동 + 외부 시세 API + Redis 캐시, 2026-09-06 완료)까지 끝났고, 현재는 **Phase 4 (종목 검색 기반 등록 + 미국 주식 시세)** 진행 중입니다 — Task 024(거래 이력 Transactions API)까지 완료됐고, 다음은 Task 025(미국 주식 시세 연동, Twelve Data)입니다. 진행 상황은 [`docs/ROADMAP.md`](docs/ROADMAP.md) 「개발 단계」 절 참조.
 
 ### 핵심 기술 스택
 
@@ -106,8 +106,9 @@ frontend/      React + Vite + TypeScript
 |---|---|---|
 | **Phase 1** | 애플리케이션 골격 구축 (백엔드 인증·프론트 라우팅·API 계약) | Spring Security, JWT, React, Vite |
 | **Phase 2** | UI/UX 완성(더미 데이터) + 백엔드 자산 CRUD·시뮬레이터 (병렬 트랙) | React 컴포넌트, BigDecimal, In-Memory 시뮬레이터 |
-| **Phase 3** (현재) | 실데이터 연동 + 외부 시세 API + Redis 캐시 | Upbit/공공데이터포털(주식)/환율 API, Resilience4j, Redis, Throttling |
-| **Phase 4** | SSE 실시간 스트리밍·하이브리드 앱·대용량 부하 | Virtual Threads, SSE, FCM/APNs, k6, Capacitor |
+| **Phase 3** | 실데이터 연동 + 외부 시세 API + Redis 캐시 | Upbit/공공데이터포털(주식)/환율 API, Resilience4j, Redis, Throttling |
+| **Phase 4** (현재) | 종목 검색 기반 등록 + 미국 주식 시세 | Twelve Data(미국 주식), 통합 종목 검색 API |
+| **Phase 5** | SSE 실시간 스트리밍·하이브리드 앱·대용량 부하 | Virtual Threads, SSE, FCM/APNs, k6, Capacitor |
 
 이 표의 Phase 번호는 `docs/ROADMAP.md`의 신규 체계를 따릅니다(기존 "Phase 2 = 외부 시세"였던 이전 체계와 다름 — 대응표는 ROADMAP.md 참조). 자세한 내용은 [`docs/ROADMAP.md`](docs/ROADMAP.md)와 [`docs/PRD.md`](docs/PRD.md) 참조.
 
