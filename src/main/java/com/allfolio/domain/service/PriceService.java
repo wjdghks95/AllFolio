@@ -15,6 +15,7 @@ import com.allfolio.infra.cache.PriceCacheStore;
 import com.allfolio.infra.cache.PriceThrottle;
 import com.allfolio.infra.price.ExchangeRateClient;
 import com.allfolio.infra.price.StockPriceClient;
+import com.allfolio.infra.price.TwelveDataClient;
 import com.allfolio.infra.price.UpbitPriceClient;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -47,11 +48,13 @@ public class PriceService {
     private final PriceThrottle priceThrottle;
     private final PriceCacheProperties priceCacheProperties;
     private final MeterRegistry meterRegistry;
+    private final TwelveDataClient twelveDataClient;
 
     public PriceService(AssetRepository assetRepository, UpbitPriceClient upbitPriceClient,
             StockPriceClient stockPriceClient, ExchangeRateClient exchangeRateClient,
             PriceCacheStore priceCacheStore, PriceThrottle priceThrottle,
-            PriceCacheProperties priceCacheProperties, MeterRegistry meterRegistry) {
+            PriceCacheProperties priceCacheProperties, MeterRegistry meterRegistry,
+            TwelveDataClient twelveDataClient) {
         this.assetRepository = assetRepository;
         this.upbitPriceClient = upbitPriceClient;
         this.stockPriceClient = stockPriceClient;
@@ -60,6 +63,7 @@ public class PriceService {
         this.priceThrottle = priceThrottle;
         this.priceCacheProperties = priceCacheProperties;
         this.meterRegistry = meterRegistry;
+        this.twelveDataClient = twelveDataClient;
     }
 
     /**
@@ -90,7 +94,7 @@ public class PriceService {
             }
 
             String cacheKey = cacheKeyFor(asset);
-            Duration freshTtl = freshTtlFor(asset.getAssetType());
+            Duration freshTtl = freshTtlFor(asset.getAssetType(), asset.getCurrency());
             Optional<PricedQuote> cached = priceCacheStore.find(cacheKey, freshTtl);
             if (cached.isPresent() && !cached.get().stale()) {
                 source = "cache";
@@ -128,7 +132,7 @@ public class PriceService {
         }
 
         try {
-            Duration freshTtl = freshTtlFor(asset.getAssetType());
+            Duration freshTtl = freshTtlFor(asset.getAssetType(), asset.getCurrency());
             Optional<PricedQuote> cached = priceCacheStore.find(cacheKey, freshTtl);
             if (cached.isPresent() && !cached.get().stale()) {
                 return cached;
@@ -169,9 +173,22 @@ public class PriceService {
     private Price fetchRawPrice(Asset asset) {
         return switch (asset.getAssetType()) {
             case COIN -> coinPrice(asset);
-            case STOCK -> stockPriceClient.getPrice(asset.getTicker());
+            case STOCK -> "USD".equals(asset.getCurrency())
+                    ? stockUsPrice(asset)
+                    : stockPriceClient.getPrice(asset.getTicker());
             case CASH -> exchangeRateClient.getUsdKrwRate();
         };
+    }
+
+    /**
+     * 미국 주식(STOCK+USD)은 Twelve Data에서 언제나 달러 시세로만 온다(COIN처럼 KRW/USDT 두 마켓을
+     * 가릴 필요가 없다). USDT 코인에서 이미 겪은 결함과 같은 이유로 여기서 원화 환산까지 마쳐야 한다 —
+     * 환산을 빼먹으면 evaluationKrw에 달러 숫자(예: 319.97)가 원화인 것처럼 그대로 노출된다.
+     */
+    private Price stockUsPrice(Asset asset) {
+        Price usdPrice = twelveDataClient.getPrice(asset.getTicker());
+        BigDecimal krwAmount = usdPrice.amount().multiply(cachedUsdKrwRate().amount());
+        return new Price(krwAmount, "KRW", usdPrice.asOf());
     }
 
     /**
@@ -191,12 +208,21 @@ public class PriceService {
     }
 
     /**
-     * USD 코인의 환율 조회를 CASH(USD)와 같은 캐시(price:CASH:USD, 12시간 freshTtl)에 태운다 —
-     * 그냥 exchangeRateClient를 직접 부르면 환율은 하루 단위로 갱신되는데도 COIN의 짧은
-     * freshTtl(10초) 주기로 매번 실호출이 나간다(code-reviewer M2 지적).
+     * USD 코인·미국 주식의 환율 조회를 전용 캐시("rate:USD:KRW", CASH(USD) freshTtl과 동일한
+     * 12시간 재사용)에 태운다 — 그냥 exchangeRateClient를 직접 부르면 환율은 하루 단위로
+     * 갱신되는데도 COIN/STOCK(USD)의 짧은 freshTtl 주기로 매번 실호출이 나간다(code-reviewer
+     * M2 지적).
+     *
+     * <p>과거에는 CASH(USD) 자산의 캐시 키("price:CASH:USD")를 그대로 재사용했으나, CASH(USD)
+     * 자체 조회 경로는 {@link #scale}에서 KRW 스케일(0자리)로 반올림한 값을 그 키에 저장한다 —
+     * 두 경로가 같은 키를 공유하면 CASH(USD) 조회가 먼저 캐시를 채웠을 때 여기서 반올림된 값을
+     * 원본 환율인 것처럼 재사용해버려, 캐시 population 순서에 따라 COIN/STOCK(USD) 환산 결과가
+     * 달라지는 비결정적 결함이 있었다(실측: 51.85달러를 반올림값 1350원으로 계산하면 69,998원,
+     * 원본 1350.05원으로 계산하면 70,000원). 그래서 CASH(USD) 자산 캐시와 겹치지 않는 전용 키를
+     * 쓴다.
      */
     private Price cachedUsdKrwRate() {
-        String cacheKey = "price:CASH:USD";
+        String cacheKey = "rate:USD:KRW";
         Optional<PricedQuote> cached = priceCacheStore.find(cacheKey, priceCacheProperties.cashUsdFreshTtl());
         if (cached.isPresent() && !cached.get().stale()) {
             return cached.get().price();
@@ -223,7 +249,8 @@ public class PriceService {
     private String cacheKeyFor(Asset asset) {
         return switch (asset.getAssetType()) {
             case COIN -> "price:COIN:%s%s".formatted(asset.getTicker(), coinCurrencySuffix(asset));
-            case STOCK -> "price:STOCK:" + asset.getTicker();
+            case STOCK -> "price:STOCK:" + asset.getTicker()
+                    + ("KRW".equals(asset.getCurrency()) ? "" : ":" + asset.getCurrency());
             case CASH -> "price:CASH:" + asset.getCurrency();
         };
     }
@@ -237,10 +264,12 @@ public class PriceService {
         return "KRW".equals(asset.getCurrency()) ? "" : ":" + asset.getCurrency();
     }
 
-    private Duration freshTtlFor(AssetType assetType) {
+    private Duration freshTtlFor(AssetType assetType, String currency) {
         return switch (assetType) {
             case COIN -> priceCacheProperties.coinFreshTtl();
-            case STOCK -> priceCacheProperties.stockFreshTtl();
+            case STOCK -> "USD".equals(currency)
+                    ? priceCacheProperties.stockUsFreshTtl()
+                    : priceCacheProperties.stockFreshTtl();
             case CASH -> priceCacheProperties.cashUsdFreshTtl();
         };
     }

@@ -25,8 +25,15 @@ public abstract class AbstractIntegrationTest {
     /** 테스트 전용 HS256 시크릿 (32바이트 이상). 운영은 ALLFOLIO_JWT_SECRET 환경변수를 쓴다. */
     protected static final String TEST_JWT_SECRET = "allfolio-test-secret-key-for-hs256-at-least-32-bytes";
 
+    // 외부 시세 클라이언트 테스트(Upbit/Stock/ExchangeRate/TwelveData 등)는 각자 다른
+    // @DynamicPropertySource(base-url)를 등록해 서로 다른 ApplicationContext로 캐싱된다 — 클라이언트
+    // 테스트 클래스가 늘어날수록 HikariCP 커넥션 풀(컨텍스트당 최대 10개)이 그만큼 늘어 기본
+    // max_connections=100인 Postgres를 전체 스위트 실행 중 소진시킨다("FATAL: sorry, too many
+    // clients already", TwelveDataClientTest 추가 시 실측 재현). 커넥션 풀 개수 자체를 줄이는 대신
+    // Postgres 쪽 한도를 넉넉히 올려 대응한다.
     @ServiceConnection
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18")
+            .withCommand("postgres", "-c", "max_connections=300");
 
     /** GenericContainer는 이미지 이름만으로 종류를 추론하지 못해 name="redis"를 명시해야 한다(Task 022). */
     @ServiceConnection(name = "redis")
@@ -41,8 +48,9 @@ public abstract class AbstractIntegrationTest {
     @DynamicPropertySource
     static void jwtProperties(DynamicPropertyRegistry registry) {
         registry.add("allfolio.jwt.secret", () -> TEST_JWT_SECRET);
-        // StockProperties.serviceKey는 @NotBlank라 ALLFOLIO_STOCK_SERVICE_KEY 미설정 시
-        // 컨텍스트 로드 자체가 실패한다 — 실키가 없는 테스트 환경에서도 부팅되도록 더미 값을 주입한다.
+        // StockProperties.serviceKey는 @NotBlank가 아니라 빈 값이어도 컨텍스트 로드는 성공한다.
+        // 그래도 더미 값을 주입하는 이유는 StockPriceClientTest가 이 값이 요청 URL에 그대로
+        // 들어가길 기대하기 때문이다(WireMock 스텁이 serviceKey 쿼리 파라미터 값을 매칭에 사용).
         registry.add("allfolio.stock.service-key", () -> "test-service-key");
     }
 }

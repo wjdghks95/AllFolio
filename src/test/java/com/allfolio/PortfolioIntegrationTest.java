@@ -39,6 +39,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 환율·주식)를 띄운다 — dynamicPort가 클래스마다 달라 AssetPriceIntegrationTest와는 별도 Spring
  * 컨텍스트가 되는 것은 불가피하다(Task 022가 이미 정리한 것과 같은 종류의 트레이드오프). 다만 이 클래스
  * 안에서 프로퍼티가 다른 여러 컨텍스트로 더 쪼개지지 않도록 이 파일 전체가 WireMock 설정 하나를 공유한다.
+ *
+ * <p>Task 025부터 STOCK+USD는 공공데이터포털(stockWireMock)이 아니라 Twelve Data(twelveDataWireMock)로
+ * 라우팅되므로 WireMock을 하나 더 띄운다.
  */
 @AutoConfigureMockMvc
 class PortfolioIntegrationTest extends AbstractIntegrationTest {
@@ -46,6 +49,7 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
     private static WireMockServer upbitWireMock;
     private static WireMockServer exchangeRateWireMock;
     private static WireMockServer stockWireMock;
+    private static WireMockServer twelveDataWireMock;
 
     @Autowired
     private MockMvcTester mvc;
@@ -70,6 +74,8 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
         exchangeRateWireMock.start();
         stockWireMock = new WireMockServer(wireMockConfig().dynamicPort());
         stockWireMock.start();
+        twelveDataWireMock = new WireMockServer(wireMockConfig().dynamicPort());
+        twelveDataWireMock.start();
     }
 
     @AfterAll
@@ -77,6 +83,7 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
         upbitWireMock.stop();
         exchangeRateWireMock.stop();
         stockWireMock.stop();
+        twelveDataWireMock.stop();
     }
 
     @DynamicPropertySource
@@ -84,6 +91,7 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
         registry.add("allfolio.upbit.base-url", () -> "http://localhost:" + upbitWireMock.port());
         registry.add("allfolio.exchange-rate.base-url", () -> "http://localhost:" + exchangeRateWireMock.port());
         registry.add("allfolio.stock.base-url", () -> "http://localhost:" + stockWireMock.port());
+        registry.add("allfolio.twelvedata.base-url", () -> "http://localhost:" + twelveDataWireMock.port());
     }
 
     /**
@@ -93,15 +101,25 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
      * 누적시켜(slidingWindowSize=4) 뒤이어 실행되는, 정상 스텁을 갖춘 테스트까지 CB OPEN 상태로 인해
      * WireMock을 아예 호출하지 못하고 실패하는 것을 실측했다 — 매 테스트 시작 전 강제로 CLOSED로
      * 리셋해 테스트 간 상태 누수를 차단한다.
+     *
+     * <p>과거에는 CASH(USD) 자산의 캐시 키(price:CASH:USD)가 COIN(USD)·STOCK(USD)의 환율 환산이
+     * 재사용하는 캐시 키와 동일해, 매 테스트 시작 전 Redis를 통째로 비워야 했다(Task 025 당시 임시
+     * 격리 조치) — CASH(USD) 쪽은 스케일 0으로 반올림된 값을 저장하는데, 이 캐시가 테스트 간에
+     * 남아있으면 뒤이어 실행되는 COIN/STOCK(USD) 테스트가 반올림된 환율을 재사용해 원 단위 계산이
+     * 어긋났다(실측: 51.85달러 × 1350원(반올림값) = 69998원 ≠ 51.85달러 × 1350.05원(원본) = 70000원).
+     * 이제 `PriceService.cachedUsdKrwRate()`가 전용 캐시 키(rate:USD:KRW)를 쓰도록 고쳐 두 경로가
+     * 더 이상 캐시를 공유하지 않으므로, Redis flush 없이도 이 충돌이 재현되지 않는다.
      */
     @BeforeEach
     void setUp() {
         upbitWireMock.resetAll();
         exchangeRateWireMock.resetAll();
         stockWireMock.resetAll();
+        twelveDataWireMock.resetAll();
         circuitBreakerRegistry.circuitBreaker("upbit").reset();
         circuitBreakerRegistry.circuitBreaker("exchange-rate").reset();
         circuitBreakerRegistry.circuitBreaker("stock").reset();
+        circuitBreakerRegistry.circuitBreaker("twelvedata").reset();
         userRepository.deleteAll();
         tokenA = accessTokenOf(signup("trader-a@example.com", "correct-horse-battery"));
         tokenB = accessTokenOf(signup("trader-b@example.com", "correct-horse-battery"));
@@ -345,23 +363,27 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
     }
 
     /**
-     * STOCK/COIN 시세는 자산의 currency와 무관하게 항상 KRW 환산액이다(STOCK은 국내 시세라 원화,
-     * COIN은 USD면 PriceService.coinPrice()가 환율로 KRW 환산해서 돌려준다).
+     * STOCK/COIN 시세는 자산의 currency와 무관하게 항상 KRW 환산액이다(STOCK+KRW는 국내 시세라 원화,
+     * STOCK+USD는 Task 025부터 Twelve Data 원본 달러 시세를 PriceService.stockUsPrice()가 환율로
+     * KRW 환산해서 돌려주고, COIN은 USD면 PriceService.coinPrice()가 동일한 방식으로 환산한다).
      * 자산을 USD로 등록하면(currency=USD, cost는 USD 스케일 2로 저장) evaluationKrw(KRW)와 cost(USD)의
      * 통화 단위가 맞지 않아 unrealizedPnl을 신뢰성 있게 계산할 수 없으므로 null로 남아야 한다(Task 023
      * Major 3, "거짓 숫자를 내보내지 않는다" 원칙). evaluationKrw 자체는 유효한 값이라 정상 계산되고,
      * weight도 다른 자산과의 비중 분모(evaluationKrw 기준)에 정상 포함되어야 한다.
-     * USD 주식: 현재가 70000원×10주=700000(evaluationKrw). KRW 현금 300000은 그대로 평가금액=원가.
-     * total = 700000+300000=1000000 → USD 주식 weight=70.00, 현금 weight=30.00.
+     * USD 주식: Twelve Data 종가 51.85달러 × 환율 1350.05 = 70000.0925원(반올림 70000원)×10주=700000
+     * (evaluationKrw). KRW 현금 300000은 그대로 평가금액=원가. total = 700000+300000=1000000
+     * → USD 주식 weight=70.00, 현금 weight=30.00.
      */
     @Test
     void portfolioLeavesUnrealizedPnlNullForNonKrwStockEvenWhenPriceLookupSucceeds() {
-        stockWireMock.stubFor(get(urlEqualTo(
-                "/getStockPriceInfo?serviceKey=test-service-key&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd=PFV4USDSTOCK"))
+        twelveDataWireMock.stubFor(get(urlEqualTo("/quote?symbol=PFV4USDSTOCK"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                         .withBody("""
-                                {"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},"body":{"items":{"item":[{"basDt":"20260901","srtnCd":"PFV4USDSTOCK","clpr":"70000"}]}}}}
+                                {"symbol":"PFV4USDSTOCK","currency":"USD","close":"51.85","last_quote_at":1788551940}
                                 """)));
+        exchangeRateWireMock.stubFor(get(urlEqualTo("/v1/currencies/usd.json"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"date\":\"2026-08-31\",\"usd\":{\"krw\":1350.05}}")));
 
         createAsset(tokenA, stockRequestWithCurrency("PFV4USDSTOCK", "달러표시종목", "10", "100.0000", "USD"));
         createAsset(tokenA, cashRequest("PFV4CASHKRW", "원화 예수금", "300000", "1"));

@@ -16,6 +16,7 @@ import com.allfolio.infra.cache.PriceCacheStore;
 import com.allfolio.infra.cache.PriceThrottle;
 import com.allfolio.infra.price.ExchangeRateClient;
 import com.allfolio.infra.price.StockPriceClient;
+import com.allfolio.infra.price.TwelveDataClient;
 import com.allfolio.infra.price.UpbitPriceClient;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,9 +69,12 @@ class PriceServiceTest {
     @Mock
     private PriceThrottle priceThrottle;
 
+    @Mock
+    private TwelveDataClient twelveDataClient;
+
     private final PriceCacheProperties priceCacheProperties = new PriceCacheProperties(
-            Duration.ofSeconds(10), Duration.ofHours(12), Duration.ofHours(12), Duration.ofHours(24),
-            Duration.ofSeconds(30));
+            Duration.ofSeconds(10), Duration.ofHours(12), Duration.ofMinutes(1), Duration.ofHours(12),
+            Duration.ofHours(24), Duration.ofSeconds(30));
 
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
@@ -82,7 +86,7 @@ class PriceServiceTest {
     @BeforeEach
     void setUp() {
         priceService = new PriceService(assetRepository, upbitPriceClient, stockPriceClient, exchangeRateClient,
-                priceCacheStore, priceThrottle, priceCacheProperties, meterRegistry);
+                priceCacheStore, priceThrottle, priceCacheProperties, meterRegistry, twelveDataClient);
         // 대다수 테스트는 캐시 미스 + Throttle 허용을 전제로 라우팅/스케일 로직만 검증한다.
         // 캐시 히트를 다루는 테스트가 eq() 매칭 stub으로 이 기본값을 덮어쓴다.
         lenient().when(priceCacheStore.find(anyString(), any(Duration.class))).thenReturn(Optional.empty());
@@ -124,30 +128,61 @@ class PriceServiceTest {
         assertThat(quote.price().amount().scale()).isEqualTo(8);
         // 같은 티커라도 KRW 코인과 캐시를 공유하면 서로 다른 가격을 덮어쓰므로 키가 갈라져야 한다.
         verify(priceCacheStore).save(eq("price:COIN:BTC:USD"), any(Price.class));
-        // CASH(USD)와 같은 캐시(price:CASH:USD)에도 환율을 저장해야 다음 COIN(USD) 조회가
-        // 재사용할 수 있다.
-        verify(priceCacheStore).save(eq("price:CASH:USD"), any(Price.class));
+        // 전용 환율 캐시(rate:USD:KRW)에도 환율을 저장해야 다음 COIN(USD)/STOCK(USD) 조회가
+        // 재사용할 수 있다. CASH(USD) 자산 자신의 캐시(price:CASH:USD)와는 별개 키다.
+        verify(priceCacheStore).save(eq("rate:USD:KRW"), any(Price.class));
     }
 
     /**
      * 회귀 방지(code-reviewer M2): 환율은 하루 단위로만 갱신되는데(CASH(USD) freshTtl 12시간)
      * COIN(USD)이 매번 exchangeRateClient를 직접 부르면 COIN의 짧은 freshTtl(10초) 주기로
-     * 환율 API가 불필요하게 반복 호출된다. CASH(USD)가 이미 채워둔 캐시가 신선하면 그 값을
-     * 재사용해야 하고, exchangeRateClient는 아예 불리지 않아야 한다.
+     * 환율 API가 불필요하게 반복 호출된다. 전용 환율 캐시(rate:USD:KRW)가 이미 채워져 있고
+     * 신선하면 그 값을 재사용해야 하고, exchangeRateClient는 아예 불리지 않아야 한다.
      */
     @Test
-    void coinUsdAssetReusesFreshCashUsdExchangeRateCache() {
+    void coinUsdAssetReusesFreshExchangeRateCache() {
         givenAsset(AssetType.COIN, "USD");
         when(upbitPriceClient.getPrice("BTC", "USD"))
                 .thenReturn(new Price(new BigDecimal("79350"), "USD", Instant.now()));
         Price cachedRate = new Price(new BigDecimal("1350"), "KRW", Instant.now());
-        when(priceCacheStore.find(eq("price:CASH:USD"), any(Duration.class)))
+        when(priceCacheStore.find(eq("rate:USD:KRW"), any(Duration.class)))
                 .thenReturn(Optional.of(new PricedQuote(cachedRate, false)));
 
         PricedQuote quote = priceService.getPrice(userId, assetId);
 
         assertThat(quote.price().amount()).isEqualByComparingTo("107122500");
         verifyNoInteractions(exchangeRateClient);
+    }
+
+    /**
+     * 회귀 방지(캐시 키 충돌 결함): CASH(USD) 자산 자신의 조회가 KRW 스케일(0자리)로 반올림한
+     * 값을 "price:CASH:USD"에 먼저 채워도, COIN(USD) 환산이 쓰는 전용 환율 캐시("rate:USD:KRW")는
+     * 별도 키라 영향받지 않는다 — 반올림되지 않은 원본 환율(1350.05)로 정확히 계산해야 한다.
+     * 과거에는 두 경로가 같은 키를 공유해 51.85달러 × 반올림값(1350)=69,998원으로 잘못
+     * 계산되던 결함이 있었다(정답은 원본값(1350.05) 기준 70,000원).
+     */
+    @Test
+    void cashUsdRoundedCacheDoesNotPolluteCoinUsdExchangeRateCache() {
+        // CASH(USD) 자산 조회가 먼저 일어나 반올림된 값을 price:CASH:USD에 채운다.
+        givenAsset(AssetType.CASH, "USD");
+        when(exchangeRateClient.getUsdKrwRate())
+                .thenReturn(new Price(new BigDecimal("1350.05"), "KRW", Instant.now()));
+        priceService.getPrice(userId, assetId);
+        verify(priceCacheStore).save(eq("price:CASH:USD"), any(Price.class));
+
+        // 이어서 COIN(USD) 조회는 전용 환율 캐시(rate:USD:KRW)를 별도로 조회하고, 캐시 미스이므로
+        // exchangeRateClient를 다시 호출해 원본(비반올림) 환율로 계산해야 한다.
+        UUID coinAssetId = UUID.randomUUID();
+        User user = User.of("trader@example.com", "hash");
+        Asset coinAsset = Asset.of(user, "ETH", "이더리움", AssetType.COIN, "USD");
+        when(assetRepository.findByIdAndUser_Id(eq(coinAssetId), eq(userId))).thenReturn(Optional.of(coinAsset));
+        when(upbitPriceClient.getPrice("ETH", "USD"))
+                .thenReturn(new Price(new BigDecimal("51.85"), "USD", Instant.now()));
+
+        PricedQuote coinQuote = priceService.getPrice(userId, coinAssetId);
+
+        verify(priceCacheStore).find(eq("rate:USD:KRW"), any(Duration.class));
+        assertThat(coinQuote.price().amount()).isEqualByComparingTo("70000.0925000");
     }
 
     /** 업비트 KRW 마켓에서 이미 원화로 오는 코인은 환율 API를 아예 부르지 않아야 한다. */
@@ -196,6 +231,29 @@ class PriceServiceTest {
 
         assertThat(quote.price().amount()).isEqualByComparingTo("71000");
         assertThat(quote.price().amount().scale()).isEqualTo(0);
+    }
+
+    /**
+     * 회귀 방지(Task 025): 미국 주식(STOCK+USD)은 공공데이터포털이 아니라 TwelveDataClient로
+     * 라우팅돼야 하고, USDT 코인과 동일한 이유로 원화 환산까지 거쳐야 한다 — 환산을 빼먹으면
+     * evaluationKrw에 달러 숫자(319.97)가 원화인 것처럼 그대로 노출된다.
+     */
+    @Test
+    void stockUsdAssetRoutesToTwelveDataAndConvertsToKrw() {
+        givenAsset(AssetType.STOCK, "USD");
+        when(twelveDataClient.getPrice("BTC"))
+                .thenReturn(new Price(new BigDecimal("319.97"), "USD", Instant.now()));
+        when(exchangeRateClient.getUsdKrwRate())
+                .thenReturn(new Price(new BigDecimal("1350"), "KRW", Instant.now()));
+
+        PricedQuote quote = priceService.getPrice(userId, assetId);
+
+        // 319.97 * 1350 = 431959.5, KRW 스케일(0자리) HALF_UP 반올림으로 431960 — 정확한 문자열까지 단언한다.
+        assertThat(quote.price().amount()).isEqualByComparingTo("431960");
+        assertThat(quote.price().amount()).isEqualTo(new BigDecimal("431960"));
+        assertThat(quote.price().currency()).isEqualTo("KRW");
+        verifyNoInteractions(stockPriceClient);
+        verify(priceCacheStore).save(eq("price:STOCK:BTC:USD"), any(Price.class));
     }
 
     @Test

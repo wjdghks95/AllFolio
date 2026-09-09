@@ -42,9 +42,14 @@ allfolio:
   stock:
     base-url: https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService
     service-key: ${ALLFOLIO_STOCK_SERVICE_KEY:}
+  twelvedata:
+    base-url: https://api.twelvedata.com
+    api-key: ${ALLFOLIO_TWELVEDATA_API_KEY:}
   price-cache:
     coin-fresh-ttl: 10s
     stock-fresh-ttl: 12h
+    # Twelve Data 무료 API 호출 한도(분당 8회)와의 절충값(Task 025).
+    stock-us-fresh-ttl: 1m
     cash-usd-fresh-ttl: 12h
     stale-ceiling: 24h
     # Task 023 Major 2: 시세 조회 실패(존재하지 않는 티커 등) 부정 캐싱 TTL. 30초 — 너무 짧으면 남용
@@ -78,6 +83,15 @@ resilience4j:
         wait-duration-in-open-state: 5s
         # 요청 티커와 일치하는 종목코드가 없음(정상 200 응답, 매칭 실패)은 외부 서비스 장애가 아니라
         # 클라이언트 입력 오류이므로 CB 실패 집계에서 제외한다.
+        ignore-exceptions:
+          - com.allfolio.domain.exception.TickerNotFoundException
+      twelvedata:
+        sliding-window-size: 4
+        minimum-number-of-calls: 4
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        # 존재하지 않는 심볼(정상 HTTP 404)은 외부 서비스 장애가 아니라 클라이언트 입력 오류이므로
+        # CB 실패 집계에서 제외한다.
         ignore-exceptions:
           - com.allfolio.domain.exception.TickerNotFoundException
 

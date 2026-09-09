@@ -22,10 +22,10 @@ AllFolio의 STOCK(주식) 자산 중 **USD(미국 주식)** 시세를 조회하�
 소관)을 쓰고, USD 주식만 이 API로 분기한다(ROADMAP Task 025) — `PriceService.fetchRawPrice`의
 `STOCK` 분기를 통화로 재분기하는 설계는 이미 확정돼 있으니 이 문서에서 다시 정하지 않는다.
 
-이 문서는 공식 문서(`https://twelvedata.com/docs`, `https://support.twelvedata.com`) 조사를
-바탕으로 작성됐다 — **실제 API 키로 검증한 적은 아직 없다.** `stock-price-api.md`가 공공데이터포털을
-실측 후 "숫자가 문자열로 온다" 같은 문서 밖 사실을 발견했던 전례가 있듯, 이 API도 무료 키 발급 후
-`getQuote()`를 실제로 호출해 아래 스펙(특히 에러 응답 스키마)을 재검증하고 이 문서를 갱신할 것.
+이 문서는 최초 작성 시 공식 문서(`https://twelvedata.com/docs`, `https://support.twelvedata.com`)
+조사만으로 작성됐으나, **Task 025 구현 시(2026-09-08) 실제 발급받은 API 키로 curl 실측을 마쳤다** —
+아래 「`/quote` 엔드포인트」·「에러 코드」 절의 실측 결과를 반영해 갱신했다. `/symbol_search`(Task 026)는
+아직 실측 전이므로 여전히 잠정 스펙이다.
 
 ## API 서비스 개요 (공식 문서 조사)
 
@@ -50,14 +50,35 @@ GET https://api.twelvedata.com/quote?symbol=AAPL&apikey={키}
 | `symbol` | 필수 | 티커(예: `AAPL`) |
 | `apikey` | 필수(헤더로 대체 가능) | API 키 |
 
-문서 조사로 확인한 응답 필드(실제 키로 재검증 전이므로 필드 유무·타입은 잠정):
+**인증 방식 실측 확인(2026-09-09, 코드 리뷰 후속 재검증)**: 실제 구현(`TwelveDataClient`)이
+쓰는 헤더 방식(`Authorization: apikey {키}`)으로 `curl -H "Authorization: apikey $KEY"
+'https://api.twelvedata.com/quote?symbol=AAPL'`를 호출해 **HTTP 200 정상 응답을 확인했다**(AAPL
+정상 시세 반환). ROADMAP Task 025 본문은 `GET /quote?symbol=&apikey=`(쿼리 파라미터)로 표기하고
+있으나, 이는 "이런 요청을 보낸다"는 개념적 예시 표기였고 인증 전달 방식을 쿼리 파라미터로
+강제한다는 의미는 아니었다 — 위 표(「API 서비스 개요」)에 정리했듯 Twelve Data는 헤더·쿼리 파라미터
+두 방식을 모두 공식 지원한다. 헤더 방식은 URL 로그(RestClient 로깅, 프록시 접근 로그 등)에 API 키가
+남지 않는다는 실질적 이점이 있어, 이번 검증으로 실제 200 응답을 확인한 뒤 헤더 방식을 그대로
+유지하기로 확정했다(쿼리 파라미터로 되돌리지 않음). `TwelveDataClientTest`에도 이 헤더가 실제로
+요청에 담겨 나가는지 검증하는 WireMock 매칭(`withHeader("Authorization", equalTo("apikey
+test-api-key"))`)을 추가해, 오타나 형식 오류가 있으면 테스트가 실패하도록 했다.
+
+AAPL 정상 응답 예시(휴장일 직후라 데이터가 금요일자):
+```json
+{"symbol":"AAPL","name":"Apple Inc.","exchange":"NASDAQ","mic_code":"XNGS","currency":"USD",
+ "datetime":"2026-09-04","timestamp":1788528600,"last_quote_at":1788551940,
+ "open":"328.31000","high":"328.92999","low":"317.85999","close":"319.97000",
+ "volume":"39551800","previous_close":"328.20999","is_market_open":false, ...}
+```
+HTTP 200. 확인된 응답 필드와 AllFolio 매핑:
 
 | 필드 | 설명 | AllFolio 매핑 |
 |---|---|---|
-| `close` | 최근 종가 | **`Price.amount`로 매핑** — ROADMAP Task 025가 지정한 필드. `price`(실시간가에 더 가까움)가 아니라 `close`를 쓰기로 이미 정해져 있으니 임의로 바꾸지 말 것 |
-| `currency` | 통화(`USD`) | 검증용(예상과 다르면 이상 신호) |
-| `datetime`/`timestamp` | 거래 시각 | `Price.asOf` 후보 — 장중 갱신되는 실시간성 데이터이므로 공공데이터포털의 EOD 규칙(`infra/price/CLAUDE.md`)과 달리 `Instant.now()`를 써도 되는지, 아니면 이 필드로 채워야 하는지는 실제 응답을 보고 판단(휴장일에 갱신 안 된 오래된 `datetime`이 올 수 있다는 점 주의) |
-| `symbol` | 요청한 티커 그대로 | 응답이 요청 심볼과 일치하는지 재검증(Upbit 사례처럼 API가 다른 심볼로 응답할 가능성 배제 못함 — 실측 필요) |
+| `close` | 최근 종가. **JSON에서 따옴표 붙은 문자열**(예: `"319.97000"`)로 온다 — 공공데이터포털과 동일한 패턴. 이 프로젝트 Jackson이 `BigDecimal` 필드로 그대로 강제 변환해줘서 별도 처리 불필요(실측 확인) | **`Price.amount`로 매핑**(`TwelveDataClient`) |
+| `currency` | 통화. AAPL/MSFT 모두 `"USD"` 확인 | `Price.currency` — 응답이 `"USD"`가 아니면 `ExternalPriceApiException`으로 방어(실측 전에는 이론적 우려였지만 구현에도 그대로 반영함) |
+| `datetime` | 날짜만("2026-09-04"), **시각 정보 없음**. 휴장일(주말·공휴일) 직후에는 마지막 정규장 거래일 그대로 — "갱신 안 된 오래된 값이 올 수 있다"는 우려가 실제로 재현됨 | 사용 안 함(정밀도 부족) |
+| `timestamp` | Unix epoch(초). 실측 예시에서는 해당 거래일의 **정규장 개장 시각**(9:30 ET)과 일치 — 의미가 `datetime`의 초 단위 버전에 가까움 | 사용 안 함 |
+| `last_quote_at` | Unix epoch(초). 실측 예시에서는 해당 거래일의 **정규장 마감 무렵**(15:59 ET)과 일치 — 마지막 실제 체결 시각에 가장 근접 | **`Price.asOf`로 매핑**(`Instant.ofEpochSecond`) — `datetime`보다 정밀하고 파싱도 간단 |
+| `symbol` | 요청한 티커 그대로(`AAPL`→`"AAPL"`, `MSFT`→`"MSFT"` 확인) | 요청 티커와 문자열 일치 검증 후 불일치 시 `ExternalPriceApiException` |
 
 `/price`(간단 응답, `{"price": "200.99001"}`만 반환)는 **ROADMAP이 선택하지 않은 엔드포인트**다 —
 `close` 필드가 필요해 `/quote`를 쓰기로 이미 확정됐으니 임의로 `/price`로 바꾸지 않는다.
@@ -94,19 +115,30 @@ ROADMAP Task 026은 "응답에 가격을 넣지 않는다"(검색 다건에 시�
 { "code": 400, "message": "...", "status": "error" }
 ```
 
-**중요 — 실측 필요**: 존재하지 않는 심볼로 `/quote`를 호출했을 때 HTTP 상태 자체가 404인지, 아니면
-공공데이터포털의 "정상 200 + 빈 배열" 패턴처럼 **HTTP 200 + 바디의 `status: "error"`** 로 오는지
-문서만으로는 확정할 수 없었다. Upbit 사례(정상 200 + 빈 배열 → `TickerNotFoundException`)와 동일한
-함정이 있을 수 있으니, 실제 키로 잘못된 심볼을 호출해 HTTP 상태 코드와 바디를 직접 확인하고 이 표를
-갱신할 것 — 확인 전까지는 `retrieve()`가 4xx/5xx를 던지는 경우와 200을 반환하는 경우 둘 다 방어적으로
-처리(바디의 `status` 필드도 체크)하는 편이 안전하다.
+**실측 확인 완료(2026-09-08, curl 직접 호출)** — 결론: **공공데이터포털·Upbit와 달리 이 API는
+"200이지만 실패" 함정이 없다.** 에러는 항상 정상적인 HTTP 4xx 상태 코드로 오고, 바디는 문서 예시와
+동일한 `{"code":..., "message":..., "status":"error"}` 스키마다.
+
+- 존재하지 않는 심볼(`symbol=ZZZZINVALID`): **HTTP 404**
+  ```json
+  {"code":404,"message":"**symbol** or **figi** parameter is missing or invalid. Please provide a valid symbol according to API documentation: https://twelvedata.com/docs#reference-data","status":"error"}
+  ```
+- 잘못된 API 키: **HTTP 401**
+  ```json
+  {"code":401,"message":"**apikey** parameter is incorrect or not specified. ...","status":"error"}
+  ```
+
+`RestClient.retrieve()`의 기본 동작(4xx/5xx 시 예외 발생)을 그대로 활용하면 되고, 404만
+`onStatus()`로 가로채 `TickerNotFoundException`으로 구분했다(그 외 4xx/5xx는 `ExternalPriceApiException`).
+429(rate limit)는 무료 플랜 한도(분당 8회)를 실측 중 넘기지 않으려 직접 재현하지는 않았다 — 문서
+설명대로 일반 4xx 계열로 온다고 가정하고 별도 분기 없이 generic 처리했다(후속 실측 필요 항목).
 
 ## 구현 시 반드시 지킬 규칙 (ROADMAP Task 025에서 이미 확정 — 재논의 대상 아님)
 
 | 규칙 | 근거 |
 |---|---|
 | `TwelveDataProperties`(`allfolio.twelvedata.base-url`, `api-key: ${ALLFOLIO_TWELVEDATA_API_KEY:}`) + `TwelveDataClient`(`infra/price`) 신규 생성 | ROADMAP Task 025. `StockProperties`/`ALLFOLIO_STOCK_SERVICE_KEY`와 동일 패턴 — 시크릿 하드코딩 금지 |
-| `api-key` 미설정이어도 **부팅은 정상** — US 주식 시세 조회(`/v1/assets/{id}/price`)만 실패 | `ALLFOLIO_STOCK_SERVICE_KEY`와 동일 정책(CLAUDE.md 루트 문서에 이미 명시된 관례) |
+| `api-key` 미설정이어도 **부팅은 정상** — US 주식 시세 조회(`/v1/assets/{id}/price`)만 실패 | `ALLFOLIO_STOCK_SERVICE_KEY`와 동일 정책(CLAUDE.md 루트 문서에 이미 명시된 관례). **실측 이력(2026-09-08) 및 정정(2026-09-09)**: Task 025 구현 당시엔 `StockProperties.serviceKey`에 `@NotBlank`가 붙어 있어, Spring Boot의 `@Validated @ConfigurationProperties` 바인딩이 빈 문자열에 `ConfigurationPropertiesBindException`을 던져 **컨텍스트 로딩 자체가 실패하는** 기존 결함이 있었다(`ApplicationContextRunner`로 직접 재현 확인). 이 결함은 **이후 별도 세션에서 `StockProperties.java`의 `@NotBlank`가 실제로 제거돼 이미 해결됐다**(`StockProperties` 현재 코드 참고) — 루트 CLAUDE.md의 "미설정이어도 부팅 정상" 서술은 이제 `StockProperties`의 실제 동작과 일치한다. `TwelveDataProperties.apiKey`는 처음부터 이 요건을 지키기 위해 **검증 애너테이션을 붙이지 않았다**(빈 문자열 허용, 조회 시점에만 401로 실패) — `infra/price/CLAUDE.md`의 "시크릿" 절 참고 |
 | `Price.amount`는 응답의 `close` 필드에서 `BigDecimal`로 매핑, `double`/`float` 금지 | `.claude/rules/financial-precision.md` |
 | USD 시세는 `PriceService`가 `cachedUsdKrwRate()`로 원화 환산까지 마친 뒤 반환 — 이 클라이언트는 원본 USD 값만 반환하고 환산은 하지 않는다(환산은 PriceService 책임, 이 에이전트 범위 밖) | COIN(USDT)에서 이미 겪은 결함 재발 방지(ROADMAP Task 025 노트) |
 | 캐시 키는 `price:STOCK:{ticker}:USD`(통화 접미사 필수, KRW는 하위 호환으로 접미사 없음) | COIN이 이미 쓰는 패턴과 통일 |
@@ -122,11 +154,13 @@ ROADMAP Task 026은 "응답에 가격을 넣지 않는다"(검색 다건에 시�
 ./gradlew build
 grep -rn "double \|float " src/main/java --include="*.java"
 ```
-실제 API 키가 발급된 뒤에는 다음을 반드시 실측하고 이 문서를 갱신할 것:
-1. `/quote`에 존재하지 않는 심볼을 넣었을 때 HTTP 상태 코드 + 바디 구조(200+`status:error`인지 4xx인지)
-2. `close` 필드가 문자열인지 숫자인지(공공데이터포털은 숫자도 문자열로 왔던 전례가 있음)
-3. `datetime`/`timestamp`가 실제로 장중 실시간에 가깝게 갱신되는지, 휴장일엔 어떻게 오는지 — `Price.asOf`를 `Instant.now()`로 둘지 응답값을 쓸지 이 실측으로 결정
-4. `/symbol_search` 응답에 STOCK 외 자산(ETF 등)이 섞여 오는지, 섞여 온다면 `instrument_type` 필터링이 필요한지
+실제 API 키 발급 후 실측 현황(2026-09-08):
+1. ~~`/quote`에 존재하지 않는 심볼을 넣었을 때 HTTP 상태 코드 + 바디 구조~~ — **완료**: HTTP 404, `{"code":404,...,"status":"error"}`(위 「에러 코드」 절 참고)
+2. ~~`close` 필드가 문자열인지 숫자인지~~ — **완료**: 따옴표 붙은 문자열(`"319.97000"`), Jackson이 `BigDecimal`로 자동 변환
+3. ~~`datetime`/`timestamp`가 실제로 장중 실시간에 가깝게 갱신되는지, 휴장일엔 어떻게 오는지~~ — **완료**: 휴장일 직후엔 마지막 정규장 값 그대로(`datetime`은 날짜만). `last_quote_at`(마지막 체결 시각)을 `Price.asOf`로 채택(위 「`/quote` 엔드포인트」 절 참고). **장중 실시간 갱신 자체는 아직 미검증**(테스트 시점이 개장 전이라 재현 불가) — 장이 열려 있는 시간대에 연속 호출해 `last_quote_at`이 실제로 갱신되는지는 후속 확인 필요
+4. `/symbol_search` 응답에 STOCK 외 자산(ETF 등)이 섞여 오는지 — **미실측**(Task 026 범위, 이번 태스크에서 다루지 않음)
+5. 429(rate limit) 실제 응답 스키마 — **미실측**(무료 플랜 한도 소진을 피하려 의도적으로 재현하지 않음, generic 4xx 처리로 방어)
+6. ~~구현이 실제로 쓰는 헤더 인증 방식(`Authorization: apikey {키}`)이 200을 반환하는지~~ — **완료(2026-09-09, 코드 리뷰 후속)**: curl로 재검증, HTTP 200 확인(위 「`/quote` 엔드포인트」 절 참고). `TwelveDataClientTest`에 헤더 매칭 회귀 테스트 추가
 
 ## 역할 경계
 

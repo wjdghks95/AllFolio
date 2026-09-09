@@ -20,6 +20,14 @@ public record PriceCacheProperties(
         @NotNull
         Duration stockFreshTtl,
 
+        /**
+         * 미국 주식(STOCK+USD, Twelve Data) 전용 신선도 기준(Task 025). 공공데이터포털(EOD, 하루 단위
+         * 갱신)과 달리 Twelve Data는 장중 실시간에 가까운 값을 주지만, 무료 플랜 호출 한도(분당 8회)와의
+         * 절충으로 1분을 기본값으로 둔다.
+         */
+        @NotNull
+        Duration stockUsFreshTtl,
+
         @NotNull
         Duration cashUsdFreshTtl,
 

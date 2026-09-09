@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-09-08
+**최종 수정:** 2026-09-09
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~5와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -458,22 +458,53 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
 사용 금지)로 명시돼 있어 **상용 배포에는 쓸 수 없다** — Enterprise 플랜은 최종 사용자 표시가 허용됨을
 사용자가 별도로 확인했다. 무료 플랜 호출 한도는 분당 8회·일 800회다.
 
-- **Task 025: 미국 주식(US STOCK) 시세 연동 — Twelve Data**
-  - `TwelveDataProperties`(`allfolio.twelvedata.base-url`, `api-key: ${ALLFOLIO_TWELVEDATA_API_KEY:}`) +
-    `TwelveDataClient`(`infra/price`) 신규. `GET /quote?symbol=&apikey=`로 시세 조회, 응답의 `close`를
-    `Price.amount`로 매핑. 실제 응답 필드는 무료 키 발급 후 실측해 `infra/price/CLAUDE.md`에 문서화한다
-    (공공데이터포털도 "숫자가 문자열로 온다" 같은 문서 밖 사실이 실측으로만 드러난 전례가 있다 — Task 021)
-  - `PriceService.fetchRawPrice`의 `STOCK` 분기를 통화로 재분기: `KRW → StockPriceClient`(공공데이터포털
+- **Task 025: 미국 주식(US STOCK) 시세 연동 — Twelve Data** ✅ — 완료 (2026-09-09)
+  - ✅ `TwelveDataProperties`(`allfolio.twelvedata.base-url`, `api-key: ${ALLFOLIO_TWELVEDATA_API_KEY:}`) +
+    `TwelveDataClient`(`infra/price`) 신규. `GET /quote?symbol=`로 시세 조회, 응답의 `close`를
+    `Price.amount`로 매핑. **인증은 계획 시점에 적었던 쿼리 파라미터(`?apikey=`)가 아니라 헤더
+    (`Authorization: apikey {키}`)로 최종 구현** — 실제 API 키로 curl 검증해 헤더 방식도 200을
+    반환함을 확인했고(URL 로그에 키가 남지 않는 이점), 이 위 문단의 애초 표기는 요청 개념을 보여준
+    예시였을 뿐 쿼리 파라미터를 강제한 것은 아니었다고 정리했다. 실측으로 확정한 사실: 존재하지
+    않는 심볼은 공공데이터포털·업비트의 "200+실패" 패턴과 달리 **정상 HTTP 404**로 옴(`{"code":404,
+    "message":"...","status":"error"}`), `close`는 따옴표 붙은 문자열이라 Jackson이 `BigDecimal`로
+    그대로 강제 변환, `Price.asOf`는 `datetime`(휴장일엔 시각 없이 날짜만 옴)이 아니라 `last_quote_at`
+    (Unix epoch 초, 마지막 체결 시각)로 채움 — 전부 `infra/price/CLAUDE.md`·`.claude/agents/twelvedata-api.md`에
+    반영(공공데이터포털도 "숫자가 문자열로 온다" 같은 문서 밖 사실이 실측으로만 드러난 전례가 있다 — Task 021)
+  - ✅ `PriceService.fetchRawPrice`의 `STOCK` 분기를 통화로 재분기: `KRW → StockPriceClient`(공공데이터포털
     유지), `USD → TwelveDataClient`. USD 시세는 `cachedUsdKrwRate()`로 원화 환산까지 마친 뒤 반환한다 —
     빠뜨리면 평가금액에 달러 숫자가 원화인 것처럼 찍힌다(Task 023에서 코인 USDT 마켓에 동일 결함 실측)
-  - 캐시 키(`price:STOCK:{ticker}`)에 통화 접미사 추가(`:USD`, KRW는 하위 호환으로 접미사 없음 — COIN이
+  - ✅ 캐시 키(`price:STOCK:{ticker}`)에 통화 접미사 추가(`:USD`, KRW는 하위 호환으로 접미사 없음 — COIN이
     이미 쓰는 패턴). `PriceCacheProperties.stockUsFreshTtl`(`stock-us-fresh-ttl: 1m`, 사용자 확정) 신규 —
     기존 `stockFreshTtl`(12h)은 공공데이터포털이 전일 종가 데이터라 하루 한 번만 갱신되는 데 맞춘 값이라
     장중에도 갱신되는 미국 시세에는 그대로 못 쓴다. 1분은 무료 플랜 분당 8회 한도와의 절충값
-  - `resilience4j.circuitbreaker.instances.twelvedata` 추가(기존 `stock` 인스턴스와 동일 파라미터,
+  - ✅ `resilience4j.circuitbreaker.instances.twelvedata` 추가(기존 `stock` 인스턴스와 동일 파라미터,
     `TickerNotFoundException` ignore-exceptions 포함)
-  - `ALLFOLIO_STOCK_SERVICE_KEY`와 동일하게 미설정 시 부팅은 되고 US 주식 시세 조회만 실패하는 정책
-  - 담당: `senior-backend`
+  - ✅ `ALLFOLIO_STOCK_SERVICE_KEY`와 동일하게 미설정 시 부팅은 되고 US 주식 시세 조회만 실패하는 정책
+  - ✅ **[후속] 작업 중 발견한 기존 결함 2건 함께 해소** (Task 025 범위는 아니지만 구현 도중 실측으로 드러남)
+    - `StockProperties.serviceKey`의 `@NotBlank`가 실제로는 `ALLFOLIO_STOCK_SERVICE_KEY` 미설정 시
+      `ConfigurationPropertiesBindException`으로 **부팅 자체를 실패**시켜, 루트 `CLAUDE.md`가 문서화한
+      "미설정이어도 부팅은 정상" 정책과 실제 동작이 어긋나 있었다(실측: `bootRun`으로 직접 재현·수정
+      확인). 검증 애너테이션 제거로 해소 — `TwelveDataProperties.apiKey`도 처음부터 동일 원칙으로
+      설계했다. 이 정책을 실제로 지키는지 검증하는 회귀 테스트(`StockAndTwelveDataPropertiesEmptyKeyBindingTest`)도 신규 추가
+    - `PriceService.cachedUsdKrwRate()`(COIN·STOCK의 USD→KRW 환산용 환율 캐시)가 CASH(USD) 자산
+      자신의 시세 캐시 키(`price:CASH:USD`)를 그대로 재사용하고 있었는데, 그 캐시는 KRW 스케일(0자리)로
+      반올림된 값을 저장하는 반면 환율 변환은 원본 정밀도를 기대해서, 캐시 population 순서에 따라
+      COIN(USD)·STOCK(USD) 환산 결과가 달라지는 비결정적 결함이 있었다(Task 023부터 존재, 실측:
+      51.85달러를 반올림값 1350원으로 계산하면 69,998원, 원본 1350.05원으로 계산하면 70,000원). 전용
+      캐시 키(`rate:USD:KRW`)로 분리해 해소, 회귀 테스트(`PriceServiceTest.cashUsdRoundedCacheDoesNotPolluteCoinUsdExchangeRateCache`) 추가
+  - ✅ `code-reviewer` 독립 검증(2026-09-09) — 1차: Blocker 0건·Major 1건(Twelve Data 인증 헤더 방식이
+    실제 키로 검증된 적 없다는 지적)·Minor 6건. Major와 Minor 4건(asOf 폴백 문서화, 에이전트 문서 역서술
+    정정, 위 부팅 정책 회귀 테스트, `StockPriceClient.decodeIfAlreadyEncoded()`의 `serviceKey` null 방어)을
+    `twelvedata-api`·`stock-price-api`·`senior-backend` 3개 에이전트에 병렬 위임해 수정. 재검증 결과
+    **Blocker 0건·Major 0건 "병합 가능"** 판정, 전체 스위트(28클래스·216테스트) 회귀 없음, `double`/`float`
+    0건, Task 026(검색 API) 범위 침범 없음 확인
+  - ⚠️ 남은 갭(Minor, code-reviewer가 "이번 Task를 막지 않는 이월 항목"으로 판단): 공유 Redis
+    Testcontainer에 `rate:USD:KRW` 캐시를 flush하는 테스트가 없어 테스트 클래스 간 값이 남을 잠재
+    리스크가 있다(현재는 전 테스트가 동일 환율값을 써서 실제로 재현되지는 않음). `AbstractIntegrationTest`의
+    `max_connections=300`(TwelveDataClientTest 추가로 Postgres 커넥션 풀이 소진되던 문제의 임시 대응)도
+    근본 해결(Hikari 풀 크기 축소, Task 022가 이미 등재한 이월 항목)이 아닌 우회다
+  - 담당: `twelvedata-api`(클라이언트 구현·실측) → `senior-backend`(라우팅·캐시 통합) →
+    `stock-price-api`(부수 결함 수정) → `code-reviewer`(독립 검증)
 
 - **Task 026: 통합 종목 검색 API**
   - 신규 `GET /v1/assets/search?assetType=&currency=&q=`(인증 필요) — `STOCK+KRW`는 공공데이터포털

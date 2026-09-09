@@ -4,6 +4,7 @@ import com.allfolio.infra.cache.PriceCacheProperties;
 import com.allfolio.infra.cache.PriceThrottleProperties;
 import com.allfolio.infra.price.ExchangeRateProperties;
 import com.allfolio.infra.price.StockProperties;
+import com.allfolio.infra.price.TwelveDataProperties;
 import com.allfolio.infra.price.UpbitProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +30,9 @@ class PricePropertiesTest extends AbstractIntegrationTest {
     private StockProperties stockProperties;
 
     @Autowired
+    private TwelveDataProperties twelveDataProperties;
+
+    @Autowired
     private PriceCacheProperties priceCacheProperties;
 
     @Autowired
@@ -51,6 +55,16 @@ class PricePropertiesTest extends AbstractIntegrationTest {
         assertThat(stockProperties.baseUrl())
                 .isEqualTo("https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService");
         assertThat(stockProperties.serviceKey()).isEqualTo("test-service-key");
+    }
+
+    /**
+     * apiKey는 @NotBlank가 없어(TwelveDataProperties 주석 참고) 미설정이어도 바인딩에 실패하지
+     * 않는다는 것만 확인한다 — 실제 값 검증은 CI 환경변수 유무에 좌우돼 단언하지 않는다.
+     */
+    @Test
+    void twelveDataBaseUrlIsBound() {
+        assertThat(twelveDataProperties.baseUrl()).isEqualTo("https://api.twelvedata.com");
+        assertThat(twelveDataProperties.apiKey()).isNotNull();
     }
 
     @Test

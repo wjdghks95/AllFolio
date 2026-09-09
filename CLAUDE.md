@@ -72,7 +72,7 @@ npm run dev   # Vite 개발 서버, 기본 포트 5173
 
 ## 아키텍처 개요
 
-AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. Phase 1(애플리케이션 골격 구축)·Phase 2(UI/UX 완성 + 백엔드 도메인 구현, 2026-08-27 완료)·Phase 3(실데이터 연동 + 외부 시세 API + Redis 캐시, 2026-09-06 완료)까지 끝났고, 현재는 **Phase 4 (종목 검색 기반 등록 + 미국 주식 시세)** 진행 중입니다 — Task 024(거래 이력 Transactions API)까지 완료됐고, 다음은 Task 025(미국 주식 시세 연동, Twelve Data)입니다. 진행 상황은 [`docs/ROADMAP.md`](docs/ROADMAP.md) 「개발 단계」 절 참조.
+AllFolio는 **Phase 기반 점진적 개발**로 설계되었습니다. Phase 1(애플리케이션 골격 구축)·Phase 2(UI/UX 완성 + 백엔드 도메인 구현, 2026-08-27 완료)·Phase 3(실데이터 연동 + 외부 시세 API + Redis 캐시, 2026-09-06 완료)까지 끝났고, 현재는 **Phase 4 (종목 검색 기반 등록 + 미국 주식 시세)** 진행 중입니다 — Task 025(미국 주식 시세 연동, Twelve Data)까지 완료됐고, 다음은 Task 026(통합 종목 검색 API)입니다. 진행 상황은 [`docs/ROADMAP.md`](docs/ROADMAP.md) 「개발 단계」 절 참조.
 
 ### 핵심 기술 스택
 

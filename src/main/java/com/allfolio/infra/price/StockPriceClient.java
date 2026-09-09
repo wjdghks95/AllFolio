@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
@@ -62,9 +63,10 @@ public class StockPriceClient {
     // "이미 인코딩된 키"라는 확실한 신호다 — 그때만 디코딩해서 원문으로 되돌리고, 아니면 원문(디코딩
     // 키 또는 특수문자 없는 평문 키) 그대로 둬 RestClient가 처음이자 유일하게 인코딩하게 한다.
     static String decodeIfAlreadyEncoded(String serviceKey) {
-        return PERCENT_ENCODED.matcher(serviceKey).find()
-                ? URLDecoder.decode(serviceKey, StandardCharsets.UTF_8)
-                : serviceKey;
+        String safeServiceKey = Objects.requireNonNullElse(serviceKey, "");
+        return PERCENT_ENCODED.matcher(safeServiceKey).find()
+                ? URLDecoder.decode(safeServiceKey, StandardCharsets.UTF_8)
+                : safeServiceKey;
     }
 
     @CircuitBreaker(name = "stock", fallbackMethod = "fallback")

@@ -32,4 +32,14 @@ class StockServiceKeyDecodingTest {
     void leavesPlainKeyWithoutSpecialCharactersUntouched() {
         assertThat(StockPriceClient.decodeIfAlreadyEncoded("test-service-key")).isEqualTo("test-service-key");
     }
+
+    /**
+     * {@code StockProperties.serviceKey}에는 검증 애너테이션이 없어(부팅은 미설정이어도 성공해야
+     * 한다는 정책, infra/price/CLAUDE.md 참고) 프로필 오버라이드로 값 없는 {@code service-key:}가
+     * 바인딩되면 {@code null}이 들어올 수 있다 — 이때도 NPE 없이 빈 문자열로 안전하게 처리돼야 한다.
+     */
+    @Test
+    void treatsNullServiceKeyAsEmptyString() {
+        assertThat(StockPriceClient.decodeIfAlreadyEncoded(null)).isEmpty();
+    }
 }
