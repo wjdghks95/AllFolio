@@ -136,6 +136,8 @@ psql -h localhost -U allfolio -d allfolio
 
 **예외 — README.md · ROADMAP.md**: 루트 `README.md`와 `docs/ROADMAP.md` 갱신은 에이전트에게 위임하지 않고 코디네이터가 직접 처리한다(README.md는 사용자 확정 2026-09-04, ROADMAP.md는 사용자 확정 2026-09-04로 development-planner 위임 규칙에서 예외로 전환). README.md는 다른 문서보다 짧고 성격이 다른 온보딩 문서라 별도 에이전트를 거칠 만큼 무겁지 않다는 판단이었고, ROADMAP.md는 Task 024부터 코디네이터가 직접 갱신하는 쪽으로 사용자가 규칙을 변경했다.
 
+**병렬 에이전트와 Gradle**: 여러 서브에이전트가 동시에 `./gradlew test`/`build`를 실행하면 공유 `build/test-results` 파일 충돌(`EOFException`)이나, 서로의 Gradle 프로세스를 리소스 경합으로 오인해 `kill -9`로 죽이는 사고가 실제로 발생했다(Task 025). 병렬 위임 시 각 에이전트에게 "동일 워크스페이스에서 다른 에이전트도 빌드를 돌릴 수 있다"는 점과 "낯선 gradle 프로세스를 임의로 종료하지 말 것"을 지시할 것.
+
 ## 규칙 파일 위치
 
 이 CLAUDE.md에는 프로젝트 전체에 항상 필요한 정보만 남아 있다. 특정 파일 종류·폴더를 다룰 때만

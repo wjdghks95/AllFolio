@@ -17,6 +17,7 @@ Phase와 무관하게 이 저장소에서 계속 유효한 환경 제약입니�
 | `RestClient.Builder` 자동 주입 | `spring-boot-starter-web`만으로는 `RestClientAutoConfiguration`이 로드되지 않아 `RestClient.Builder` 빈이 없다는 `NoSuchBeanDefinitionException`이 남 (Task 021 실측). `org.springframework.boot:spring-boot-restclient` 모듈을 별도로 추가해야 함 |
 | Jackson 2 → 3 전환 | Spring Boot 4.1은 기본 JSON 라이브러리를 Jackson 3(`tools.jackson.*`)으로 전환해 `com.fasterxml.jackson.databind.ObjectMapper`(Jackson 2) 빈을 더 이상 자동 등록하지 않음(Task 022 실측). Spring Data Redis의 `Jackson2JsonRedisSerializer`(deprecated)를 주입하려 하면 `NoSuchBeanDefinitionException`이 남 — `JacksonJsonRedisSerializer`(`tools.jackson.databind.ObjectMapper` 사용)처럼 각 라이브러리의 "Jackson 2" 접미사 없는 버전을 찾아 써야 함 |
 | Self-invocation | 같은 빈 내부에서 `this.privateMethod()`로 `@Transactional` 메서드를 호출하면 AOP 프록시를 안 거쳐 트랜잭션이 조용히 무시됨(Task 023 실측). 클래스 분리 대신 `TransactionTemplate`으로 해당 구간만 명시적으로 감쌀 것 |
+| `ValidationAutoConfiguration` 패키지 이동 | Spring Boot 4.1에서 `org.springframework.boot.autoconfigure.validation.ValidationAutoConfiguration`이 `org.springframework.boot.validation.autoconfigure.ValidationAutoConfiguration`으로 이동(Task 025 실측) — `ApplicationContextRunner`로 `@Validated` 바인딩을 테스트할 때 옛 패키지로 import하면 컴파일 에러 |
 
 ## Virtual Threads 활성화
 

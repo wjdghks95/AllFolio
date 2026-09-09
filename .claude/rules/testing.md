@@ -17,3 +17,7 @@ paths:
 ## Resilience4j CircuitBreaker 테스트 격리
 
 같은 Spring 컨텍스트를 공유하는 통합 테스트에서 CircuitBreaker(`slidingWindowSize` 등)의 실패 카운트가 테스트 간에 누적된다(Task 023 실측) — 관련 `CircuitBreakerRegistry` 인스턴스를 `@BeforeEach`에서 `reset()`할 것.
+
+## @ConfigurationProperties 경계 케이스는 ApplicationContextRunner로
+
+`AbstractIntegrationTest`는 공유 `@DynamicPropertySource`로 시크릿류에 항상 더미값을 주입해, "빈 값 바인딩" 같은 경계 케이스를 그 안에서는 재현할 수 없다(Task 025 실측). 전체 `@SpringBootTest` 대신 `ApplicationContextRunner` + `@EnableConfigurationProperties`만 등록한 최소 `TestConfig`로 해당 프로퍼티 클래스만 가볍게 띄워 검증할 것.
