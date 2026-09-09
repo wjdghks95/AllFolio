@@ -11,9 +11,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 사용자당 시세 조회 Throttling(Task 022). INCR과 EXPIRE를 Lua 스크립트로 하나의 원자적 실행 단위로
- * 묶어 경쟁 상태 없이 고정 윈도우 카운터를 구현한다 — Redis에는 이 둘을 묶은 단일 명령이 원래
- * 존재하지 않는다(ROADMAP의 "Lettuce INCREX 지원 실측" 조사에서 확인).
+ * 사용자당 요청 Throttling(Task 022, Task 026 서브태스크 3에서 keyPrefix로 범용화). INCR과 EXPIRE를
+ * Lua 스크립트로 하나의 원자적 실행 단위로 묶어 경쟁 상태 없이 고정 윈도우 카운터를 구현한다 — Redis에는
+ * 이 둘을 묶은 단일 명령이 원래 존재하지 않는다(ROADMAP의 "Lettuce INCREX 지원 실측" 조사에서 확인).
  */
 @Component
 public class PriceThrottle {
@@ -46,18 +46,29 @@ public class PriceThrottle {
     }
 
     /**
-     * 윈도우 내 요청 수가 한도 이하면 true(허용), 초과하면 false(거부).
-     * Redis 장애 시에는 fail-open(true)한다 — Throttle은 부가 보호장치일 뿐이라, Redis가 죽었다고
-     * 정상 시세 조회 요청까지 막아 가용성을 해치는 것보다 일시적으로 제한을 못 거는 쪽이 낫다.
+     * 시세 조회(price-throttle 설정)용 기존 시그니처. 신규 오버로드({@link #tryAcquire(UUID, String)})에
+     * "price" prefix로 위임하며, Redis 키 포맷("throttle:price:"+userId)은 리팩터링 전과 동일하게 유지된다.
      */
     public boolean tryAcquire(UUID userId) {
-        String key = "throttle:price:" + userId;
+        return tryAcquire(userId, "price");
+    }
+
+    /**
+     * 윈도우 내 요청 수가 한도 이하면 true(허용), 초과하면 false(거부). keyPrefix로 시세 조회
+     * ("price")·종목 검색("search") 등 서로 다른 한도를 독립된 Redis 키 공간에서 관리한다.
+     * limit/window는 호출부(PriceService/SearchService)가 각자의 Properties에서 넘겨야 한다 —
+     * 이 클래스 자체는 price-throttle 설정에만 묶여 있지 않다.
+     * Redis 장애 시에는 fail-open(true)한다 — Throttle은 부가 보호장치일 뿐이라, Redis가 죽었다고
+     * 정상 요청까지 막아 가용성을 해치는 것보다 일시적으로 제한을 못 거는 쪽이 낫다.
+     */
+    public boolean tryAcquire(UUID userId, String keyPrefix) {
+        String key = "throttle:" + keyPrefix + ":" + userId;
         Long count;
         try {
             count = stringRedisTemplate.execute(THROTTLE_SCRIPT, List.of(key),
                     String.valueOf(properties.window().toMillis()));
         } catch (DataAccessException e) {
-            log.warn("Redis Throttle 확인 실패 — 이번 요청은 허용 userId={}", userId, e);
+            log.warn("Redis Throttle 확인 실패 — 이번 요청은 허용 userId={} keyPrefix={}", userId, keyPrefix, e);
             return true;
         }
         return count != null && count <= properties.limit();

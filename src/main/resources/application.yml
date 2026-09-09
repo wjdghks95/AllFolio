@@ -58,6 +58,14 @@ allfolio:
   price-throttle:
     limit: 1
     window: 1s
+  # 통합 종목 검색(GET /v1/assets/search) 결과 캐시(Task 026 서브태스크 3). 종목명·마켓 목록은
+  # 시세와 달리 실시간성이 필요 없어 하루 단위로 넉넉하게 잡는다.
+  search-cache:
+    ttl: 6h
+  # 프론트 자동완성 디바운스(300~400ms)보다 넉넉해야 정상 타이핑이 429로 막히지 않는다.
+  search-throttle:
+    limit: 30
+    window: 10s
 
 resilience4j:
   circuitbreaker:

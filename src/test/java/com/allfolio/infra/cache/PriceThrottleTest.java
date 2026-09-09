@@ -3,6 +3,7 @@ package com.allfolio.infra.cache;
 import com.allfolio.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.util.UUID;
 
@@ -20,6 +21,9 @@ class PriceThrottleTest extends AbstractIntegrationTest {
     @Autowired
     private PriceThrottle priceThrottle;
 
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+
     @Test
     void secondCallWithinSameWindowIsRejected() {
         UUID userId = UUID.randomUUID();
@@ -36,5 +40,40 @@ class PriceThrottleTest extends AbstractIntegrationTest {
         Thread.sleep(1_100);
 
         assertThat(priceThrottle.tryAcquire(userId)).isTrue();
+    }
+
+    /**
+     * 회귀 방지(Task 026 서브태스크 3): tryAcquire(UUID)는 내부적으로 tryAcquire(userId, "price")에
+     * 위임하도록 리팩터링했다 — 리팩터링 전과 동일한 Redis 키("throttle:price:"+userId)를 써야 기존
+     * 시세 조회 Throttle 동작(초당 1건)이 그대로 유지된다.
+     */
+    @Test
+    void tryAcquireWithoutPrefixUsesPriceKeyFormatForBackwardCompatibility() {
+        UUID userId = UUID.randomUUID();
+
+        priceThrottle.tryAcquire(userId);
+
+        assertThat(stringRedisTemplate.hasKey("throttle:price:" + userId)).isTrue();
+    }
+
+    /** 신규 keyPrefix 오버로드는 prefix별로 독립된 Redis 키 공간을 쓴다 — "price"와 카운터가 섞이지 않는다. */
+    @Test
+    void tryAcquireWithPrefixUsesSeparateKeySpaceFromPriceThrottle() {
+        UUID userId = UUID.randomUUID();
+
+        assertThat(priceThrottle.tryAcquire(userId, "search")).isTrue();
+
+        assertThat(stringRedisTemplate.hasKey("throttle:search:" + userId)).isTrue();
+        // "search" prefix로 쓴 호출이 "price" 카운터에 영향을 주지 않으므로, 같은 사용자의 첫 price
+        // 조회는 여전히 허용돼야 한다.
+        assertThat(priceThrottle.tryAcquire(userId)).isTrue();
+    }
+
+    @Test
+    void secondCallWithSamePrefixWithinSameWindowIsRejected() {
+        UUID userId = UUID.randomUUID();
+
+        assertThat(priceThrottle.tryAcquire(userId, "search")).isTrue();
+        assertThat(priceThrottle.tryAcquire(userId, "search")).isFalse();
     }
 }

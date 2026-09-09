@@ -1,6 +1,8 @@
 package com.allfolio.infra.price;
 
+import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Price;
+import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.TickerNotFoundException;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -69,6 +71,34 @@ public class UpbitPriceClient {
         return "USD".equals(currency) ? "USDT" : currency;
     }
 
+    /**
+     * 통합 종목 검색(GET /v1/assets/search, COIN 분기)용 업비트 전체 마켓 목록 조회. 특정 티커가
+     * 아니라 {@code /v1/market/all}로 전체 마켓 코드를 받아온다는 점이 {@link #getPrice}와 다르다.
+     * AllFolio가 지원하는 통화(KRW/USD)에 대응하는 KRW-, USDT- 접두어 마켓만 남기고, 그 외 코인마켓
+     * (BTC- 접두어 등)은 제외한다.
+     */
+    @CircuitBreaker(name = "upbit", fallbackMethod = "listMarketsFallback")
+    public List<SearchResult> listMarkets() {
+        List<UpbitMarketResponse> response = restClient.get()
+                .uri("/v1/market/all")
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {
+                });
+
+        if (response == null) {
+            return List.of();
+        }
+
+        return response.stream()
+                .filter(market -> market.market().startsWith("KRW-") || market.market().startsWith("USDT-"))
+                .map(market -> new SearchResult(
+                        market.market().substring(market.market().indexOf('-') + 1),
+                        market.koreanName(),
+                        AssetType.COIN,
+                        domainCurrencyOf(market.market())))
+                .toList();
+    }
+
     // 마켓 접두어(KRW-BTC의 "KRW")를 도메인 통화 개념으로 되돌린다 — USDT는 업비트 표기일 뿐
     // 자산 통화로는 "USD"로 부른다(PrecisionScale 등 나머지 코드는 USDT를 모른다).
     private String domainCurrencyOf(String market) {
@@ -83,10 +113,21 @@ public class UpbitPriceClient {
         throw new ExternalPriceApiException("업비트 시세 조회에 실패했습니다: " + ticker, ex);
     }
 
+    private List<SearchResult> listMarketsFallback(Throwable ex) {
+        throw new ExternalPriceApiException("업비트 마켓 목록 조회에 실패했습니다", ex);
+    }
+
     private record UpbitTickerResponse(
             String market,
             @JsonProperty("trade_price")
             BigDecimal tradePrice
+    ) {
+    }
+
+    private record UpbitMarketResponse(
+            String market,
+            @JsonProperty("korean_name")
+            String koreanName
     ) {
     }
 }

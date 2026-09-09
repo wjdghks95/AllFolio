@@ -24,8 +24,9 @@ AllFolio의 STOCK(주식) 자산 중 **USD(미국 주식)** 시세를 조회하�
 
 이 문서는 최초 작성 시 공식 문서(`https://twelvedata.com/docs`, `https://support.twelvedata.com`)
 조사만으로 작성됐으나, **Task 025 구현 시(2026-09-08) 실제 발급받은 API 키로 curl 실측을 마쳤다** —
-아래 「`/quote` 엔드포인트」·「에러 코드」 절의 실측 결과를 반영해 갱신했다. `/symbol_search`(Task 026)는
-아직 실측 전이므로 여전히 잠정 스펙이다.
+아래 「`/quote` 엔드포인트」·「에러 코드」 절의 실측 결과를 반영해 갱신했다. `/symbol_search`(Task 026,
+STOCK+USD 검색 부분)도 **2026-09-09 curl 실측을 마쳤다** — 아래 「`/symbol_search` 엔드포인트」 절
+참고. "잠정 스펙" 표기는 제거했다.
 
 ## API 서비스 개요 (공식 문서 조사)
 
@@ -86,18 +87,44 @@ HTTP 200. 확인된 응답 필드와 AllFolio 매핑:
 ## `/symbol_search` 엔드포인트 (Task 026, STOCK+USD 검색 부분)
 
 ```
-GET https://api.twelvedata.com/symbol_search?symbol={질의어}&apikey={키}
+GET https://api.twelvedata.com/symbol_search?symbol={질의어}&outputsize=20
 ```
 
 | 요청 파라미터 | 필수 | 설명 |
 |---|---|---|
 | `symbol` | 필수 | 검색어(티커 또는 종목명 일부) |
-| `outputsize` | 옵션 | 결과 개수(기본 30, 최대 120) — 자동완성 UX에는 작은 값(예: 10)으로 제한 권장 |
+| `outputsize` | 옵션 | 결과 개수(기본 30, 최대 120) — `TwelveDataClient.search`는 자동완성 UX 권장값인 20으로 고정 요청한다 |
 
-응답 필드(잠정, 실측 필요): `symbol`(티커), `instrument_name`(종목명), `exchange`(거래소),
-`instrument_type`(자산유형 — 주식 외 ETF 등도 섞여 나올 수 있어 필터링 필요할 수 있음), `country`, `currency`.
+**실제 API 키로 curl 검증 완료(2026-09-09)**: `curl -H "Authorization: apikey $KEY"
+'https://api.twelvedata.com/symbol_search?symbol=AAPL&outputsize=20'`로 확인.
+
+- **응답 필드 확정**(문서 예상과 일치): `symbol`, `instrument_name`, `exchange`, `mic_code`,
+  `exchange_timezone`, `instrument_type`, `country`, `currency`. 최상위는 `{"data":[...],"status":"ok"}`
+  — `/quote`처럼 단일 객체가 아니라 배열을 감싼 형태다.
+- **"결과 없음"은 `/quote`의 404와 다르다 — 이 태스크의 핵심 확인 포인트였다.** 실제로 존재하지
+  않는 질의어(`symbol=ZZZZINVALIDNOTHING`)로 호출한 결과 **HTTP 200 + `{"data":[],"status":"ok"}`**
+  가 돌아왔다. 즉 `TickerNotFoundException`/`onStatus(404, ...)` 같은 특수 분기가 `/symbol_search`에는
+  필요 없다 — 빈 리스트를 그대로 반환하면 된다.
+- **주식 외 자산이 다량 섞여 온다.** "AAPL" 검색 결과 20건 중 미국 나스닥(`instrument_type=
+  "Common Stock"`, `country="United States"`, `currency="USD"`) 상장은 1건뿐이고, 나머지는
+  아르헨티나 CEDEAR·콜롬비아 BVC·멕시코 BMV·캐나다 TSX/NEO·폴란드 GPW·오스트리아 VSE·페루 BVL·
+  스위스 SIX·칠레 BVS·태국 SET 등 전세계 상장 및 `instrument_type="Depositary Receipt"`/
+  `"Mutual Fund"`(예: `AAPLDXX`, Barclays 구조화 노트) 같은 비주식 자산이다. 따라서
+  `instrument_type == "Common Stock" && currency == "USD"`로 반드시 걸러야 한다.
+- **이 두 조건 필터만으로도 동일 심볼 중복이 남을 수 있다.** 칠레 BVS 상장(`AAPL`,
+  `country="Chile"`, `currency="USD"`)이 `instrument_type="Common Stock"`이라 필터를 통과해,
+  나스닥 `AAPL`과 함께 같은 `symbol`이 두 번 남는 사례가 실측으로 확인됐다. `TwelveDataClient.search`는
+  `symbol` 기준으로 API가 반환한 순서상 첫 항목(실측 예시에서는 나스닥이 항상 먼저 옴)만 남기는
+  중복 제거를 추가했다 — `StockPriceClient.search`(STOCK+KRW 분기)가 이미 쓰는 패턴과 동일하다.
+- **인증 없이도 200이 온다.** `Authorization` 헤더를 아예 생략하거나 잘못된 키를 넣어도 동일한
+  정상 검색 결과가 돌아왔다 — `/symbol_search`는 공개 참조 데이터(reference data) 엔드포인트로
+  보인다. 그럼에도 공식 에러 코드 표(아래)에 401이 명시돼 있고 429(rate limit)도 이론상 가능해,
+  구현은 방어적으로 4xx/5xx를 `ExternalPriceApiException`으로 변환한다(실제 401 재현은 못했지만
+  WireMock 스텁으로 해당 분기를 검증해뒀다).
+
 ROADMAP Task 026은 "응답에 가격을 넣지 않는다"(검색 다건에 시세까지 붙이면 무료 한도 즉시 소진)를
-이미 원칙으로 못박았다 — `symbol_search` 응답을 그대로 매핑할 때 가격 필드를 끌어오지 않는다.
+이미 원칙으로 못박았다 — `symbol_search` 응답을 그대로 매핑할 때 가격 필드를 끌어오지 않는다(애초에
+`/symbol_search` 응답 자체에도 가격 필드가 없다).
 
 ## 에러 코드 (공식 문서)
 
@@ -158,9 +185,10 @@ grep -rn "double \|float " src/main/java --include="*.java"
 1. ~~`/quote`에 존재하지 않는 심볼을 넣었을 때 HTTP 상태 코드 + 바디 구조~~ — **완료**: HTTP 404, `{"code":404,...,"status":"error"}`(위 「에러 코드」 절 참고)
 2. ~~`close` 필드가 문자열인지 숫자인지~~ — **완료**: 따옴표 붙은 문자열(`"319.97000"`), Jackson이 `BigDecimal`로 자동 변환
 3. ~~`datetime`/`timestamp`가 실제로 장중 실시간에 가깝게 갱신되는지, 휴장일엔 어떻게 오는지~~ — **완료**: 휴장일 직후엔 마지막 정규장 값 그대로(`datetime`은 날짜만). `last_quote_at`(마지막 체결 시각)을 `Price.asOf`로 채택(위 「`/quote` 엔드포인트」 절 참고). **장중 실시간 갱신 자체는 아직 미검증**(테스트 시점이 개장 전이라 재현 불가) — 장이 열려 있는 시간대에 연속 호출해 `last_quote_at`이 실제로 갱신되는지는 후속 확인 필요
-4. `/symbol_search` 응답에 STOCK 외 자산(ETF 등)이 섞여 오는지 — **미실측**(Task 026 범위, 이번 태스크에서 다루지 않음)
-5. 429(rate limit) 실제 응답 스키마 — **미실측**(무료 플랜 한도 소진을 피하려 의도적으로 재현하지 않음, generic 4xx 처리로 방어)
+4. ~~`/symbol_search` 응답에 STOCK 외 자산(ETF 등)이 섞여 오는지~~ — **완료(2026-09-09, Task 026 서브태스크)**: 섞여 온다(Depositary Receipt·Mutual Fund·비USD 통화 다수). `instrument_type=="Common Stock" && currency=="USD"` 필터와 `symbol` 기준 중복 제거로 대응(위 「`/symbol_search` 엔드포인트」 절 참고)
+5. 429(rate limit) 실제 응답 스키마 — **미실측**(무료 플랜 한도 소진을 피하려 의도적으로 재현하지 않음, generic 4xx 처리로 방어). `/symbol_search`는 인증 없이도 200이 오는 것으로 실측 확인돼(항목 6 참고), 401 재현도 마찬가지로 못했다 — 두 항목 모두 후속 확인 필요
 6. ~~구현이 실제로 쓰는 헤더 인증 방식(`Authorization: apikey {키}`)이 200을 반환하는지~~ — **완료(2026-09-09, 코드 리뷰 후속)**: curl로 재검증, HTTP 200 확인(위 「`/quote` 엔드포인트」 절 참고). `TwelveDataClientTest`에 헤더 매칭 회귀 테스트 추가
+7. ~~`/symbol_search`의 '결과 없음'이 어떤 형태로 오는지(404 vs 200+빈 배열)~~ — **완료(2026-09-09, Task 026 서브태스크)**: `symbol=ZZZZINVALIDNOTHING`으로 재현, HTTP 200 + `{"data":[],"status":"ok"}`(위 「`/symbol_search` 엔드포인트」 절 참고)
 
 ## 역할 경계
 

@@ -1,6 +1,8 @@
 package com.allfolio.infra.price;
 
+import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Price;
+import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.TickerNotFoundException;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -10,6 +12,9 @@ import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Twelve Data(twelvedata.com) "/quote" 클라이언트 — 미국 주식(STOCK+USD) 시세 조회 전용
@@ -114,12 +119,80 @@ public class TwelveDataClient {
         throw new ExternalPriceApiException("미국 주식 시세 조회에 실패했습니다: " + ticker, ex);
     }
 
+    /**
+     * 통합 종목 검색(GET /v1/assets/search)의 STOCK+USD 분기. 검색은 가격을 포함하지 않는다 —
+     * 결과 목록에서 각 종목의 시세는 등록 후 {@link #getPrice}가 담당한다.
+     *
+     * <p><b>실제 API 키로 curl 검증 완료</b>(2026-09-09):
+     * <ul>
+     *   <li>결과 없음은 {@code /quote}의 404와 달리 **정상 HTTP 200 + {@code {"data":[],"status":"ok"}}**
+     *       로 온다 — "결과 없음"이 빈 배열로 오는지 404로 오는지가 이 엔드포인트의 핵심 확인
+     *       포인트였는데, 문서만으로는 알 수 없었고 실측으로 빈 배열임을 확정했다. 따라서
+     *       {@code /quote}처럼 별도의 {@code onStatus(404, ...)}/{@link TickerNotFoundException}
+     *       분기를 두지 않는다 — 이 메서드에서 그 조합은 재현되지 않는다.</li>
+     *   <li>"AAPL" 검색 결과에는 미국 나스닥(NASDAQ, {@code instrument_type="Common Stock"},
+     *       {@code currency="USD"}) 외에도 아르헨티나 CEDEAR·칠레 BVS·태국 SET 등 전세계 거래소의
+     *       동일 티커 상장이 함께 섞여 온다({@code country}가 미국이 아니거나 {@code instrument_type}이
+     *       "Depositary Receipt"/"Mutual Fund" 등 주식이 아닌 자산도 포함) — {@code instrument_type
+     *       == "Common Stock"} && {@code currency == "USD"}로 걸러야 한다. 다만 이 두 조건만으로도
+     *       칠레 BVS 상장(country="Chile", currency="USD")처럼 티커가 같은 복수 항목이 남는 경우가
+     *       실측으로 확인됐다 — {@code symbol} 기준으로 첫 항목(API가 반환한 순서상 미국 거래소가
+     *       먼저 옴)만 남기는 중복 제거를 추가했다(STOCK+KRW 분기의 {@code StockPriceClient.search}가
+     *       이미 쓰는 것과 동일한 패턴).</li>
+     *   <li>인증(apikey) 없이도 200이 반환된다 — {@code /symbol_search}는 공개 참조 데이터 엔드포인트로
+     *       보인다(잘못된 키·키 자체를 생략해도 정상 검색 결과가 그대로 왔다). 그럼에도 401 등 4xx를
+     *       받을 가능성 자체를 배제할 근거는 없어(문서상 공식 에러 코드 표에 401이 명시돼 있고, 무료
+     *       한도 초과 시 429는 별도로 재현 가능성이 있음) 기존 {@code /quote}와 동일하게 4xx/5xx는
+     *       {@link ExternalPriceApiException}으로 방어적으로 처리한다.</li>
+     * </ul>
+     */
+    @CircuitBreaker(name = "twelvedata", fallbackMethod = "searchFallback")
+    public List<SearchResult> search(String query) {
+        TwelveDataSymbolSearchResponse response = restClient.get()
+                .uri("/symbol_search?symbol={q}&outputsize=20", query)
+                .retrieve()
+                .body(TwelveDataSymbolSearchResponse.class);
+
+        if (response == null || response.data() == null) {
+            return List.of();
+        }
+
+        Map<String, SymbolSearchItem> deduped = new LinkedHashMap<>();
+        for (SymbolSearchItem item : response.data()) {
+            if ("Common Stock".equals(item.instrumentType()) && "USD".equals(item.currency())) {
+                deduped.putIfAbsent(item.symbol(), item);
+            }
+        }
+
+        return deduped.values().stream()
+                .map(item -> new SearchResult(item.symbol(), item.instrumentName(), AssetType.STOCK, "USD"))
+                .toList();
+    }
+
+    private List<SearchResult> searchFallback(String query, Throwable ex) {
+        throw new ExternalPriceApiException("미국 주식 종목 검색에 실패했습니다: " + query, ex);
+    }
+
     private record TwelveDataQuoteResponse(
             String symbol,
             String currency,
             BigDecimal close,
             @JsonProperty("last_quote_at")
             Long lastQuoteAt
+    ) {
+    }
+
+    private record TwelveDataSymbolSearchResponse(List<SymbolSearchItem> data) {
+    }
+
+    private record SymbolSearchItem(
+            String symbol,
+            @JsonProperty("instrument_name")
+            String instrumentName,
+            @JsonProperty("instrument_type")
+            String instrumentType,
+            String country,
+            String currency
     ) {
     }
 }

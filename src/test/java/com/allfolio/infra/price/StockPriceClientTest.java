@@ -1,7 +1,9 @@
 package com.allfolio.infra.price;
 
 import com.allfolio.AbstractIntegrationTest;
+import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Price;
+import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -17,6 +19,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
@@ -148,6 +151,116 @@ class StockPriceClientTest extends AbstractIntegrationTest {
                                 """)));
 
         assertThatThrownBy(() -> stockPriceClient.getPrice(TICKER))
+                .isInstanceOf(ExternalPriceApiException.class);
+    }
+
+    @Test
+    void searchUsesLikeItmsNmForNonNumericQuery() {
+        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+                + "&numOfRows=20&pageNo=1&resultType=json&likeItmsNm=%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90";
+        wireMockServer.stubFor(get(urlEqualTo(requestPath))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "response": {
+                                    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+                                    "body": {
+                                      "numOfRows": 20, "pageNo": 1, "totalCount": 2,
+                                      "items": {"item": [
+                                        {"basDt": "20260908", "srtnCd": "005930", "itmsNm": "삼성전자", "clpr": "269500"},
+                                        {"basDt": "20260908", "srtnCd": "005935", "itmsNm": "삼성전자우", "clpr": "198400"}
+                                      ]}
+                                    }
+                                  }
+                                }
+                                """)));
+
+        List<SearchResult> results = stockPriceClient.search("삼성전자");
+
+        assertThat(results).containsExactly(
+                new SearchResult("005930", "삼성전자", AssetType.STOCK, "KRW"),
+                new SearchResult("005935", "삼성전자우", AssetType.STOCK, "KRW"));
+    }
+
+    @Test
+    void searchUsesLikeSrtnCdForNumericQueryAndDedupesDuplicateTickerAcrossDates() {
+        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+                + "&numOfRows=20&pageNo=1&resultType=json&likeSrtnCd=" + TICKER;
+        // 2026-09-09 실측: basDt를 지정하지 않으면 동일 종목의 여러 거래일 데이터가 최신순으로 온다
+        // (하나의 종목코드만 매칭돼도 numOfRows 잔여분이 과거 날짜로 채워짐) — 클라이언트가 srtnCd
+        // 기준으로 첫 번째(가장 최근) 항목만 남기는지 검증한다.
+        wireMockServer.stubFor(get(urlEqualTo(requestPath))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "response": {
+                                    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+                                    "body": {
+                                      "numOfRows": 20, "pageNo": 1, "totalCount": 2,
+                                      "items": {"item": [
+                                        {"basDt": "20260908", "srtnCd": "005930", "itmsNm": "삼성전자", "clpr": "269500"},
+                                        {"basDt": "20260907", "srtnCd": "005930", "itmsNm": "삼성전자", "clpr": "270000"}
+                                      ]}
+                                    }
+                                  }
+                                }
+                                """)));
+
+        List<SearchResult> results = stockPriceClient.search(TICKER);
+
+        assertThat(results).containsExactly(new SearchResult("005930", "삼성전자", AssetType.STOCK, "KRW"));
+    }
+
+    @Test
+    void searchReturnsEmptyListWhenNoItemsMatch() {
+        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+                + "&numOfRows=20&pageNo=1&resultType=json&likeItmsNm=%EC%A1%B4%EC%9E%AC%ED%95%98%EC%A7%80%EC%95%8A%EC%9D%8C";
+        wireMockServer.stubFor(get(urlEqualTo(requestPath))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "response": {
+                                    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+                                    "body": {
+                                      "numOfRows": 20, "pageNo": 1, "totalCount": 0,
+                                      "items": {"item": []}
+                                    }
+                                  }
+                                }
+                                """)));
+
+        List<SearchResult> results = stockPriceClient.search("존재하지않음");
+
+        assertThat(results).isEmpty();
+    }
+
+    @Test
+    void searchThrowsExternalPriceApiExceptionOnAuthError() {
+        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+                + "&numOfRows=20&pageNo=1&resultType=json&likeItmsNm=%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90";
+        wireMockServer.stubFor(get(urlEqualTo(requestPath))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "OpenAPI_ServiceResponse": {
+                                    "cmmMsgHeader": {
+                                      "errMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+                                      "returnAuthMsg": "등록되지 않은 서비스키",
+                                      "returnReasonCode": "30"
+                                    }
+                                  }
+                                }
+                                """)));
+
+        assertThatThrownBy(() -> stockPriceClient.search("삼성전자"))
                 .isInstanceOf(ExternalPriceApiException.class);
     }
 }

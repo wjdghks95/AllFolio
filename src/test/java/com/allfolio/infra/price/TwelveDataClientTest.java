@@ -1,7 +1,9 @@
 package com.allfolio.infra.price;
 
 import com.allfolio.AbstractIntegrationTest;
+import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Price;
+import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.TickerNotFoundException;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -16,6 +18,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
@@ -217,6 +220,106 @@ class TwelveDataClientTest extends AbstractIntegrationTest {
                                 """)));
 
         assertThatThrownBy(() -> twelveDataClient.getPrice(TICKER))
+                .isInstanceOf(ExternalPriceApiException.class);
+    }
+
+    /**
+     * docs/ROADMAP.md Task 026(통합 종목 검색) — {@code /symbol_search} 실제 curl 검증(2026-09-09):
+     * "AAPL" 검색 결과에는 나스닥(Common Stock/USD)뿐 아니라 아르헨티나 CEDEAR·칠레 BVS·태국 SET 등
+     * 전세계 상장이 섞여 온다({@code instrument_type}이 "Depositary Receipt"/"Mutual Fund"거나
+     * {@code currency}가 USD가 아님) — {@code instrument_type=="Common Stock" && currency=="USD"}로
+     * 걸러야 한다. 이 스텁은 실제 응답 구조를 축약해 나스닥 정상 항목·통화 불일치(Depositary
+     * Receipt, ARS)·자산유형 불일치(Common Stock이지만 다른 나라 상장이 아닌 Mutual Fund) 3종을
+     * 함께 담아, 필터링이 실제로 동작하는지 검증한다.
+     */
+    @Test
+    void searchFiltersToUsCommonStockAndMapsToSearchResult() {
+        wireMockServer.stubFor(get(urlEqualTo("/symbol_search?symbol=AAPL&outputsize=20"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "data": [
+                                    {
+                                      "symbol": "AAPL",
+                                      "instrument_name": "Apple Inc.",
+                                      "exchange": "NASDAQ",
+                                      "mic_code": "XNGS",
+                                      "instrument_type": "Common Stock",
+                                      "country": "United States",
+                                      "currency": "USD"
+                                    },
+                                    {
+                                      "symbol": "AAPL",
+                                      "instrument_name": "Apple Inc. CEDEAR",
+                                      "exchange": "BCBA",
+                                      "mic_code": "XBUE",
+                                      "instrument_type": "Depositary Receipt",
+                                      "country": "Argentina",
+                                      "currency": "ARS"
+                                    },
+                                    {
+                                      "symbol": "AAPLDXX",
+                                      "instrument_name": "Barclays Bank PLC Note AAPLDXX",
+                                      "exchange": "NASDAQ",
+                                      "mic_code": "XNAS",
+                                      "instrument_type": "Mutual Fund",
+                                      "country": "United States",
+                                      "currency": "USD"
+                                    }
+                                  ],
+                                  "status": "ok"
+                                }
+                                """)));
+
+        List<SearchResult> results = twelveDataClient.search("AAPL");
+
+        assertThat(results).containsExactly(new SearchResult("AAPL", "Apple Inc.", AssetType.STOCK, "USD"));
+    }
+
+    /**
+     * 실측(2026-09-09)으로 확정한 핵심 포인트 — {@code /symbol_search}의 "결과 없음"은
+     * {@code /quote}의 404와 달리 **정상 HTTP 200 + {@code {"data":[],"status":"ok"}}**로 온다
+     * (실제 존재하지 않는 질의어 "ZZZZINVALIDNOTHING"으로 curl 직접 재현 확인).
+     */
+    @Test
+    void searchReturnsEmptyListWhenNoMatches() {
+        wireMockServer.stubFor(get(urlEqualTo("/symbol_search?symbol=ZZZZINVALIDNOTHING&outputsize=20"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "data": [],
+                                  "status": "ok"
+                                }
+                                """)));
+
+        assertThat(twelveDataClient.search("ZZZZINVALIDNOTHING")).isEmpty();
+    }
+
+    /**
+     * 실측(2026-09-09)으로는 {@code /symbol_search}가 잘못된/누락된 apikey로도 200을 반환해
+     * 인증 실패를 실제로 재현하지 못했다(공개 참조 데이터 엔드포인트로 추정) — 그럼에도 공식 문서가
+     * 401을 명시하고 있어, 방어적으로 4xx를 받으면 {@link ExternalPriceApiException}으로 변환되는지
+     * WireMock 스텁으로 검증해둔다.
+     */
+    @Test
+    void searchThrowsExternalPriceApiExceptionOnAuthError() {
+        wireMockServer.stubFor(get(urlEqualTo("/symbol_search?symbol=AAPL&outputsize=20"))
+                .willReturn(aResponse()
+                        .withStatus(401)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "code": 401,
+                                  "message": "**apikey** parameter is incorrect or not specified.",
+                                  "status": "error"
+                                }
+                                """)));
+
+        assertThatThrownBy(() -> twelveDataClient.search("AAPL"))
                 .isInstanceOf(ExternalPriceApiException.class);
     }
 }

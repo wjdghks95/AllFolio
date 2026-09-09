@@ -1,6 +1,8 @@
 package com.allfolio.infra.price;
 
+import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Price;
+import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.TickerNotFoundException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
@@ -14,7 +16,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -36,6 +40,13 @@ import java.util.regex.Pattern;
  *       필드가 채워지지 않아 null이 되므로 아래 방어 로직이 그대로 {@link ExternalPriceApiException}으로
  *       전환한다(별도 파싱 분기 불필요).</li>
  * </ul>
+ *
+ * <p><b>{@link #search}(Task 026) 실제 서비스키로 검증 완료</b>(2026-09-09, curl 직접 호출):
+ * {@code basDt}를 지정하지 않으면 응답이 최근 거래일부터 과거 순으로 정렬되어, 매칭 종목 수가 적은
+ * 질의어일수록 {@code numOfRows} 잔여분이 같은 종목의 과거 날짜 데이터로 채워진다(예: "005930"으로
+ * 검색 시 종목 1개인데도 서로 다른 20개 날짜가 옴). {@code srtnCd} 기준 첫 항목(=최근 날짜)만
+ * 남기는 클라이언트 측 중복 제거로 해결했다. 자세한 내용은 .claude/agents/stock-price-api.md의
+ * "Task 026" 절 참고.
  */
 @Component
 public class StockPriceClient {
@@ -115,6 +126,56 @@ public class StockPriceClient {
         throw new ExternalPriceApiException("주식 시세 조회에 실패했습니다: " + ticker, ex);
     }
 
+    /**
+     * 통합 종목 검색(GET /v1/assets/search)의 STOCK+KRW 분기. 질의어가 숫자로만 구성되면 종목코드
+     * 포함검색({@code likeSrtnCd}), 아니면 종목명 포함검색({@code likeItmsNm})으로 라우팅한다.
+     * 검색은 가격을 포함하지 않는다 — 결과 목록에서 각 종목의 시세는 등록 후 {@link #getPrice}가 담당한다.
+     */
+    @CircuitBreaker(name = "stock", fallbackMethod = "searchFallback")
+    public List<SearchResult> search(String query) {
+        boolean numeric = query.chars().allMatch(Character::isDigit);
+        String param = numeric ? "likeSrtnCd" : "likeItmsNm";
+        StockPriceApiResponse response = restClient.get()
+                .uri("/getStockPriceInfo?serviceKey={serviceKey}&numOfRows=20&pageNo=1&resultType=json&"
+                        + param + "={query}", serviceKey, query)
+                .retrieve()
+                .body(StockPriceApiResponse.class);
+
+        return extractSearchResults(response, query);
+    }
+
+    private List<SearchResult> extractSearchResults(StockPriceApiResponse response, String query) {
+        if (response == null || response.response() == null
+                || response.response().body() == null
+                || response.response().body().items() == null
+                || response.response().body().items().item() == null) {
+            throw new ExternalPriceApiException("주식 종목 검색 응답 형식이 올바르지 않습니다: " + query);
+        }
+
+        Header header = response.response().header();
+        if (header != null && header.resultCode() != null && !"00".equals(header.resultCode())) {
+            throw new ExternalPriceApiException(
+                    "주식 종목 검색 실패(%s): %s".formatted(header.resultCode(), header.resultMsg()));
+        }
+
+        // basDt를 지정하지 않으면 최근 거래일부터 과거 순으로 정렬된 여러 날짜의 데이터가 함께 온다
+        // (2026-09-09 curl 실측, .claude/agents/stock-price-api.md Task 026 절 참고) — 매칭되는
+        // 종목 수가 적은 질의어일수록 numOfRows 잔여분이 같은 종목의 과거 날짜로 채워져 동일 종목이
+        // 중복 노출된다. srtnCd 기준으로 첫 번째(가장 최근 날짜) 항목만 남겨 중복을 제거한다.
+        Map<String, Item> deduped = new LinkedHashMap<>();
+        for (Item item : response.response().body().items().item()) {
+            deduped.putIfAbsent(item.srtnCd(), item);
+        }
+
+        return deduped.values().stream()
+                .map(item -> new SearchResult(item.srtnCd(), item.itmsNm(), AssetType.STOCK, "KRW"))
+                .toList();
+    }
+
+    private List<SearchResult> searchFallback(String query, Throwable ex) {
+        throw new ExternalPriceApiException("주식 종목 검색에 실패했습니다: " + query, ex);
+    }
+
     private record StockPriceApiResponse(Response response) {
     }
 
@@ -130,6 +191,6 @@ public class StockPriceClient {
     private record Items(List<Item> item) {
     }
 
-    private record Item(String basDt, String srtnCd, BigDecimal clpr) {
+    private record Item(String basDt, String srtnCd, String itmsNm, BigDecimal clpr) {
     }
 }

@@ -119,6 +119,23 @@ GET https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getSto
 ```
 `StockPriceClient`는 이 경우 `response` 필드가 채워지지 않아 null이 되고, 기존 방어 로직(`extractMatchingItem`의 null 체크)이 그대로 `ExternalPriceApiException`으로 전환한다 — 별도 파싱 분기를 추가할 필요가 없었다. `StockPriceClientTest.getPriceThrowsExternalPriceApiExceptionOnAuthError()`로 이 정확한 응답을 WireMock에 재현해 검증됨.
 
+## Task 026 실측 — StockPriceClient.search() (통합 종목 검색, GET /v1/assets/search의 STOCK+KRW 분기)
+
+`GET /v1/assets/search`는 3개 외부 소스(STOCK+KRW/STOCK+USD/COIN)로 라우팅하는 검색 엔드포인트이며, 검색 결과에는 가격을 포함하지 않는다(여러 결과 각각 시세 조회 시 무료 API 한도를 검색 한 번에 소진하기 때문). 3개 클라이언트가 공유하는 결과 타입은 `domain/SearchResult.java`(`record SearchResult(String ticker, String name, AssetType assetType, String currency)`)이며, STOCK+KRW는 `ticker=srtnCd`·`name=itmsNm`·`assetType=STOCK`·`currency="KRW"`로 채운다.
+
+`StockPriceClient.search(String query)`는 기존 `getStockPriceInfo` 오퍼레이션을 그대로 재사용한다 — 검색 전용 별도 오퍼레이션은 없다. 질의어가 숫자로만 구성되면 `likeSrtnCd`(종목코드 포함검색), 아니면 `likeItmsNm`(종목명 포함검색)으로 분기하고 `numOfRows=20&pageNo=1`로 호출한다.
+
+**실제 서비스키로 curl 실측 완료(2026-09-09)** — 문서에 없던 중요한 함정을 발견했다: **`basDt`를 지정하지 않으면 응답이 최근 거래일부터 과거 순으로 정렬된 여러 날짜의 데이터가 함께 온다.** `getPrice()`는 `numOfRows=1`이라 항상 최신 1건만 오므로 이 문제를 겪지 않았지만, `search()`는 `numOfRows=20`이라 직접 영향을 받는다.
+
+- 매칭되는 종목 수가 충분히 많은 질의어(예: `likeItmsNm=삼성`, 실측 시 26개 종목 매칭)는 첫 페이지 20건이 모두 오늘 날짜(최신 거래일)의 서로 다른 종목이라 우연히 문제가 드러나지 않는다.
+- 하지만 매칭 종목 수가 적은 질의어(예: `likeSrtnCd=005930`은 종목 1개, `likeItmsNm=삼성전자`는 2개인 "삼성전자"/"삼성전자우")는 `numOfRows=20`의 나머지 자리를 **같은 종목의 과거 거래일 데이터**가 채운다 — 실측 결과 `likeSrtnCd=005930`은 20건 모두 종목코드 `005930`이었고 날짜만 `20260908`부터 과거로 내려가며 달랐다(`totalCount=1641`, 상장 이후 전체 거래일 수와 일치).
+- 응답 정렬은 `basDt` 내림차순이 1순위, 동일 `basDt` 내에서는 `srtnCd` 오름차순으로 보인다(실측: `likeItmsNm=삼성` 첫 페이지가 `000810`→`028260` 순으로 전부 `20260908`).
+- 이 정렬 덕분에, **`srtnCd` 기준으로 첫 번째로 나온 항목만 남기는 클라이언트 측 중복 제거**(`LinkedHashMap.putIfAbsent`)만으로 정확히 해결된다 — 첫 번째 항목이 항상 그 종목의 최신 거래일 데이터이기 때문이다. `basDt`를 별도로 지정하는 방식(주말/공휴일에 그 날짜로 데이터가 없어 0건이 되는 리스크)보다 안전해 이 방식을 택했다. `StockPriceClient.extractSearchResults()`에 구현됨.
+- 매칭 0건 시 응답은 `{"response":{"header":{"resultCode":"00",...},"body":{"totalCount":0,"items":{"item":[]}}}}` — `items.item`이 `null`이 아니라 **빈 배열**로 온다(실측 확인). `getPrice()`의 "정상 200 + 매칭 실패는 `TickerNotFoundException`"과 달리, `search()`는 빈 배열이면 그대로 빈 `List<SearchResult>`를 반환한다(예외 아님 — "결과 없음"이 검색의 정상 케이스).
+- 인증 실패 응답 스키마는 `getPrice()`와 동일(`OpenAPI_ServiceResponse`/`cmmMsgHeader`) — 동일한 null 체크 방어 로직이 `ExternalPriceApiException`으로 전환한다.
+
+`StockPriceClientTest`에 `searchUsesLikeItmsNmForNonNumericQuery`·`searchUsesLikeSrtnCdForNumericQueryAndDedupesDuplicateTickerAcrossDates`·`searchReturnsEmptyListWhenNoItemsMatch`·`searchThrowsExternalPriceApiExceptionOnAuthError` 4건으로 위 내용을 WireMock에 재현해 검증됨.
+
 ## 구현 시 반드시 지킬 규칙
 
 | 규칙 | 근거 |

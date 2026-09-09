@@ -1,7 +1,9 @@
 package com.allfolio.infra.price;
 
 import com.allfolio.AbstractIntegrationTest;
+import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Price;
+import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -14,6 +16,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
@@ -139,6 +142,41 @@ class UpbitPriceClientTest extends AbstractIntegrationTest {
                 .willReturn(aResponse().withStatus(200).withFixedDelay(5000)));
 
         assertThatThrownBy(() -> upbitPriceClient.getPrice("KRW-BTC", "KRW"))
+                .isInstanceOf(ExternalPriceApiException.class);
+    }
+
+    /**
+     * 통합 종목 검색(GET /v1/assets/search) COIN 분기용 전체 마켓 목록 조회(Task 026 서브태스크 3).
+     * KRW-, USDT- 접두어 마켓만 SearchResult로 매핑하고, AllFolio가 지원하지 않는 통화의 코인마켓(BTC- 접두어 등)은
+     * 제외해야 한다.
+     */
+    @Test
+    void listMarketsMapsKrwAndUsdtMarketsAndExcludesUnsupportedQuoteCurrencies() {
+        wireMockServer.stubFor(get(urlEqualTo("/v1/market/all"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                [
+                                  {"market":"KRW-BTC","korean_name":"비트코인","english_name":"Bitcoin"},
+                                  {"market":"USDT-BTC","korean_name":"비트코인","english_name":"Bitcoin"},
+                                  {"market":"BTC-ETH","korean_name":"이더리움","english_name":"Ethereum"}
+                                ]
+                                """)));
+
+        List<SearchResult> markets = upbitPriceClient.listMarkets();
+
+        assertThat(markets).containsExactlyInAnyOrder(
+                new SearchResult("BTC", "비트코인", AssetType.COIN, "KRW"),
+                new SearchResult("BTC", "비트코인", AssetType.COIN, "USD"));
+    }
+
+    @Test
+    void listMarketsThrowsExternalPriceApiExceptionOnServerError() {
+        wireMockServer.stubFor(get(urlEqualTo("/v1/market/all"))
+                .willReturn(aResponse().withStatus(500)));
+
+        assertThatThrownBy(() -> upbitPriceClient.listMarkets())
                 .isInstanceOf(ExternalPriceApiException.class);
     }
 }
