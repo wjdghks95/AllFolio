@@ -221,6 +221,21 @@ public class PriceService {
      * 원본 1350.05원으로 계산하면 70,000원). 그래서 CASH(USD) 자산 캐시와 겹치지 않는 전용 키를
      * 쓴다.
      */
+    /**
+     * {@code GET /v1/portfolio}(Task 023, Task 025 STOCK+USD 손익 버그 수정)에서 STOCK(USD)/COIN(USD)
+     * 자산의 cost(USD)를 KRW로 환산해 손익을 계산할 때 쓰는 원본(반올림 전) 환율을 외부에 노출한다.
+     * {@link #quoteForPortfolio(Asset)}과 동일하게 실패를 흡수해(RuntimeException → log.warn →
+     * {@link Optional#empty()}) 호출자에게 예외를 전파하지 않는다.
+     */
+    public Optional<Price> quoteUsdKrwRate() {
+        try {
+            return Optional.of(cachedUsdKrwRate());
+        } catch (RuntimeException e) {
+            log.warn("USD/KRW 환율 조회 실패", e);
+            return Optional.empty();
+        }
+    }
+
     private Price cachedUsdKrwRate() {
         String cacheKey = "rate:USD:KRW";
         Optional<PricedQuote> cached = priceCacheStore.find(cacheKey, priceCacheProperties.cashUsdFreshTtl());

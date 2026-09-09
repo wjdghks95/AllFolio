@@ -4,6 +4,7 @@ import com.allfolio.domain.Asset;
 import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Holding;
 import com.allfolio.domain.PrecisionScale;
+import com.allfolio.domain.Price;
 import com.allfolio.domain.PricedQuote;
 import com.allfolio.domain.repository.AssetRepository;
 import com.allfolio.domain.repository.HoldingRepository;
@@ -103,7 +104,10 @@ public class PortfolioService {
      * CASH(KRW)는 시세 조회 대상이 아니라 quantity 자체가 이미 평가금액이다. STOCK/COIN/CASH(USD)는
      * PriceService.quoteForPortfolio()가 반환하는 원화 환산 금액을 그대로 곱해 평가금액을 낸다 —
      * CASH(USD)만 cost도 같은 환율로 재환산해야 원화 기준 손익이 나온다(cost는 USD 스케일로 저장돼 있음).
-     * 시세 조회가 실패하면(Optional.empty) evaluationKrw/unrealizedPnl 둘 다 null로 남긴다.
+     * STOCK(USD)/COIN(USD)도 cost가 USD 스케일로 저장되는 구조는 동일해, PriceService.quoteUsdKrwRate()로
+     * cost를 KRW 환산해야 손익을 계산할 수 있다(Task 025 GOOGL unrealizedPnl 항상 null 버그 수정) —
+     * 환율 조회까지 실패하면 그대로 null로 남긴다. 시세 조회가 실패하면(Optional.empty) evaluationKrw/
+     * unrealizedPnl 둘 다 null로 남긴다.
      */
     private PortfolioItemResponse priceItem(ItemDraft draft) {
         Asset asset = draft.asset();
@@ -128,6 +132,16 @@ public class PortfolioService {
                     // 스케일로 저장돼 있어) 손익을 신뢰성 있게 계산할 수 없다 — null로 남긴다
                     // (Major 3, 거짓 숫자를 내보내지 않는다는 원칙).
                     unrealizedPnl = evaluationKrw.subtract(draft.cost());
+                } else if ("USD".equals(asset.getCurrency())) {
+                    // STOCK(USD, 예: GOOGL)·COIN(USD, USDT 마켓)은 draft.cost()가 USD 스케일로
+                    // 저장돼 있어 evaluationKrw(원화)와 바로 뺄 수 없다 — CASH(USD)와 동일하게
+                    // cost를 USD/KRW 환율로 원화 환산한 뒤에야 손익을 계산할 수 있다.
+                    Optional<Price> rate = priceService.quoteUsdKrwRate();
+                    if (rate.isPresent()) {
+                        BigDecimal costKrw = draft.cost().multiply(rate.get().amount())
+                                .setScale(0, RoundingMode.HALF_UP);
+                        unrealizedPnl = evaluationKrw.subtract(costKrw);
+                    }
                 }
             }
         }

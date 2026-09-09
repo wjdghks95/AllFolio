@@ -367,15 +367,17 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
      * STOCK+USD는 Task 025부터 Twelve Data 원본 달러 시세를 PriceService.stockUsPrice()가 환율로
      * KRW 환산해서 돌려주고, COIN은 USD면 PriceService.coinPrice()가 동일한 방식으로 환산한다).
      * 자산을 USD로 등록하면(currency=USD, cost는 USD 스케일 2로 저장) evaluationKrw(KRW)와 cost(USD)의
-     * 통화 단위가 맞지 않아 unrealizedPnl을 신뢰성 있게 계산할 수 없으므로 null로 남아야 한다(Task 023
-     * Major 3, "거짓 숫자를 내보내지 않는다" 원칙). evaluationKrw 자체는 유효한 값이라 정상 계산되고,
-     * weight도 다른 자산과의 비중 분모(evaluationKrw 기준)에 정상 포함되어야 한다.
+     * 통화 단위가 맞지 않아 그대로는 뺄 수 없다 — PriceService.quoteUsdKrwRate()로 cost도 KRW 환산한
+     * 뒤에야 손익을 계산할 수 있다(Task 025 GOOGL 실사용 버그 수정, cost가 USD 스케일인 CASH(USD)와
+     * 동일한 처리). evaluationKrw는 여전히 정상 계산되고, weight도 다른 자산과의 비중 분모
+     * (evaluationKrw 기준)에 정상 포함된다.
      * USD 주식: Twelve Data 종가 51.85달러 × 환율 1350.05 = 70000.0925원(반올림 70000원)×10주=700000
-     * (evaluationKrw). KRW 현금 300000은 그대로 평가금액=원가. total = 700000+300000=1000000
-     * → USD 주식 weight=70.00, 현금 weight=30.00.
+     * (evaluationKrw). cost = 10주×100.0000달러 = 1000.00달러 → costKrw = 1000.00×1350.05 =
+     * 1350050원 → unrealizedPnl = 700000-1350050 = -650050. KRW 현금 300000은 그대로 평가금액=원가.
+     * total = 700000+300000=1000000 → USD 주식 weight=70.00, 현금 weight=30.00.
      */
     @Test
-    void portfolioLeavesUnrealizedPnlNullForNonKrwStockEvenWhenPriceLookupSucceeds() {
+    void portfolioComputesUnrealizedPnlForUsdStockByConvertingCostWithExchangeRate() {
         twelveDataWireMock.stubFor(get(urlEqualTo("/quote?symbol=PFV4USDSTOCK"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                         .withBody("""
@@ -397,7 +399,8 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
         Map<String, Object> usdStock = itemByTicker(items, "PFV4USDSTOCK");
         assertThat(usdStock.get("evaluationKrw")).isNotNull();
         assertThat(new BigDecimal((String) usdStock.get("evaluationKrw"))).isEqualByComparingTo("700000");
-        assertThat(usdStock.get("unrealizedPnl")).isNull();
+        assertThat(usdStock.get("unrealizedPnl")).isNotNull();
+        assertThat(new BigDecimal((String) usdStock.get("unrealizedPnl"))).isEqualByComparingTo("-650050");
         assertThat(new BigDecimal((String) usdStock.get("weight"))).isEqualByComparingTo("70.00");
 
         Map<String, Object> cashKrw = itemByTicker(items, "PFV4CASHKRW");

@@ -173,6 +173,45 @@ class PortfolioServiceTest {
         }
     }
 
+    /**
+     * STOCK(USD, 예: GOOGL)은 draft.cost()가 USD 스케일로 저장돼 있어 CASH(USD)와 동일하게
+     * quoteUsdKrwRate()로 환산해야 손익이 나온다(Task 025 GOOGL unrealizedPnl 항상 null 버그
+     * 회귀 방지). GOOGL 10주 × 평단가 $150 = cost $1500, 현재가 $200/주 → evaluationKrw =
+     * 200×1350×10 = 2,700,000, costKrw = 1500×1350 = 2,025,000 → 손익 675,000.
+     */
+    @Test
+    void computesUnrealizedPnlForUsdStock() {
+        Asset stockUsd = asset(AssetType.STOCK, "GOOGL", "Alphabet", "USD");
+        given(userId, List.of(stockUsd), Map.of(stockUsd, holding(stockUsd, "10", "150")));
+
+        when(priceService.quoteForPortfolio(stockUsd)).thenReturn(quote("270000"));
+        when(priceService.quoteUsdKrwRate())
+                .thenReturn(Optional.of(new Price(new BigDecimal("1350"), "KRW", Instant.now())));
+
+        PortfolioResponse response = portfolioService.listPortfolio(userId);
+
+        PortfolioItemResponse item = itemOf(response, "GOOGL");
+        assertThat(new BigDecimal(item.evaluationKrw())).isEqualByComparingTo("2700000");
+        assertThat(new BigDecimal(item.unrealizedPnl())).isEqualByComparingTo("675000");
+        assertThat(item.unrealizedPnl()).isEqualTo("675000");
+    }
+
+    /** 환율 조회까지 실패하면(Optional.empty) evaluationKrw는 정상이어도 unrealizedPnl은 null로 남는다. */
+    @Test
+    void unrealizedPnlIsNullForUsdStockWhenExchangeRateUnavailable() {
+        Asset stockUsd = asset(AssetType.STOCK, "GOOGL", "Alphabet", "USD");
+        given(userId, List.of(stockUsd), Map.of(stockUsd, holding(stockUsd, "10", "150")));
+
+        when(priceService.quoteForPortfolio(stockUsd)).thenReturn(quote("270000"));
+        when(priceService.quoteUsdKrwRate()).thenReturn(Optional.empty());
+
+        PortfolioResponse response = portfolioService.listPortfolio(userId);
+
+        PortfolioItemResponse item = itemOf(response, "GOOGL");
+        assertThat(new BigDecimal(item.evaluationKrw())).isEqualByComparingTo("2700000");
+        assertThat(item.unrealizedPnl()).isNull();
+    }
+
     private void given(UUID userId, List<Asset> assets, Map<Asset, Holding> holdingsByAsset) {
         when(assetRepository.findByUser_IdOrderByIdDesc(userId)).thenReturn(assets);
         when(holdingRepository.findByAsset_IdIn(any())).thenReturn(List.copyOf(holdingsByAsset.values()));
