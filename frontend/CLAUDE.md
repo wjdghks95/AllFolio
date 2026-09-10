@@ -17,11 +17,12 @@ npm run lint        # oxlint
 
 ```
 src/
-  api/       백엔드 fetch 래퍼 (authApi.ts, assetApi.ts, types.ts, fixtures.ts)
-  components/ 공통 UI 컴포넌트 (Button, Field, TextField, Alert, Card, ConfirmDialog, SegmentToggle)
+  api/       백엔드 fetch 래퍼 (authApi.ts, assetApi.ts, types.ts)
+  auth/      인증 컨텍스트 (AuthProvider, RequireAuth, useAuth, tokenStorage)
+  components/ 공통 UI 컴포넌트 (Button, Field, TextField, Alert, Card, ConfirmDialog, SegmentToggle, SearchCombobox)
+  layouts/   라우트 레이아웃 (AppLayout, AuthLayout)
   pages/     라우트별 페이지 (LoginPage, SignupPage, PortfolioPage, AssetNewPage, AssetDetailPage)
-  lib/       순수 유틸 (big.ts, money.ts, validation.ts, simulate.ts, messages.ts)
-  hooks/     커스텀 훅
+  lib/       순수 유틸 (big.ts, money.ts, validation.ts, messages.ts)
 ```
 
 ## 화면 전환 후 알림 — Flash 메시지 패턴

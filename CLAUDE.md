@@ -107,8 +107,8 @@ frontend/      React + Vite + TypeScript
 | **Phase 1** | 애플리케이션 골격 구축 (백엔드 인증·프론트 라우팅·API 계약) | Spring Security, JWT, React, Vite |
 | **Phase 2** | UI/UX 완성(더미 데이터) + 백엔드 자산 CRUD·시뮬레이터 (병렬 트랙) | React 컴포넌트, BigDecimal, In-Memory 시뮬레이터 |
 | **Phase 3** | 실데이터 연동 + 외부 시세 API + Redis 캐시 | Upbit/공공데이터포털(주식)/환율 API, Resilience4j, Redis, Throttling |
-| **Phase 4** (현재) | 종목 검색 기반 등록 + 미국 주식 시세 | Twelve Data(미국 주식), 통합 종목 검색 API |
-| **Phase 5** | SSE 실시간 스트리밍·하이브리드 앱·대용량 부하 | Virtual Threads, SSE, FCM/APNs, k6, Capacitor |
+| **Phase 4** | 종목 검색 기반 등록 + 미국 주식 시세 | Twelve Data(미국 주식), 통합 종목 검색 API |
+| **Phase 5** (현재) | SSE 실시간 스트리밍·하이브리드 앱·대용량 부하 | Virtual Threads, SSE, FCM/APNs, k6, Capacitor |
 
 이 표의 Phase 번호는 `docs/ROADMAP.md`의 신규 체계를 따릅니다(기존 "Phase 2 = 외부 시세"였던 이전 체계와 다름 — 대응표는 ROADMAP.md 참조). 자세한 내용은 [`docs/ROADMAP.md`](docs/ROADMAP.md)와 [`docs/PRD.md`](docs/PRD.md) 참조.
 
