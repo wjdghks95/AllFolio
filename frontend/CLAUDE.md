@@ -5,11 +5,38 @@ Vite 개발 서버는 `/v1/*` 요청을 `localhost:8080`(Spring Boot)으로 프�
 ## 명령어
 
 ```bash
+npm run dev         # Vite 개발 서버 (포트 5173)
+npm run build       # 프로덕션 빌드 → dist/
 npm run test        # vitest run (1회 실행)
 npm run test:watch  # vitest watch 모드
 npm run typecheck   # tsc -b --noEmit
 npm run lint        # oxlint
 ```
+
+## 디렉터리 구조
+
+```
+src/
+  api/       백엔드 fetch 래퍼 (authApi.ts, assetApi.ts, types.ts, fixtures.ts)
+  components/ 공통 UI 컴포넌트 (Button, Field, TextField, Alert, Card, ConfirmDialog, SegmentToggle)
+  pages/     라우트별 페이지 (LoginPage, SignupPage, PortfolioPage, AssetNewPage, AssetDetailPage)
+  lib/       순수 유틸 (big.ts, money.ts, validation.ts, simulate.ts, messages.ts)
+  hooks/     커스텀 훅
+```
+
+## 화면 전환 후 알림 — Flash 메시지 패턴
+
+Toast 대신 **라우터 state로 결과 전달** 후 이동 대상 페이지의 `Alert`로 렌더링한다:
+
+```ts
+// 송신 측
+navigate('/portfolio', { state: { flash: { type: 'success', message: '...' } } });
+
+// 수신 측 (PortfolioPage)
+const [flash] = useState(() => location.state?.flash ?? null);  // 마운트 시 1회 캡처
+```
+
+`useState` 지연 초기화로 마운트 시점에 캡처해야 한다 — `location.state`를 매 렌더에서 읽으면 한 프레임 만에 사라진다(실측 버그).
 
 ## 금액 계산은 `Dec`(big.js)로만 한다
 
