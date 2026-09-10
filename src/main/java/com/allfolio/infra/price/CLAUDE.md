@@ -51,6 +51,20 @@ Data) 환산도 동일 캐시를 공유한다.
 KRW가 아닌 통화는 접미사로 반영한다(`price:COIN:{ticker}:{currency}`) — 그렇지 않으면 "BTC"를
 KRW로 등록한 자산과 USD로 등록한 자산이 캐시를 공유해 서로 다른 가격을 덮어쓴다.
 
+## 통합 검색 라우팅 (Task 026)
+
+`StockPriceClient.search(q)`, `TwelveDataClient.search(q)`, `UpbitPriceClient.listMarkets()`는 모두
+`List<SearchResult>`를 반환한다. `domain/service/SearchService`가 `assetType·currency`로 이 세 메서드 중
+하나를 라우팅해 호출하며, 클라이언트 자체는 라우팅 로직을 모른다.
+
+- `StockPriceClient.search(q)` — 공공데이터포털 `likeItmsNm`/`likeSrtnCd` 파라미터 이용. 종목명·코드 모두
+  포함 검색. 결과가 없으면 200 + 빈 배열
+- `TwelveDataClient.search(q)` — `GET /symbol_search?symbol=` 엔드포인트. 존재하지 않는 심볼도 HTTP 200으로
+  빈 배열 형태로 오므로 getPrice와 다른 에러 패턴임에 주의
+- `UpbitPriceClient.listMarkets()` — `GET /v1/market/all`로 AllFolio가 지원하는 KRW-·USDT- 접두어
+  마켓 전체를 반환. `SearchResult.currency`는 KRW 마켓이면 "KRW", USDT 마켓이면 "USD". 검색어(q) 필터와
+  통화(currency) 필터는 클라이언트에서 하지 않고 `SearchService.filterByQuery`에서 인-메모리로 수행
+
 ## 에러 매핑
 
 - 외부 API 장애(반복 실패 → Circuit Breaker Open 포함): 503 `EXTERNAL_API_DOWN`

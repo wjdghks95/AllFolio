@@ -10,6 +10,8 @@ import com.allfolio.domain.exception.InvalidCursorException;
 import com.allfolio.domain.exception.PriceRateLimitExceededException;
 import com.allfolio.domain.exception.PriceUnavailableException;
 import com.allfolio.domain.exception.RefreshTokenInvalidException;
+import com.allfolio.domain.exception.SearchRateLimitExceededException;
+import com.allfolio.domain.exception.SearchValidationException;
 import com.allfolio.web.dto.ErrorResponse;
 import org.hibernate.exception.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -235,6 +237,22 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of("PRICE_RATE_LIMITED", e.getMessage()));
+    }
+
+    /** 사용자당 종목 검색 요청 한도를 초과했을 때(Task 026). */
+    @ExceptionHandler(SearchRateLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> handleSearchRateLimitExceeded(SearchRateLimitExceededException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("SEARCH_RATE_LIMITED", e.getMessage()));
+    }
+
+    /** 지원하지 않는 assetType/currency 조합으로 종목 검색 요청이 들어왔을 때(Task 026). */
+    @ExceptionHandler(SearchValidationException.class)
+    public ResponseEntity<ErrorResponse> handleSearchValidation(SearchValidationException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("VALIDATION_ERROR", e.getMessage()));
     }
 
     /**

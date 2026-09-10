@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-09-09
+**최종 수정:** 2026-09-10
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~5와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -506,7 +506,7 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
   - 담당: `twelvedata-api`(클라이언트 구현·실측) → `senior-backend`(라우팅·캐시 통합) →
     `stock-price-api`(부수 결함 수정) → `code-reviewer`(독립 검증)
 
-- **Task 026: 통합 종목 검색 API**
+- **Task 026: 통합 종목 검색 API** ✅ — 완료 (2026-09-10)
   - 신규 `GET /v1/assets/search?assetType=&currency=&q=`(인증 필요) — `STOCK+KRW`는 공공데이터포털
     `likeItmsNm`/`likeSrtnCd`(종목명·종목코드 포함 검색, 담당: `stock-price-api`), `STOCK+USD`는 Twelve
     Data `GET /symbol_search`, `COIN`은 업비트 `GET /v1/market/all`으로 라우팅
@@ -517,7 +517,28 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
   - 기존 `PriceThrottle`(사용자당 초당 1건)을 그대로 쓰지 않고 검색 전용 한도를 새로 둔다 — 자동완성에
     그대로 걸면 두 글자만 쳐도 429가 난다
   - 검색 결과 0건은 200 + 빈 배열(오류 아님), 외부 API 장애는 기존 `ExternalPriceApiException`(503) 재사용
-  - 담당: `senior-backend` + `stock-price-api`
+  - ✅ **서브태스크 A~C** (WIP 커밋 `b670609`, 2026-09-10): `SearchResult` 도메인 레코드, 3개 클라이언트
+    (`StockPriceClient.search()`, `TwelveDataClient.search()`, `UpbitPriceClient.listMarkets()`)의
+    `SearchResult` 반환 메서드, `SearchCacheStore`(TTL 6h), `SearchThrottleProperties`(30건/10s),
+    `SearchCacheProperties`, `application.yml` 설정 추가
+  - ✅ **서브태스크 D** — `SearchThrottle`(@Component, `SearchThrottleProperties` 30건/10s 직접 주입,
+    `PriceThrottle`과 완전히 독립된 컴포넌트로 분리 — 공유하면 `PriceThrottleProperties`(1건/1s)가
+    실제 적용되는 함정이 있음), `SearchService`(STOCK+KRW→StockPriceClient·STOCK+USD→TwelveDataClient·
+    COIN→UpbitPriceClient.listMarkets() 라우팅, `search:COIN:ALL` 단일 키로 전체 마켓 목록 캐싱 후
+    q·currency 인-메모리 필터), `SearchController`(@Validated 없음, `GET /v1/assets/search`),
+    `SearchResultResponse`(금액 필드 없음, `assetType` String 직렬화), `SearchServiceTest`(Mockito 단위
+    9케이스), `SearchIntegrationTest`(WireMock 통합 6케이스), `GlobalExceptionHandler` 매핑
+    (`SearchRateLimitExceededException` → 429 `SEARCH_RATE_LIMITED`,
+    `SearchValidationException` → 400 `VALIDATION_ERROR`)
+  - ✅ **서브태스크 E** — `code-reviewer` 독립 검증(2026-09-10): Blocker 0건·Major 1건 발견.
+    Major: COIN `filterByQuery`가 currency를 무시해 `currency=USD` 요청에 KRW 마켓이 섞여 나오는
+    결함. `senior-backend`가 `filterByQuery(List, String currency, String q)`로 수정(currency 필터 선행,
+    캐시 키는 `search:COIN:ALL` 유지), `coinFilterExcludesDifferentCurrencyMarkets()` 테스트 추가.
+    Throttle 통합테스트 카운터 조작을 루프 INCR에서 `set("31", 10s)` 직접 SET으로 교체(TTL 경쟁 조건
+    제거). 재검증 후 Blocker 0건·Major 0건 확인
+  - ✅ **서브태스크 F** — ROADMAP.md·`infra/price/CLAUDE.md`·`infra/cache/CLAUDE.md` 문서 갱신 (이 항목)
+  - 담당: `stock-price-api`(StockPriceClient.search) → `twelvedata-api`(TwelveDataClient.search) →
+    `senior-backend`(오케스트레이션·테스트) → `code-reviewer`(독립 검증) → 코디네이터(문서)
 
 - **Task 027: 검색 기반 자산 등록 화면**
   - `AssetNewPage.tsx`의 티커·종목명 `TextField` 2개를 검색 자동완성 컴포넌트(가칭 `SearchCombobox`, 신규)로

@@ -23,3 +23,31 @@ Redis(Lettuce)에는 `INCR`과 `EXPIRE`를 한 번에 묶는 원자적 명령이
 ## 스테일 폴백은 에러가 아니라 206이다
 
 외부 API 장애 시 캐시에 스테일(만료됐지만 `stale-ceiling` 이내) 값이 있으면 503 대신 **206 + 응답 본문 `isStale:true`**로 응답한다. 캐시에 값 자체가 없을 때만 503 `EXTERNAL_API_DOWN`(`infra/price/` 소관 에러 경로)으로 빠진다.
+
+## SearchThrottle — PriceThrottle과 별도 컴포넌트 (Task 026)
+
+`SearchThrottle`(@Component)은 `PriceThrottle`과 동일한 Lua INCR+PEXPIRE 스크립트를 쓰지만 **완전히 독립된
+컴포넌트**다. Redis 키는 `throttle:search:{userId}`로 분리하고, `SearchThrottleProperties`(limit=30/window=10s,
+`allfolio.search-throttle.*`)를 직접 주입받는다.
+
+**분리 이유:** `PriceThrottle`에 `keyPrefix` 인자만 바꿔 재사용하면, 내부에서 `PriceThrottleProperties`(1건/1s)가
+실제 적용돼 SearchThrottleProperties를 주입했어도 무시되는 함정이 있다. 자동완성 시나리오에서 "초당 1건" 한도는
+두 글자만 쳐도 429가 나는 UX 결함이 되므로 별도 컴포넌트로 분리해 30건/10s 한도를 독립 보장한다.
+
+`GET /v1/assets/{id}/price`(PriceThrottle, 1건/1s)와 `GET /v1/assets/search`(SearchThrottle, 30건/10s)는
+서로 한도를 공유하지 않는다.
+
+## SearchCacheStore — 종목 검색 결과 캐시 (Task 026)
+
+`SearchCacheStore`는 `PriceCacheStore`와 다르게 fresh/stale 2단계 없이 단일 TTL(6h,
+`allfolio.search-cache.ttl`)만 사용한다. 검색 결과는 실시간성 요구가 없고 종목 목록은 하루 수준으로
+안정적이기 때문이다.
+
+**COIN 캐시 전략:** `UpbitPriceClient.listMarkets()`가 반환하는 전체 마켓 목록을 `search:COIN:ALL` **단일 키**로
+캐싱한다. q·currency 필터는 `SearchService.filterByQuery`에서 인-메모리로 수행한다. 이 전략의 이점:
+
+- 캐시 키가 검색어 수에 비례해 폭발하지 않는다
+- 첫 번째 사용자 요청만 업비트를 호출하고 이후 6시간은 Redis 히트
+
+STOCK 검색은 `search:STOCK:{currency}:{q}` 키로 질의어 단위 캐싱한다(업비트와 달리 공공데이터포털·Twelve Data는
+서버 측 필터링을 API가 담당하므로 전체 목록 캐싱이 의미 없다).
