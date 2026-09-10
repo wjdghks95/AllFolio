@@ -1,7 +1,7 @@
 // 구조·동작: senior-frontend / 시각 표현·문구: ui-ux-designer
 import { useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { ASSET_TYPES, type AssetType, type CreateAssetRequest } from '../api/types';
+import { ASSET_TYPES, type AssetType, type CreateAssetRequest, type Currency } from '../api/types';
 import { createAsset } from '../api/assetApi';
 import { ApiError } from '../api/authApi';
 import { useAuth } from '../auth/useAuth';
@@ -15,6 +15,7 @@ import {
 import { VALIDATION_MESSAGES, messageForErrorCode } from '../lib/messages';
 import Alert from '../components/Alert';
 import SegmentToggle from '../components/SegmentToggle';
+import SearchCombobox from '../components/SearchCombobox';
 import TextField from '../components/TextField';
 import Button from '../components/Button';
 import type { Flash } from './PortfolioPage';
@@ -36,10 +37,9 @@ const ASSET_TYPE_OPTIONS = ASSET_TYPES.map((type) => ({
   testIdSuffix: ASSET_TYPE_TESTID_SUFFIX[type],
 }));
 
-// PRD F001 "통화(KRW/USD) 선택" — USD 외 통화 확대는 명시적 비목표(PRD 「비목표」)라
-// 자유 텍스트가 아닌 2지선다로 고정한다.
+// PRD F001 "통화(KRW/USD) 선택" — CASH는 여전히 자유 선택 2지선다다(STOCK/COIN은 검색 결과가
+// 통화를 정하므로 이 토글 자체가 CASH에서만 렌더된다). Currency 타입은 api/types.ts로 승격됨.
 const CURRENCIES = ['KRW', 'USD'] as const;
-type Currency = (typeof CURRENCIES)[number];
 const CURRENCY_TESTID_SUFFIX: Record<Currency, string> = {
   KRW: 'krw',
   USD: 'usd',
@@ -88,8 +88,16 @@ export default function AssetNewPage() {
   // 실수로 제출되는 것을 막기 위해 함께 리셋한다. 에러도 함께 지운다 — 그렇지 않으면 STOCK에서
   // 평단가 에러(예: PRICE_NOT_POSITIVE)를 띄운 채 CASH로 갔다가 STOCK으로 돌아왔을 때
   // 이미 지난 제출 시점의 에러가 그대로 다시 보인다.
+  // ticker/name/currency도 같은 이유로 유형이 바뀔 때마다 리셋한다 — CASH는 자유 텍스트로,
+  // STOCK/COIN은 검색 결과 선택으로 채워지는 서로 다른 입력 경로라 이전 선택이 남아있으면
+  // 화면(검색창은 key={assetType}로 비어 보임)과 실제 제출값이 어긋난 채 실수로 제출될 수 있다.
   function handleAssetTypeChange(next: AssetType) {
     setAssetType(next);
+    setTicker('');
+    setName('');
+    setCurrency('KRW');
+    setTickerError(null);
+    setNameError(null);
     if (next === 'CASH') {
       setAvgPrice(null);
       setAvgPriceError(null);
@@ -176,41 +184,78 @@ export default function AssetNewPage() {
               testId="asset-new-type"
             />
           </div>
-          <TextField
-            label="티커"
-            value={ticker}
-            onChange={setTicker}
-            placeholder={placeholder.ticker}
-            required
-            error={tickerError ? VALIDATION_MESSAGES[tickerError] : null}
-            testId="asset-new-ticker"
-          />
-          <TextField
-            label="종목명"
-            value={name}
-            onChange={setName}
-            placeholder={placeholder.name}
-            required
-            error={nameError ? VALIDATION_MESSAGES[nameError] : null}
-            testId="asset-new-name"
-          />
-          {/* PRD F001 "통화(KRW/USD) 선택" — 자유 입력이 아니라 자산 유형과 같은 세그먼트
-              토글이다. 두 선택지뿐이라 CURRENCY_FORMAT 에러는 이 UI로는 재현되지 않는다. */}
-          <div className="flex flex-col gap-1.5">
-            <span
-              id="asset-new-currency-label"
-              className="text-[13px] font-medium tracking-tight text-ink-soft"
-            >
-              통화
-            </span>
-            <SegmentToggle
-              value={currency}
-              options={CURRENCY_OPTIONS}
-              onChange={setCurrency}
-              ariaLabelledBy="asset-new-currency-label"
-              testId="asset-new-currency"
+          {assetType === 'CASH' ? (
+            <>
+              <TextField
+                label="티커"
+                value={ticker}
+                onChange={setTicker}
+                placeholder={placeholder.ticker}
+                required
+                error={tickerError ? VALIDATION_MESSAGES[tickerError] : null}
+                testId="asset-new-ticker"
+              />
+              <TextField
+                label="종목명"
+                value={name}
+                onChange={setName}
+                placeholder={placeholder.name}
+                required
+                error={nameError ? VALIDATION_MESSAGES[nameError] : null}
+                testId="asset-new-name"
+              />
+              {/* PRD F001 "통화(KRW/USD) 선택" — 자유 입력이 아니라 자산 유형과 같은 세그먼트
+                  토글이다. 두 선택지뿐이라 CURRENCY_FORMAT 에러는 이 UI로는 재현되지 않는다.
+                  STOCK/COIN은 검색 결과가 통화를 정하므로 이 토글이 렌더되지 않는다. */}
+              <div className="flex flex-col gap-1.5">
+                <span
+                  id="asset-new-currency-label"
+                  className="text-[13px] font-medium tracking-tight text-ink-soft"
+                >
+                  통화
+                </span>
+                <SegmentToggle
+                  value={currency}
+                  options={CURRENCY_OPTIONS}
+                  onChange={setCurrency}
+                  ariaLabelledBy="asset-new-currency-label"
+                  testId="asset-new-currency"
+                />
+              </div>
+            </>
+          ) : (
+            // STOCK/COIN — 티커·종목명 자유 입력 대신 검색 자동완성으로 채운다(ROADMAP Task 026·027-A).
+            // key={assetType}로 STOCK↔COIN 전환 시 내부 검색 상태(입력값·결과)를 강제로 비운다.
+            <SearchCombobox
+              key={assetType}
+              label="종목 검색"
+              assetType={assetType}
+              onSelect={(result) => {
+                if (result === null) {
+                  // 선택 해제(검색어를 지우거나 고쳐 씀) — 이전 선택값이 그대로 남아 제출되는 걸 막는다.
+                  setTicker('');
+                  setName('');
+                  setCurrency('KRW');
+                  return;
+                }
+                setTicker(result.ticker);
+                setName(result.name);
+                setCurrency(result.currency);
+              }}
+              onUnauthorized={() => {
+                auth.logout();
+                navigate('/login', { replace: true, state: { from: location } });
+              }}
+              error={
+                tickerError
+                  ? VALIDATION_MESSAGES[tickerError]
+                  : nameError
+                    ? VALIDATION_MESSAGES[nameError]
+                    : null
+              }
+              testId="asset-new-symbol-search"
             />
-          </div>
+          )}
         </div>
 
         <div className="mt-8 flex flex-col gap-4">

@@ -37,6 +37,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   ASSET_NOT_FOUND: '삭제되었거나 없는 자산입니다. 총 자산 화면에서 다시 선택하세요.',
   HOLDING_CONFLICT: '다른 곳에서 이미 수정되었습니다. 새로고침 후 다시 시도하세요.',
   CONFLICT: '지금 상태에서는 처리할 수 없습니다. 새로고침 후 다시 시도하세요.',
+  SEARCH_RATE_LIMITED: '검색 요청이 너무 잦습니다. 잠시 후 다시 시도하세요.',
 }
 
 const FALLBACK_ERROR_MESSAGE = '요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요.'

@@ -8,6 +8,11 @@
 export const ASSET_TYPES = ['STOCK', 'COIN', 'CASH'] as const;
 export type AssetType = (typeof ASSET_TYPES)[number];
 
+// PRD F001 "통화(KRW/USD) 선택" — USD 외 통화 확대는 명시적 비목표(PRD 「비목표」)라 2개 리터럴로 고정한다.
+// 원래 AssetNewPage.tsx 안에만 있던 타입인데, Task 027-A(검색 자동완성)에서 assetApi.ts·
+// SearchCombobox.tsx도 이 타입을 공유해야 해서 이 파일로 승격했다.
+export type Currency = 'KRW' | 'USD';
+
 // 금액·수량 필드는 NUMERIC(28,8)이라 JS number(IEEE 754 배정도)가 정밀도를
 // 담지 못한다. 백엔드가 항상 JSON 문자열로 내려주므로 이 타입도 string으로
 // 고정한다. parseFloat/Number() 변환 금지 — big.js 등 십진 라이브러리로 처리.
@@ -80,6 +85,15 @@ export interface PortfolioResponse {
   totalUnrealizedPnl: Money | null;
 }
 
+// GET /v1/assets/search 응답 원소. 가격 필드가 없다(ROADMAP Task 026 — 검색 결과 여러 건에
+// 시세까지 붙이면 검색 한 번이 외부 API 다건 호출이 되어 KPI를 못 맞춘다).
+export interface SearchResult {
+  ticker: string;
+  name: string;
+  assetType: AssetType;
+  currency: Currency;
+}
+
 export interface SimulateAvgPriceRequest {
   assetId: string;
   additionalPrice: Money;
@@ -112,6 +126,7 @@ export const ERROR_CODES = [
   'ASSET_NOT_FOUND',
   'HOLDING_CONFLICT',
   'CONFLICT',
+  'SEARCH_RATE_LIMITED',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 

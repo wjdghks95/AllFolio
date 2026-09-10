@@ -6,9 +6,12 @@ import { ApiError, refresh as refreshTokens } from './authApi';
 import { getToken, getRefreshToken, setToken, setRefreshToken } from '../auth/tokenStorage';
 import type {
   Asset,
+  AssetType,
   CreateAssetRequest,
+  Currency,
   UpdateHoldingRequest,
   PortfolioResponse,
+  SearchResult,
   SimulateAvgPriceRequest,
   SimulateAvgPriceResponse,
   TokenResponse,
@@ -77,6 +80,18 @@ async function authorizedRequest<T>(path: string, options: RequestInit = {}): Pr
 
 export function getAsset(id: string): Promise<Asset> {
   return authorizedRequest<Asset>(`/v1/assets/${id}`);
+}
+
+// GET /v1/assets/search — currency는 필수 파라미터라(Task 026), KRW/USD 결과를 함께 보여주려면
+// 호출부(SearchCombobox)가 이 함수를 두 번(KRW, USD) 병렬 호출해 합쳐야 한다.
+export function searchSymbols(
+  assetType: AssetType,
+  currency: Currency,
+  q: string,
+): Promise<SearchResult[]> {
+  return authorizedRequest<SearchResult[]>(
+    `/v1/assets/search?assetType=${assetType}&currency=${currency}&q=${encodeURIComponent(q)}`,
+  );
 }
 
 export function createAsset(req: CreateAssetRequest): Promise<Asset> {
