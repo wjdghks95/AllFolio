@@ -540,16 +540,41 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
   - 담당: `stock-price-api`(StockPriceClient.search) → `twelvedata-api`(TwelveDataClient.search) →
     `senior-backend`(오케스트레이션·테스트) → `code-reviewer`(독립 검증) → 코디네이터(문서)
 
-- **Task 027: 검색 기반 자산 등록 화면**
-  - `AssetNewPage.tsx`의 티커·종목명 `TextField` 2개를 검색 자동완성 컴포넌트(가칭 `SearchCombobox`, 신규)로
-    교체 — 선택 시 티커·종목명·통화 자동 채움. 프론트에 자동완성·드롭다운·디바운스 구현이 전무해 직접 구현
-  - `Field.tsx`의 라벨·에러·aria 배선을 재사용하되 `aria-expanded`/`aria-controls`/`aria-activedescendant`
-    (WAI-ARIA 콤보박스 패턴)는 새로 붙인다. 디바운스 300~400ms 필수(무료 플랜 분당 8회 한도)
-  - CASH는 검색 대상이 아니므로 기존 입력 방식 유지
-  - `assetApi.ts`에 `searchSymbols()` 추가(인증 래퍼가 파일 밖으로 export되지 않으므로 같은 파일 안에 작성).
-    `types.ts`에 검색 결과 타입 추가, `AssetNewPage.tsx`에만 있던 `Currency` 타입을 `types.ts`로 승격
-  - 기존 `AssetNewPage.test.tsx` 7케이스를 자유입력 전제에서 검색 선택 전제로 수정
-  - 담당: `senior-frontend` → `ui-ux-designer`
+- **Task 027: 검색 기반 자산 등록 화면** ✅ — 완료 (2026-09-10)
+  - `AssetNewPage.tsx`의 티커·종목명 `TextField` 2개를 STOCK/COIN에 한해 검색 자동완성 컴포넌트
+    `SearchCombobox`(신규)로 교체 — 선택 시 티커·종목명·통화 자동 채움. CASH는 기존 자유 입력 그대로 유지.
+    통화(KRW/USD)는 사용자가 먼저 고르지 않고 검색 결과가 결정한다(착수 시 확정) — `GET /v1/assets/search`가
+    `currency`를 필수 파라미터로 요구하므로(Task 026) 프론트가 KRW/USD를 `Promise.allSettled`로 병렬
+    호출해 결과를 합친다(백엔드 무변경)
+  - ✅ **Task 027-A**(`senior-frontend`) — `SearchCombobox.tsx` 신규(WAI-ARIA 콤보박스,
+    `aria-expanded`/`aria-controls`/`aria-activedescendant`, 디바운스 350ms, 시퀀스 번호로 stale 응답
+    폐기, `Promise.allSettled` 부분 실패는 조용히 무시하고 전체 실패만 에러 표시, `onUnauthorized`로 401
+    처리를 `AssetNewPage`의 기존 로그아웃 경로에 합류), `assetApi.ts`에 `searchSymbols()`,
+    `types.ts`에 `SearchResult` 타입 추가 + `Currency` 타입 승격, `ERROR_CODES`에 `SEARCH_RATE_LIMITED`
+    추가. `AssetNewPage.test.tsx` 7케이스를 검색-선택 전제로 수정 + `SearchCombobox.test.tsx` 신규
+  - ✅ **Task 027-B**(`ui-ux-designer`) — 입력칸을 `TextField`의 `INPUT_BASE`와 통일, 결과 목록을
+    흐름에서 분리해 팝오버로 띄움(신규 `--shadow-popover` 토큰, `docs/DESIGN.md` §4 "그림자 없음" 규칙에
+    팝오버 예외 명시), 로딩/에러/빈결과 상태별 아이콘+문구, 결과 행은 이름·티커(왼쪽)/통화 뱃지(오른쪽)
+    구조(§6-2 목록 행 규격 재사용). `docs/DESIGN.md` §6-3-1 신설(v1.9.0). 시각 검증 중 실동작 결함 2건
+    (디바운스 대기 중 "검색 결과가 없습니다" 깜빡임, 상태 행 3개가 `role="option"`이 아님)을 스스로
+    발견해 즉시 수정
+  - ✅ **Task 027-C**(`code-reviewer`) — 1차 독립 검증: Blocker 0건·Major 1건·Minor 6건. Major(선택 후
+    검색어를 지우거나 고쳐 써도 부모의 ticker/name/currency가 이전 선택값 그대로 남아 화면과 다른 종목이
+    등록되는 결함) — `SearchCombobox`의 `onSelect`를 `(result: SearchResult | null) => void`로 바꾸고
+    선택 문자열이 바뀌는 순간 `onSelect(null)`로 부모에 알리도록 수정. Minor 6건(`SearchResult.currency`
+    타입 좁히기, `role="presentation"`+`aria-live` 충돌 해소, `aria-controls` 참조 무결성을 위해
+    리스트박스를 `hidden` 속성으로 상시 렌더, APG 콤보박스 키보드 패턴 보정, `SEARCH_RATE_LIMITED`를
+    `messageForErrorCode`에 연결, 테스트 2건 보강)도 함께 수정. 재검증 결과 **Blocker 0건·Major 0건,
+    병합 가능** 판정, 전체 스위트 168 테스트 통과
+  - ⚠ **남은 갭(Minor 5건, code-reviewer가 "병합을 막지 않는 이월 항목"으로 판단)**: Esc/blur 시
+    `activeIndex`를 리셋하지 않아 `aria-activedescendant`가 숨겨진 옵션을 가리킬 수 있음(`senior-frontend`),
+    `hidden` 전환 이후 약해진 테스트 단언 2곳(`senior-frontend`), 목록이 열린 채로는 Enter로 폼을 제출할
+    방법이 없음(`senior-frontend`), 검색어만 입력하고 옵션을 고르지 않은 채 제출하면 "입력이 필요합니다"가
+    화면과 어긋나 보임 — 전용 문구 필요(`ui-ux-designer` 문구 + `senior-frontend` 배선), `SearchThrottle`
+    한도(30건/10초) 산정 근거 주석이 "디바운스 1회=요청 1건"을 가정하는데 실제로는 KRW/USD 2건이라 실효
+    여유가 절반(`senior-backend`, `application.yml`)
+  - 담당: `senior-frontend`(구조·API·타입) → `ui-ux-designer`(시각·문구) → `senior-frontend`(리뷰 반영) →
+    `code-reviewer`(독립 검증, 재검증 포함) → 코디네이터(문서)
 
 - **배포 체크리스트 선행 조건**: Twelve Data 무료 플랜은 "Internal non-display usage"라 상용 배포 전 반드시
   Enterprise 계약이 선행돼야 한다 — Task 032(배포 파이프라인)의 체크리스트에 반영할 것
