@@ -12,7 +12,7 @@ import {
   validateTicker,
   type ValidationCode,
 } from '../lib/validation';
-import { VALIDATION_MESSAGES, messageForErrorCode } from '../lib/messages';
+import { SEARCH_SELECTION_REQUIRED_MESSAGE, VALIDATION_MESSAGES, messageForErrorCode } from '../lib/messages';
 import Alert from '../components/Alert';
 import SegmentToggle from '../components/SegmentToggle';
 import SearchCombobox from '../components/SearchCombobox';
@@ -64,6 +64,13 @@ const PLACEHOLDER: Record<
   // CASH는 평단가 칸 자체가 렌더되지 않으므로 avgPrice 예시는 쓰이지 않는다.
   CASH: { ticker: 'KRW', name: '원화 예수금', quantity: '1000000', avgPrice: '' },
 };
+
+// SearchCombobox(STOCK/COIN)에서 REQUIRED는 "칸이 비었다"가 아니라 "검색 결과에서 고르지
+// 않았다"를 뜻한다 — 타이핑 여부와 무관하게 항상 검색·선택을 요구하는 문구로 바꾼다
+// (ui-ux-designer 결정, docs/DESIGN.md §6-3-1). 그 외 코드는 기존 VALIDATION_MESSAGES 그대로.
+function searchComboboxErrorMessage(code: ValidationCode): string {
+  return code === 'REQUIRED' ? SEARCH_SELECTION_REQUIRED_MESSAGE : VALIDATION_MESSAGES[code];
+}
 
 export default function AssetNewPage() {
   const [assetType, setAssetType] = useState<AssetType>('STOCK');
@@ -248,9 +255,9 @@ export default function AssetNewPage() {
               }}
               error={
                 tickerError
-                  ? VALIDATION_MESSAGES[tickerError]
+                  ? searchComboboxErrorMessage(tickerError)
                   : nameError
-                    ? VALIDATION_MESSAGES[nameError]
+                    ? searchComboboxErrorMessage(nameError)
                     : null
               }
               testId="asset-new-symbol-search"

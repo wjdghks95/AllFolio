@@ -62,9 +62,13 @@ allfolio:
   # 시세와 달리 실시간성이 필요 없어 하루 단위로 넉넉하게 잡는다.
   search-cache:
     ttl: 6h
-  # 프론트 자동완성 디바운스(300~400ms)보다 넉넉해야 정상 타이핑이 429로 막히지 않는다.
+  # 프론트 디바운스(350ms) 1회 발동은 KRW/USD 검색을 병렬 2건 호출한다(SearchCombobox.runSearch —
+  # GET /v1/assets/search가 currency를 필수 파라미터로 요구해 프론트가 나눠 호출, Task 026·027-A).
+  # 350ms 간격으로 쉬지 않고 10초간 계속 타이핑하는 극단적 케이스: 10s/350ms≈28회 발동×2건=최대 56건.
+  # "디바운스 1회=1건"을 가정한 기존 30건/10s로는 15회(5.25초)만에 429가 나 부족했으므로 60건/10s로
+  # 상향한다(Task 027 이월 갭 수정).
   search-throttle:
-    limit: 30
+    limit: 60
     window: 10s
 
 resilience4j:

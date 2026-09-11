@@ -23,6 +23,13 @@ export const VALIDATION_MESSAGES: Record<ValidationCode, string> = {
   QUANTITY_NOT_POSITIVE: '추가 매수 수량은 0보다 커야 합니다.',
 }
 
+// 검색 콤보박스(SearchCombobox) 전용 문구. VALIDATION_MESSAGES의 키가 아니라 별도 상수인 이유는
+// 그 Record가 ValidationCode와 1:1이고, REQUIRED는 다른 칸의 진짜 "미입력"에도 쓰이기 때문이다.
+// 검색칸에서는 REQUIRED가 "칸이 비었다"가 아니라 "목록에서 고르지 않았다"를 뜻한다 — 타이핑한
+// 글자가 칸에 남아 있는 화면에서 "입력이 필요합니다"는 눈앞의 화면과 모순된다.
+// 이름에 _MESSAGE를 붙여 ValidationCode 값으로 오인되지 않게 한다(코드는 REQUIRED처럼 접미사가 없다).
+export const SEARCH_SELECTION_REQUIRED_MESSAGE = '종목을 검색해 목록에서 선택하세요.'
+
 export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   EMAIL_ALREADY_EXISTS: '이미 가입된 이메일입니다. 로그인하거나 다른 이메일로 가입하세요.',
   INVALID_CREDENTIALS: '이메일 또는 비밀번호가 일치하지 않습니다.',

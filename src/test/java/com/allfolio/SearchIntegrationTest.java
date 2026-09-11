@@ -211,11 +211,11 @@ class SearchIntegrationTest extends AbstractIntegrationTest {
     }
 
     /**
-     * Redis에서 throttle:search:{userId} 키를 limit(30)+1=31로 직접 설정해 Throttle 초과를 재현한다.
+     * Redis에서 throttle:search:{userId} 키를 limit(60)+1=61로 직접 설정해 Throttle 초과를 재현한다.
      * DynamicPropertySource로 limit을 낮추면 별도 ApplicationContext가 생성돼 Testcontainer
      * 커넥션 폭발 문제(AbstractIntegrationTest 주석)가 생기므로 이 방법을 선택했다.
      *
-     * [Minor 3] 루프 INCR 방식 대신 키를 직접 SET(31, TTL=10s)한다.
+     * [Minor 3] 루프 INCR 방식 대신 키를 직접 SET(61, TTL=10s)한다.
      * 루프 INCR은 실행 시간이 10초를 초과하면 PEXPIRE가 만료돼 카운터가 리셋될 수 있다.
      */
     @Test
@@ -231,11 +231,11 @@ class SearchIntegrationTest extends AbstractIntegrationTest {
         // 첫 번째 요청으로 throttle:search:{userId} 키를 Redis에 생성시킨다.
         authorizedGet("/v1/assets/search?assetType=STOCK&currency=KRW&q=test", token);
 
-        // 생성된 키를 찾아 카운터를 limit(30)+1=31로 직접 덮어써 즉시 초과 상태로 만든다.
+        // 생성된 키를 찾아 카운터를 limit(60)+1=61로 직접 덮어써 즉시 초과 상태로 만든다.
         var throttleKeys = stringRedisTemplate.keys("throttle:search:*");
         assertThat(throttleKeys).isNotNull().isNotEmpty();
         String throttleKey = throttleKeys.iterator().next();
-        stringRedisTemplate.opsForValue().set(throttleKey, "31", Duration.ofSeconds(10));
+        stringRedisTemplate.opsForValue().set(throttleKey, "61", Duration.ofSeconds(10));
 
         MvcTestResult result = authorizedGet("/v1/assets/search?assetType=STOCK&currency=KRW&q=삼성", token);
 

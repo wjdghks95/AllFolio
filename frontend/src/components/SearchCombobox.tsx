@@ -146,6 +146,7 @@ export default function SearchCombobox({
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Escape') {
       setOpen(false);
+      setActiveIndex(-1);
       return;
     }
     if (!open) {
@@ -164,11 +165,14 @@ export default function SearchCombobox({
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter') {
-      // 목록이 열려 있는 동안은 Enter가 의도치 않게 폼을 제출하지 않게 항상 막는다.
-      // 활성 옵션이 없으면(activeIndex === -1) 선택은 확정하지 않는다.
-      e.preventDefault();
+      // 활성 옵션이 있을 때만 선택을 확정하며 폼 제출을 막는다. 활성 옵션이 없으면(검색 중·결과
+      // 없음 등) 목록만 닫고 Enter의 기본 동작(폼 제출)을 그대로 흘려보낸다.
       if (activeIndex >= 0 && results[activeIndex]) {
+        e.preventDefault();
         selectResult(results[activeIndex]);
+      } else {
+        setOpen(false);
+        setActiveIndex(-1);
       }
     }
   }
@@ -194,7 +198,10 @@ export default function SearchCombobox({
             value={query}
             onChange={(e) => handleChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            onBlur={() => setOpen(false)}
+            onBlur={() => {
+              setOpen(false);
+              setActiveIndex(-1);
+            }}
             data-testid={testId}
             className={INPUT_BASE}
           />

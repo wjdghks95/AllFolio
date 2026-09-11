@@ -86,6 +86,9 @@ describe('SearchCombobox', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect((screen.getByTestId('symbol-search-listbox') as HTMLUListElement).hidden).toBe(true);
+    // 목록이 hidden으로만 숨겨져 있어도(회귀 지점) aria-activedescendant가 그 안의 옵션 id를
+    // 계속 가리키면 안 된다 — 닫힌 상태에서는 활성 옵션 자체가 없어야 한다.
+    expect(input.getAttribute('aria-activedescendant')).toBeNull();
   });
 
   it('KRW/USD 검색 결과를 합쳐서 보여준다', async () => {
@@ -297,8 +300,38 @@ describe('SearchCombobox', () => {
     await typeAndWait(input, '검색어');
     expect((screen.getByTestId('symbol-search-listbox') as HTMLUListElement).hidden).toBe(false);
 
+    // 활성 옵션을 만들어 둔 뒤 Esc로 닫는다 — activeIndex가 리셋되지 않으면 숨겨진 옵션을
+    // aria-activedescendant가 계속 가리키게 된다.
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input.getAttribute('aria-activedescendant')).not.toBeNull();
+
     fireEvent.keyDown(input, { key: 'Escape' });
 
     expect((screen.getByTestId('symbol-search-listbox') as HTMLUListElement).hidden).toBe(true);
+    expect(input.getAttribute('aria-activedescendant')).toBeNull();
+  });
+
+  it('활성 옵션이 없을 때 Enter는 목록만 닫고 폼 제출(기본 동작)을 막지 않는다', async () => {
+    const fetchMock = vi.fn((path: unknown) => {
+      const url = String(path);
+      const results = url.includes('currency=USD') ? [appleUsd] : [];
+      return Promise.resolve({ ok: true, json: async () => results });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { onSelect } = renderCombobox();
+
+    const input = screen.getByTestId('symbol-search');
+    // 결과가 로드돼 목록은 열려 있지만 화살표 키로 옵션을 고르지 않아 activeIndex는 -1이다.
+    await typeAndWait(input, '검색어');
+    expect((screen.getByTestId('symbol-search-listbox') as HTMLUListElement).hidden).toBe(false);
+    expect(input.getAttribute('aria-activedescendant')).toBeNull();
+
+    // fireEvent가 반환하는 값은 dispatchEvent의 결과다 — preventDefault가 호출됐으면 false다.
+    const notPrevented = fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(notPrevented).toBe(true);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect((screen.getByTestId('symbol-search-listbox') as HTMLUListElement).hidden).toBe(true);
+    expect(input.getAttribute('aria-activedescendant')).toBeNull();
   });
 });

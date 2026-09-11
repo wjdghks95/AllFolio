@@ -27,14 +27,20 @@ Redis(Lettuce)에는 `INCR`과 `EXPIRE`를 한 번에 묶는 원자적 명령이
 ## SearchThrottle — PriceThrottle과 별도 컴포넌트 (Task 026)
 
 `SearchThrottle`(@Component)은 `PriceThrottle`과 동일한 Lua INCR+PEXPIRE 스크립트를 쓰지만 **완전히 독립된
-컴포넌트**다. Redis 키는 `throttle:search:{userId}`로 분리하고, `SearchThrottleProperties`(limit=30/window=10s,
+컴포넌트**다. Redis 키는 `throttle:search:{userId}`로 분리하고, `SearchThrottleProperties`(limit=60/window=10s,
 `allfolio.search-throttle.*`)를 직접 주입받는다.
+
+**60건/10초인 이유:** 프론트 디바운스(350ms) 1회 발동마다 `GET /v1/assets/search`를 KRW/USD로 나눠
+병렬 2건 호출한다(`SearchCombobox.runSearch` — currency가 필수 파라미터라 프론트가 나눠 호출). userId
+단위 카운터는 currency와 무관하게 공유되므로 "디바운스 1회 = 요청 2건"이다. 350ms 간격으로 쉬지 않고
+10초간 계속 타이핑하는 극단적 케이스는 최대 28회 발동×2건=56건이라, "디바운스 1회=1건"을 가정했던
+기존 30건/10s(15회·5.25초 만에 429)로는 부족해 60건/10s로 상향했다(Task 027 이월 갭 수정).
 
 **분리 이유:** `PriceThrottle`에 `keyPrefix` 인자만 바꿔 재사용하면, 내부에서 `PriceThrottleProperties`(1건/1s)가
 실제 적용돼 SearchThrottleProperties를 주입했어도 무시되는 함정이 있다. 자동완성 시나리오에서 "초당 1건" 한도는
-두 글자만 쳐도 429가 나는 UX 결함이 되므로 별도 컴포넌트로 분리해 30건/10s 한도를 독립 보장한다.
+두 글자만 쳐도 429가 나는 UX 결함이 되므로 별도 컴포넌트로 분리해 60건/10s 한도를 독립 보장한다.
 
-`GET /v1/assets/{id}/price`(PriceThrottle, 1건/1s)와 `GET /v1/assets/search`(SearchThrottle, 30건/10s)는
+`GET /v1/assets/{id}/price`(PriceThrottle, 1건/1s)와 `GET /v1/assets/search`(SearchThrottle, 60건/10s)는
 서로 한도를 공유하지 않는다.
 
 ## SearchCacheStore — 종목 검색 결과 캐시 (Task 026)

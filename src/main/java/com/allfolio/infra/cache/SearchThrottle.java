@@ -12,7 +12,7 @@ import java.util.UUID;
 
 /**
  * 사용자당 종목 검색 요청 Throttling(Task 026). PriceThrottle과 동일한 Lua INCR+PEXPIRE 스크립트를
- * 쓰되 Redis 키를 {@code throttle:search:{userId}}로 분리하고, SearchThrottleProperties(30건/10초)를
+ * 쓰되 Redis 키를 {@code throttle:search:{userId}}로 분리하고, SearchThrottleProperties(60건/10초)를
  * 주입한다. PriceThrottle에 keyPrefix만 다르게 위임하는 방식을 쓰지 않고 별도 @Component로 만든
  * 이유는, 공유 컴포넌트에서 SearchThrottleProperties가 아닌 PriceThrottleProperties가 실제 적용되는
  * 함정을 막기 위함이다.

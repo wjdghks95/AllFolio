@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import AssetNewPage from './AssetNewPage';
 import { AuthProvider } from '../auth/AuthProvider';
 import type { Asset, ErrorCode, SearchResult } from '../api/types';
-import { VALIDATION_MESSAGES } from '../lib/messages';
+import { SEARCH_SELECTION_REQUIRED_MESSAGE, VALIDATION_MESSAGES } from '../lib/messages';
 import { getToken, setToken } from '../auth/tokenStorage';
 
 // PortfolioPage 자체는 이 테스트의 관심사가 아니다 — AssetNewPage가 navigate로 넘기는
@@ -117,9 +117,12 @@ describe('AssetNewPage', () => {
 
     fireEvent.click(screen.getByTestId('asset-new-submit'));
 
-    // STOCK(기본 선택)에서 티커/종목명은 검색 콤보박스 하나가 두 에러를 함께 대표한다(같은
-    // REQUIRED 문구라 둘 다 REQUIRED여도 화면에는 1개 노드만 뜬다) + 수량 + 평단가 = 총 3개.
-    expect(screen.getAllByText(VALIDATION_MESSAGES.REQUIRED)).toHaveLength(3);
+    // STOCK(기본 선택)에서 티커/종목명은 검색 콤보박스 하나가 두 에러를 함께 대표하는데, 그 REQUIRED는
+    // "칸이 비었다"가 아니라 "목록에서 고르지 않았다"를 뜻하므로 일반 REQUIRED 문구가 아니라
+    // SEARCH_SELECTION_REQUIRED_MESSAGE로 뜬다(ui-ux-designer 결정, docs/DESIGN.md §6-3-1).
+    // 수량 + 평단가는 그대로 일반 REQUIRED 문구다.
+    expect(screen.getByText(SEARCH_SELECTION_REQUIRED_MESSAGE)).toBeTruthy();
+    expect(screen.getAllByText(VALIDATION_MESSAGES.REQUIRED)).toHaveLength(2);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -214,7 +217,7 @@ describe('AssetNewPage', () => {
     expect(screen.queryByText(VALIDATION_MESSAGES.PRICE_NOT_POSITIVE)).toBeNull();
   });
 
-  it('선택 후 검색어를 지우고 제출하면 REQUIRED 에러가 뜨고 등록 fetch가 나가지 않는다', async () => {
+  it('선택 후 검색어를 지우고 제출하면 검색 선택 요구 에러가 뜨고 등록 fetch가 나가지 않는다', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     mockCreateSuccess(fetchMock);
@@ -224,12 +227,29 @@ describe('AssetNewPage', () => {
     fireEvent.change(screen.getByTestId('asset-new-avg-price'), { target: { value: '150.25' } });
 
     // 선택 후 검색어를 지우면 ticker/name이 리셋된다 — 이전 선택값이 남은 채 제출되면 안 된다.
+    // "칸이 비었다"가 아니라 "고르지 않았다"이므로 SEARCH_SELECTION_REQUIRED_MESSAGE가 뜬다.
     fireEvent.change(screen.getByTestId('asset-new-symbol-search'), { target: { value: '' } });
     fireEvent.click(screen.getByTestId('asset-new-submit'));
 
-    expect(screen.getByText(VALIDATION_MESSAGES.REQUIRED)).toBeTruthy();
+    expect(screen.getByText(SEARCH_SELECTION_REQUIRED_MESSAGE)).toBeTruthy();
     // 검색 호출(2건: KRW/USD) 이상 늘지 않아야 한다 — 등록(POST) fetch가 나가지 않았다는 뜻.
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('검색어를 한 번도 입력하지 않고 제출해도(타이핑 이력 없음) 검색 선택 요구 에러가 뜬다', () => {
+    // ui-ux-designer 명시 결정: "타이핑한 적이 있는지"로 문구를 가르지 않는다 — ticker/name이
+    // 비어 있으면(REQUIRED) 타이핑 여부와 무관하게 항상 SEARCH_SELECTION_REQUIRED_MESSAGE다.
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    renderAssetNewPage();
+
+    fireEvent.change(screen.getByTestId('asset-new-quantity'), { target: { value: '10' } });
+    fireEvent.change(screen.getByTestId('asset-new-avg-price'), { target: { value: '150.25' } });
+    fireEvent.click(screen.getByTestId('asset-new-submit'));
+
+    expect(screen.getByText(SEARCH_SELECTION_REQUIRED_MESSAGE)).toBeTruthy();
+    expect(screen.queryByText(VALIDATION_MESSAGES.REQUIRED)).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('6개 필드를 모두 유효하게 채우면 성공 flash와 함께 /portfolio로 이동한다', async () => {
