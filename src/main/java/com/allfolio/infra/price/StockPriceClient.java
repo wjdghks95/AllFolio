@@ -1,6 +1,7 @@
 package com.allfolio.infra.price;
 
 import com.allfolio.domain.AssetType;
+import com.allfolio.domain.DailyBar;
 import com.allfolio.domain.Price;
 import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
@@ -16,6 +17,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,12 +50,28 @@ import java.util.regex.Pattern;
  * 검색 시 종목 1개인데도 서로 다른 20개 날짜가 옴). {@code srtnCd} 기준 첫 항목(=최근 날짜)만
  * 남기는 클라이언트 측 중복 제거로 해결했다. 자세한 내용은 .claude/agents/stock-price-api.md의
  * "Task 026" 절 참고.
+ *
+ * <p><b>{@link #getDailySeries}(Task 028 일봉 시계열) 실제 서비스키로 검증 완료</b>(2026-09-11,
+ * curl 직접 호출): {@code beginBasDt}/{@code endBasDt}는 문서 그대로 날짜 범위(이상/이하) 필터로
+ * 정상 동작했다(예: 2025-01-01~2026-09-10 범위 삼성전자 411건 = 그 기간 실제 거래일수와 일치).
+ * {@code numOfRows}는 1000·5000 모두 한 번에 정상 응답해 상한을 발견하지 못했다(5000 요청 시
+ * 10년 범위 1642건 전량이 단일 페이지로 옴) — 이 프로젝트가 다루는 최대 수년 단위 차트 범위에서는
+ * 페이지네이션이 불필요함을 확인했다. 응답 항목에는 {@code clpr}(종가) 외에 {@code mkp}(시가)·
+ * {@code hipr}(고가)·{@code lopr}(저가)도 함께 온다 — {@link DailyBar}가 이 4개 값을 모두 담는다.
+ * 정렬은 여기서도 {@code basDt} 내림차순(최신 우선)으로 오므로, 캔들 차트 소비자를 배려해 오름차순
+ * (과거→최신)으로 뒤집어 반환한다. 매칭 0건은 "해당 티커 없음"과 "그 범위에 거래일 데이터 없음"을
+ * API 응답만으로 구분할 수 없어(둘 다 200 + 빈 배열, 실측 확인) {@link #getPrice}처럼
+ * {@link TickerNotFoundException}을 던지지 않고 빈 리스트를 반환한다({@link #search}와 동일한 판단).
  */
 @Component
 public class StockPriceClient {
 
     private static final DateTimeFormatter BAS_DT_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    // 2026-09-11 curl 실측으로 numOfRows=5000(10년 범위, 1642건)까지 단일 페이지 정상 응답을
+    // 확인했다. 이 프로젝트가 필요로 하는 차트 범위(최대 수년)는 여유롭게 커버하면서, 확인 안 된
+    // 구간까지 요청하지 않도록 실측 범위 안쪽인 10년(약 3660일)으로 상한을 둔다.
+    private static final int MAX_DAILY_SERIES_ROWS = 3660;
     private static final Pattern PERCENT_ENCODED = Pattern.compile("%[0-9A-Fa-f]{2}");
 
     private final RestClient restClient;
@@ -176,6 +195,58 @@ public class StockPriceClient {
         throw new ExternalPriceApiException("주식 종목 검색에 실패했습니다: " + query, ex);
     }
 
+    /**
+     * 국내 주식 일봉 원본 시계열 조회(Task 028). {@code begin}~{@code end}(포함) 범위를
+     * {@code beginBasDt}/{@code endBasDt}로 그대로 전달하고, 그 범위의 달력일수(+1)를
+     * {@code numOfRows}로 넉넉히 잡아 단일 페이지로 전량을 받는다(실측 근거는 클래스 Javadoc 참고 —
+     * 이 프로젝트가 다루는 수년 단위 범위에서는 페이지네이션이 필요하지 않았다).
+     *
+     * <p>주/월/년봉 집계는 이 메서드의 책임이 아니다 — 호출자가 반환된 일봉을 모아 계산한다.
+     */
+    @CircuitBreaker(name = "stock", fallbackMethod = "dailySeriesFallback")
+    public List<DailyBar> getDailySeries(String ticker, LocalDate begin, LocalDate end) {
+        long calendarDays = ChronoUnit.DAYS.between(begin, end) + 1;
+        int numOfRows = (int) Math.min(Math.max(calendarDays, 1), MAX_DAILY_SERIES_ROWS);
+
+        StockPriceApiResponse response = restClient.get()
+                .uri("/getStockPriceInfo?serviceKey={serviceKey}&numOfRows={numOfRows}&pageNo=1&resultType=json"
+                        + "&likeSrtnCd={ticker}&beginBasDt={begin}&endBasDt={end}",
+                        serviceKey, numOfRows, ticker, begin.format(BAS_DT_FORMAT), end.format(BAS_DT_FORMAT))
+                .retrieve()
+                .body(StockPriceApiResponse.class);
+
+        return extractDailySeries(response, ticker);
+    }
+
+    private List<DailyBar> extractDailySeries(StockPriceApiResponse response, String ticker) {
+        if (response == null || response.response() == null
+                || response.response().body() == null
+                || response.response().body().items() == null
+                || response.response().body().items().item() == null) {
+            throw new ExternalPriceApiException("주식 일봉 시계열 응답 형식이 올바르지 않습니다: " + ticker);
+        }
+
+        Header header = response.response().header();
+        if (header != null && header.resultCode() != null && !"00".equals(header.resultCode())) {
+            throw new ExternalPriceApiException(
+                    "주식 일봉 시계열 조회 실패(%s): %s".formatted(header.resultCode(), header.resultMsg()));
+        }
+
+        // likeSrtnCd는 포함 검색이므로 요청한 티커와 정확히 일치하는 항목만 사용한다(getPrice와 동일 이유).
+        // "해당 티커 없음"과 "그 범위에 거래일 데이터 없음"을 응답만으로 구분할 수 없어(클래스 Javadoc
+        // 실측 참고) 빈 결과는 예외가 아니라 빈 리스트로 반환한다.
+        return response.response().body().items().item().stream()
+                .filter(item -> ticker.equals(item.srtnCd()))
+                .map(item -> new DailyBar(
+                        LocalDate.parse(item.basDt(), BAS_DT_FORMAT), item.mkp(), item.hipr(), item.lopr(), item.clpr()))
+                .sorted(Comparator.comparing(DailyBar::date))
+                .toList();
+    }
+
+    private List<DailyBar> dailySeriesFallback(String ticker, LocalDate begin, LocalDate end, Throwable ex) {
+        throw new ExternalPriceApiException("주식 일봉 시계열 조회에 실패했습니다: " + ticker, ex);
+    }
+
     private record StockPriceApiResponse(Response response) {
     }
 
@@ -191,6 +262,7 @@ public class StockPriceClient {
     private record Items(List<Item> item) {
     }
 
-    private record Item(String basDt, String srtnCd, String itmsNm, BigDecimal clpr) {
+    private record Item(
+            String basDt, String srtnCd, String itmsNm, BigDecimal clpr, BigDecimal mkp, BigDecimal hipr, BigDecimal lopr) {
     }
 }

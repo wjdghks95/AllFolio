@@ -136,6 +136,22 @@ GET https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getSto
 
 `StockPriceClientTest`에 `searchUsesLikeItmsNmForNonNumericQuery`·`searchUsesLikeSrtnCdForNumericQueryAndDedupesDuplicateTickerAcrossDates`·`searchReturnsEmptyListWhenNoItemsMatch`·`searchThrowsExternalPriceApiExceptionOnAuthError` 4건으로 위 내용을 WireMock에 재현해 검증됨.
 
+## Task 028 실측 — StockPriceClient.getDailySeries() (국내주식 일봉 원본 시계열)
+
+캔들스틱 차트(F007, Task 028)의 국내주식(STOCK+KRW) 일/주/월/년봉은 REST 폴링으로 제공하기로 했는데, 이 API 자체는 일별 데이터만 주므로 주/월/년봉 집계는 이 메서드 범위 밖이고, **일봉 원본 시계열을 받아오는 것까지만** `getDailySeries(String ticker, LocalDate begin, LocalDate end)`의 책임이다.
+
+**실제 서비스키로 curl 실측 완료(2026-09-11)**:
+
+- **`beginBasDt`/`endBasDt`는 문서 그대로 날짜 범위(이상/이하) 필터로 정상 동작한다.** `likeSrtnCd=005930&beginBasDt=20260901&endBasDt=20260910` 요청에 `totalCount=7`(그 구간 실제 거래일수, 09/05·09/06 주말 제외)이 정확히 왔다. `beginBasDt=20250101&endBasDt=20260910`(약 1.75년) 범위는 `totalCount=411`, `beginBasDt=20150101&endBasDt=20260910`(약 10년) 범위는 `totalCount=1642` — 둘 다 그 기간 실제 거래일수와 맞아떨어졌다.
+- **`numOfRows` 상한을 찾지 못했다.** `numOfRows=1000`(411건 요청)·`numOfRows=5000`(1642건 요청) 모두 한 번에 전량이 단일 페이지로 왔다(`items.item.length == totalCount`, 잘림 없음). 이 프로젝트가 다루는 최대 수년 단위 차트 범위에서는 **페이지네이션이 필요하지 않다** — `getDailySeries()`는 요청 범위의 달력일수(+1)를 `numOfRows`로 계산해 단일 호출만 한다(상한은 실측 확인된 5000 안쪽인 `MAX_DAILY_SERIES_ROWS = 3660`(약 10년)으로 방어적으로 설정).
+  - 참고: API 서비스 개요 표의 "최대 메시지 4000 byte"는 이 실측 결과(1642건 응답이 수십 KB)와 명백히 맞지 않는다 — 문서 수치를 신뢰하지 않고, rate limit 성격(초당 tps)의 오기이거나 무관한 값으로 추정한다. 실제 캡핑은 관측되지 않았다.
+- **OHLC 필드가 모두 존재한다.** 응답 item에는 `clpr`(종가) 외에 `mkp`(시가)·`hipr`(고가)·`lopr`(저가)가 이미 함께 온다(사실 이 문서의 "요청/응답 예제" 섹션 원문 JSON에도 이미 있었다 — 과거 `Item` record가 `clpr`만 파싱했을 뿐, API 자체는 처음부터 OHLC 전체를 제공했다). 신규 `DailyBar(LocalDate date, BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close)` record가 이 4개 값을 전부 담는다. 거래량(`trqu`) 등은 이번 범위 밖이라 파싱하지 않았다.
+- **정렬은 `basDt` 내림차순(최신 우선)** — `search()`와 동일하다. `getDailySeries()`는 캔들 차트 소비자를 배려해 클라이언트 측에서 `basDt` 오름차순(과거→최신)으로 뒤집어 반환한다.
+- **매칭 0건은 "해당 티커 없음"과 "그 범위에 거래일 데이터 없음"을 API 응답만으로 구분할 수 없다.** 존재하지 않는 티커(`likeSrtnCd=999999`)와, 존재하는 티커의 미래 날짜 범위(아직 거래일 데이터가 없는 구간) 둘 다 `{"totalCount":0,"items":{"item":[]}}`로 동일하게 응답했다(실측 확인). 그래서 `getPrice()`(`TickerNotFoundException`)와 달리 `getDailySeries()`는 `search()`처럼 빈 결과를 예외가 아닌 빈 `List<DailyBar>`로 반환한다.
+- 인증 실패 응답 스키마는 `getPrice()`/`search()`와 동일(`OpenAPI_ServiceResponse`/`cmmMsgHeader`) — 동일한 null 체크 방어 로직이 `ExternalPriceApiException`으로 전환한다.
+
+`StockPriceClientTest`에 `getDailySeriesMapsOhlcAndSortsAscendingByDate`·`getDailySeriesReturnsEmptyListWhenNoItemsMatch`·`getDailySeriesThrowsExternalPriceApiExceptionOnAuthError` 3건으로 위 내용을 WireMock에 재현해 검증됨.
+
 ## 구현 시 반드시 지킬 규칙
 
 | 규칙 | 근거 |

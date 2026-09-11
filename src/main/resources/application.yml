@@ -58,6 +58,16 @@ allfolio:
   price-throttle:
     limit: 1
     window: 1s
+  # STOCK(국내+해외 공통) 일봉 원본 캐시(Task 028 「캔들 캐시·집계·페이징 인프라」). 캔들 서비스 레이어는
+  # 후속 태스크지만, 이 인프라의 TTL·범위 상한·락 만료는 여기서 함께 확정한다.
+  candle-cache:
+    # EOD(하루 1회 갱신) 데이터라 price-cache.stock-fresh-ttl과 동일하게 길게 둔다.
+    stock-daily-ttl: 12h
+    # 캔들 차트가 다루는 최대 조회 범위 상한(연 단위) — 무한정 과거로 캐시가 확장되는 것을 막는다.
+    max-history-years: 10
+    # cache stampede 방지용 티커 단위 락(CandleRangeLock) 만료 시간. 벤더 API 호출 1건이 끝나기에
+    # 충분히 짧게 둔다.
+    range-lock-ttl: 5s
   # 통합 종목 검색(GET /v1/assets/search) 결과 캐시(Task 026 서브태스크 3). 종목명·마켓 목록은
   # 시세와 달리 실시간성이 필요 없어 하루 단위로 넉넉하게 잡는다.
   search-cache:

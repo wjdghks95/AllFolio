@@ -2,9 +2,11 @@ package com.allfolio.infra.price;
 
 import com.allfolio.AbstractIntegrationTest;
 import com.allfolio.domain.AssetType;
+import com.allfolio.domain.Candle;
 import com.allfolio.domain.Price;
 import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
+import com.allfolio.domain.exception.TickerNotFoundException;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.junit.jupiter.api.AfterAll;
@@ -16,11 +18,16 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -177,6 +184,159 @@ class UpbitPriceClientTest extends AbstractIntegrationTest {
                 .willReturn(aResponse().withStatus(500)));
 
         assertThatThrownBy(() -> upbitPriceClient.listMarkets())
+                .isInstanceOf(ExternalPriceApiException.class);
+    }
+
+    /**
+     * docs/ROADMAP.md Task 028 「COIN 캔들 조회 클라이언트 확장」. 실제 응답에는 여기서 매핑하지
+     * 않는 필드(prev_closing_price·change_price 등)가 더 있는데, 기존 {@link UpbitTickerResponse}가
+     * 이미 같은 방식(전체 25개 필드 중 2개만 매핑)으로 실 API와 동작해온 전례를 그대로 따른다 —
+     * 스텁 바디에도 매핑 대상 외 필드(candle_acc_trade_price)를 일부러 섞어 역직렬화가 깨지지
+     * 않는지 함께 검증한다.
+     */
+    @Test
+    void getDayCandlesMapsOhlcAndDerivesCandleAtFromUtcPeriodStart() {
+        wireMockServer.stubFor(get(urlPathEqualTo("/v1/candles/days"))
+                .withQueryParam("market", equalTo("KRW-BTC"))
+                .withQueryParam("count", equalTo("2"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                [
+                                  {"market":"KRW-BTC","candle_date_time_utc":"2026-09-11T00:00:00",
+                                   "opening_price":104721000.0,"high_price":105242000.0,"low_price":104710000.0,
+                                   "trade_price":105232000.0,"candle_acc_trade_price":19467426670.45949000},
+                                  {"market":"KRW-BTC","candle_date_time_utc":"2026-09-10T00:00:00",
+                                   "opening_price":106402000.0,"high_price":106575000.0,"low_price":104712000.0,
+                                   "trade_price":104712000.0,"candle_acc_trade_price":98903659326.47980000}
+                                ]
+                                """)));
+
+        List<Candle> candles = upbitPriceClient.getDayCandles("BTC", "KRW", 2);
+
+        assertThat(candles).hasSize(2);
+        Candle latest = candles.get(0);
+        assertThat(latest.open()).isEqualByComparingTo("104721000.0");
+        assertThat(latest.high()).isEqualByComparingTo("105242000.0");
+        assertThat(latest.low()).isEqualByComparingTo("104710000.0");
+        assertThat(latest.close()).isEqualByComparingTo("105232000.0");
+        assertThat(latest.candleAt()).isEqualTo(LocalDateTime.of(2026, 9, 11, 0, 0).toInstant(ZoneOffset.UTC));
+    }
+
+    @Test
+    void getMinuteCandlesUsesUnitInPath() {
+        wireMockServer.stubFor(get(urlPathEqualTo("/v1/candles/minutes/15"))
+                .withQueryParam("market", equalTo("KRW-BTC"))
+                .withQueryParam("count", equalTo("1"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                [{"market":"KRW-BTC","candle_date_time_utc":"2026-09-11T05:45:00",
+                                  "opening_price":105231000.0,"high_price":105232000.0,"low_price":105231000.0,
+                                  "trade_price":105232000.0}]
+                                """)));
+
+        List<Candle> candles = upbitPriceClient.getMinuteCandles("BTC", "KRW", 15, 1);
+
+        assertThat(candles).hasSize(1);
+        assertThat(candles.get(0).candleAt()).isEqualTo(LocalDateTime.of(2026, 9, 11, 5, 45).toInstant(ZoneOffset.UTC));
+    }
+
+    @Test
+    void getWeekAndMonthCandlesMapOhlc() {
+        wireMockServer.stubFor(get(urlPathEqualTo("/v1/candles/weeks"))
+                .withQueryParam("market", equalTo("KRW-BTC"))
+                .withQueryParam("count", equalTo("1"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                [{"market":"KRW-BTC","candle_date_time_utc":"2026-09-07T00:00:00",
+                                  "opening_price":109407000.0,"high_price":109556000.0,"low_price":104710000.0,
+                                  "trade_price":105232000.0,"first_day_of_period":"2026-09-07"}]
+                                """)));
+        wireMockServer.stubFor(get(urlPathEqualTo("/v1/candles/months"))
+                .withQueryParam("market", equalTo("KRW-BTC"))
+                .withQueryParam("count", equalTo("1"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                [{"market":"KRW-BTC","candle_date_time_utc":"2026-09-01T00:00:00",
+                                  "opening_price":108304000.0,"high_price":112000000.0,"low_price":104710000.0,
+                                  "trade_price":105232000.0,"first_day_of_period":"2026-09-01"}]
+                                """)));
+
+        List<Candle> weeks = upbitPriceClient.getWeekCandles("BTC", "KRW", 1);
+        List<Candle> months = upbitPriceClient.getMonthCandles("BTC", "KRW", 1);
+
+        assertThat(weeks.get(0).open()).isEqualByComparingTo("109407000.0");
+        assertThat(months.get(0).open()).isEqualByComparingTo("108304000.0");
+    }
+
+    /**
+     * 과거 페이징용 {@code to} 오버로드 — 실제 업비트 API가 요구하는 ISO8601 UTC 형식
+     * ({@code yyyy-MM-dd'T'HH:mm:ss'Z'})으로 쿼리 파라미터에 실려 나가는지 검증한다
+     * (2026-09-11 실측: 이 형식과 "yyyy-MM-dd HH:mm:ss" 둘 다 동일하게 동작하며, {@code to}는
+     * exclusive 상한이다 — 해당 시각의 캔들 자체는 결과에서 제외됨).
+     */
+    @Test
+    void getDayCandlesWithToPagesUsingIso8601UtcQueryParam() {
+        wireMockServer.stubFor(get(urlPathEqualTo("/v1/candles/days"))
+                .withQueryParam("market", equalTo("KRW-BTC"))
+                .withQueryParam("count", equalTo("1"))
+                .withQueryParam("to", equalTo("2026-09-05T00:00:00Z"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                [{"market":"KRW-BTC","candle_date_time_utc":"2026-09-04T00:00:00",
+                                  "opening_price":110937000.0,"high_price":111392000.0,"low_price":107713000.0,
+                                  "trade_price":109126000.0}]
+                                """)));
+
+        Instant to = LocalDateTime.of(2026, 9, 5, 0, 0).toInstant(ZoneOffset.UTC);
+        List<Candle> candles = upbitPriceClient.getDayCandles("BTC", "KRW", 1, to);
+
+        assertThat(candles).hasSize(1);
+        assertThat(candles.get(0).candleAt()).isEqualTo(LocalDateTime.of(2026, 9, 4, 0, 0).toInstant(ZoneOffset.UTC));
+    }
+
+    /**
+     * 존재하지 않는 마켓 코드는 {@code /v1/ticker}(200+빈 배열)와 달리 캔들 엔드포인트에서는
+     * 정상 HTTP 404로 온다(2026-09-11 실측, {@code {"error":{"name":404,"message":"Code not found"}}}) —
+     * 같은 업비트라도 엔드포인트별 매칭 실패 표현이 다르다는 점을 회귀 방지로 고정한다.
+     */
+    @Test
+    void getDayCandlesThrowsTickerNotFoundOn404() {
+        wireMockServer.stubFor(get(urlPathEqualTo("/v1/candles/days"))
+                .withQueryParam("market", equalTo("KRW-NOTEXIST"))
+                .willReturn(aResponse()
+                        .withStatus(404)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"error\":{\"name\":404,\"message\":\"Code not found\"}}")));
+
+        assertThatThrownBy(() -> upbitPriceClient.getDayCandles("NOTEXIST", "KRW", 1))
+                .isInstanceOf(TickerNotFoundException.class);
+    }
+
+    @Test
+    void getDayCandlesThrowsExternalPriceApiExceptionOnServerError() {
+        wireMockServer.stubFor(get(urlPathEqualTo("/v1/candles/days"))
+                .willReturn(aResponse().withStatus(500)));
+
+        assertThatThrownBy(() -> upbitPriceClient.getDayCandles("BTC", "KRW", 1))
+                .isInstanceOf(ExternalPriceApiException.class);
+    }
+
+    @Test
+    void getMinuteCandlesThrowsExternalPriceApiExceptionOnTimeoutTriggeringCircuitBreakerFallback() {
+        wireMockServer.stubFor(get(urlPathEqualTo("/v1/candles/minutes/1"))
+                .willReturn(aResponse().withStatus(200).withFixedDelay(5000)));
+
+        assertThatThrownBy(() -> upbitPriceClient.getMinuteCandles("BTC", "KRW", 1, 1))
                 .isInstanceOf(ExternalPriceApiException.class);
     }
 }

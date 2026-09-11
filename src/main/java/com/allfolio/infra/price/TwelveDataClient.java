@@ -1,6 +1,7 @@
 package com.allfolio.infra.price;
 
 import com.allfolio.domain.AssetType;
+import com.allfolio.domain.DailyBar;
 import com.allfolio.domain.Price;
 import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
@@ -12,6 +13,7 @@ import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -120,6 +122,66 @@ public class TwelveDataClient {
     }
 
     /**
+     * 해외주식 일봉 시계열(캔들 차트, F007) 조회 — {@code /time_series?interval=1day}. 주/월/년봉은
+     * 이 일봉을 모아 후속 태스크(집계 서비스)가 백엔드에서 직접 계산하므로, 이 메서드는 일봉 원본만
+     * 그대로 반환한다.
+     *
+     * <p><b>실제 API 키로 curl 검증 완료</b>(2026-09-11):
+     * <ul>
+     *   <li>{@code outputsize} 상한은 **1~5000**(무료 플랜 한정 제한이 아니라 API 자체의 하드 제한으로
+     *       보인다 — 에러 메시지가 플랜을 언급하지 않고 범위만 언급). 5000은 정상 응답, 5001은
+     *       {@code HTTP 400 {"code":400,"message":"Invalid outputsize provided: 5001. Accepts
+     *       values in the range from 1 to 5000 inclusive.","status":"error"}}로 확인했다.</li>
+     *   <li>존재하지 않는 심볼·잘못된 apikey는 {@code /quote}와 동일한 패턴 — 각각 정상 HTTP
+     *       404/401 + {@code {"code":...,"status":"error"}} 스키마로 온다(200+에러 함정 없음).</li>
+     *   <li>{@code values[]}의 각 항목은 {@code datetime}(시각 없이 날짜만, 예: "2026-09-10")·
+     *       {@code open}/{@code high}/{@code low}/{@code close}(모두 따옴표 붙은 문자열)를 담고
+     *       있어 {@link DailyBar}로 그대로 매핑한다.</li>
+     *   <li>응답 헤더 {@code api-credits-used}/{@code api-credits-left}로 실측한 결과, {@code
+     *       outputsize}를 5(적음)로 요청하든 5000(최대)으로 요청하든 **credit 소비는 요청 1회당 1로
+     *       동일**했다 — {@code /quote} 1회 호출과 같은 비용이다. 캔들 조회 rate limit 영향 분석은
+     *       {@code .claude/agents/twelvedata-api.md}의 「일봉 시계열(`/time_series`)과 분당 호출
+     *       한도」 절에 정리했다.</li>
+     * </ul>
+     */
+    @CircuitBreaker(name = "twelvedata", fallbackMethod = "dailySeriesFallback")
+    public List<DailyBar> getDailySeries(String ticker, int outputsize) {
+        TwelveDataTimeSeriesResponse response = restClient.get()
+                .uri("/time_series?symbol={symbol}&interval=1day&outputsize={outputsize}", ticker, outputsize)
+                .retrieve()
+                // /quote와 동일하게 존재하지 않는 심볼은 정상 HTTP 404로 온다(실측 확인).
+                .onStatus(status -> status.value() == 404, (req, res) -> {
+                    throw new TickerNotFoundException("일치하는 티커를 찾을 수 없습니다: " + ticker);
+                })
+                .body(TwelveDataTimeSeriesResponse.class);
+
+        if (response == null || response.values() == null || response.meta() == null) {
+            throw new ExternalPriceApiException("미국 주식 일봉 시세 응답 형식이 올바르지 않습니다: " + ticker);
+        }
+
+        if (!ticker.equals(response.meta().symbol())) {
+            throw new ExternalPriceApiException(
+                    "요청한 티커(%s)와 응답 심볼(%s)이 일치하지 않습니다.".formatted(ticker, response.meta().symbol()));
+        }
+
+        if (!"USD".equals(response.meta().currency())) {
+            throw new ExternalPriceApiException(
+                    "예상치 못한 통화(%s)가 반환됐습니다: %s".formatted(response.meta().currency(), ticker));
+        }
+
+        return response.values().stream()
+                .map(v -> new DailyBar(LocalDate.parse(v.datetime()), v.open(), v.high(), v.low(), v.close()))
+                .toList();
+    }
+
+    private List<DailyBar> dailySeriesFallback(String ticker, int outputsize, Throwable ex) {
+        if (ex instanceof TickerNotFoundException tickerNotFoundException) {
+            throw tickerNotFoundException;
+        }
+        throw new ExternalPriceApiException("미국 주식 일봉 시세 조회에 실패했습니다: " + ticker, ex);
+    }
+
+    /**
      * 통합 종목 검색(GET /v1/assets/search)의 STOCK+USD 분기. 검색은 가격을 포함하지 않는다 —
      * 결과 목록에서 각 종목의 시세는 등록 후 {@link #getPrice}가 담당한다.
      *
@@ -183,6 +245,15 @@ public class TwelveDataClient {
     }
 
     private record TwelveDataSymbolSearchResponse(List<SymbolSearchItem> data) {
+    }
+
+    private record TwelveDataTimeSeriesResponse(TimeSeriesMeta meta, List<TimeSeriesValue> values) {
+    }
+
+    private record TimeSeriesMeta(String symbol, String currency) {
+    }
+
+    private record TimeSeriesValue(String datetime, BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close) {
     }
 
     private record SymbolSearchItem(
