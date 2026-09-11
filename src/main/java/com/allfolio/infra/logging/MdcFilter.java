@@ -30,6 +30,13 @@ import java.util.UUID;
  * <p>Virtual Thread 환경(spring.threads.virtual.enabled=true)에서 MDC는 스레드 로컬 기반이므로
  * finally에서 반드시 MDC.clear()로 정리해, 스레드가 재사용될 때 이전 요청의 값이 새어 들어가지
  * 않게 한다. 이 필터가 체인 전체를 감싸므로, 안쪽의 JwtFilter가 채운 userId도 여기서 함께 정리된다.
+ *
+ * <p>비동기 처리(Task 028 SSE의 {@code SseEmitter} 반환 등)가 시작돼도 이 필터는 별도로 신경 쓸 게
+ * 없다 — {@code OncePerRequestFilter.shouldNotFilterAsyncDispatch()}가 기본 true라 비동기
+ * 재디스패치에서 이 필터가 재실행되지 않고, 실제 이벤트를 내보내는 비동기 작업은 애초에 이 필터가
+ * 감싼 원 요청 스레드가 아닌 다른 스레드에서 돈다(정의상 그렇다). 그 스레드 경계를 넘어 traceId를
+ * 전파하는 책임은 이 필터가 아니라 {@link MdcPropagation}(및 {@link MdcTaskDecorator})이 진다 —
+ * Task 028은 SSE 이벤트를 보내는 백그라운드 작업을 반드시 그쪽으로 감싸야 한다.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
