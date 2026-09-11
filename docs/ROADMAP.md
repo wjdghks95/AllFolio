@@ -257,7 +257,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - Minor 3건은 보류: 히스토그램 5ms 경계 보간 이슈(위 항목에 서술, Task 015 착수 시 판단), 로그인 실패 로그 주체 미기록(「남은 갭」), `userId` MDC 키가 실제 프로덕션 로그엔 아직 한 번도 안 찍힘(인증 성공 후 경로에 로그 문장이 아직 없을 뿐 결함 아님 — 정보성)
   - ⚠️ 남은 갭:
     - 로그인 실패 `AUDIT` 로그가 어떤 계정을 대상으로 한 실패인지 남기지 않는다(user enumeration 방지는 HTTP 응답 계약에 대한 요구이지 서버 내부 로그에 대한 요구는 아니므로 스펙 위반은 아님, code-reviewer도 판단 사항으로만 제시) — 브루트포스 탐지 필요성이 커지면 비밀번호 불일치 경로에 한해 `userId` 기록을 다음 착수 시 재검토
-    - 현재는 동기 필터 체인만 존재해(`grep`으로 `CompletableFuture`/`@Async`/`SseEmitter` 0건 확인) Virtual Thread 환경에서 MDC 누수가 없다. Phase 5 Task 028(SSE)에서 MVC 비동기 처리가 들어오면 `OncePerRequestFilter`가 비동기 디스패치 시작 시점에 체인을 빠져나가며 MDC를 지우므로 emitter 콜백에는 `traceId`가 없다 — 지금 고칠 사안은 아니고 Task 028 착수 시 재검토
+    - ✅ **(2026-09-11, Task 028 착수 전 재검토 완료 — 아래 「Task 028 착수 전 MDC traceId 비동기 전파 준비」 참고)** 당초 이 문단이 "`OncePerRequestFilter`가 비동기 디스패치 시작 시점에 MDC를 지운다"고 추정했던 것은 실측 결과 틀렸다 — `MdcFilter`는 비동기 분기를 넣을 필요 자체가 없었다(원래의 무조건 `finally { MDC.clear(); }` 그대로 정확함, 상세 근거는 아래 항목). 실제 위험은 다른 곳에 있었다: MDC가 ThreadLocal이라 SSE 이벤트를 실제로 전송하는 백그라운드 스레드는 애초에 원 요청 스레드의 traceId/userId를 물려받지 못한다는 점 — 이걸 위한 전파 유틸(`MdcPropagation`/`MdcTaskDecorator`)을 미리 만들어뒀다
     - `MdcFilter`는 `OncePerRequestFilter`라 컨테이너 ERROR 디스패치(핸들러 없는 404 등)에는 기본적으로 재실행되지 않아 `traceId`가 비어있다 — `SecurityConfig`가 "보안 필터는 ERROR 디스패치에도 적용된다"고 명시한 것과는 비대칭. 실제로는 `GlobalExceptionHandler`가 대부분의 4xx/5xx를 REQUEST 디스패치 중에 처리해 `traceId`가 붙으므로 영향은 미미(2차 code-reviewer 확인) — 지금 고칠 사안은 아님
     - Task 015(시뮬레이터) 구현 시 `allfolio.simulation.duration` 이름으로 실제 `Timer`를 기록하는 프로덕션 코드(`@Timed` 또는 `Timer.record`)가 필요하다 — 이번엔 `MeterRegistry` 직접 호출로 설정이 살아있음만 검증했다
 
@@ -566,7 +566,7 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
     리스트박스를 `hidden` 속성으로 상시 렌더, APG 콤보박스 키보드 패턴 보정, `SEARCH_RATE_LIMITED`를
     `messageForErrorCode`에 연결, 테스트 2건 보강)도 함께 수정. 재검증 결과 **Blocker 0건·Major 0건,
     병합 가능** 판정, 전체 스위트 168 테스트 통과
-  - ⚠ **남은 갭(Minor 5건, code-reviewer가 "병합을 막지 않는 이월 항목"으로 판단)**: Esc/blur 시
+  - ✅ **남은 갭(Minor 5건) — 2026-09-11 전부 해소**(아래 「Task 027 이월 Minor 5건 수정」 참고): Esc/blur 시
     `activeIndex`를 리셋하지 않아 `aria-activedescendant`가 숨겨진 옵션을 가리킬 수 있음(`senior-frontend`),
     `hidden` 전환 이후 약해진 테스트 단언 2곳(`senior-frontend`), 목록이 열린 채로는 Enter로 폼을 제출할
     방법이 없음(`senior-frontend`), 검색어만 입력하고 옵션을 고르지 않은 채 제출하면 "입력이 필요합니다"가
@@ -575,6 +575,117 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
     여유가 절반(`senior-backend`, `application.yml`)
   - 담당: `senior-frontend`(구조·API·타입) → `ui-ux-designer`(시각·문구) → `senior-frontend`(리뷰 반영) →
     `code-reviewer`(독립 검증, 재검증 포함) → 코디네이터(문서)
+
+- **Task 027 완료 후 코드 리뷰 후속** (2026-09-11, 코디네이터가 `code-reviewer` 에이전트로 독립 검증을 직접
+  발주 — formal Task 번호 없이 진행)
+  - ✅ `code-reviewer` 독립 검증 — Task 027 이월 Minor 5건이 코드에 그대로 잔존함을 실측 확인(아직 미수정 상태이니
+    당연한 결과, 아래 「Task 027 이월 Minor 5건 수정」에서 해소 착수), Task 014가 남긴 MDC traceId 비동기 전파
+    갭(Task 028 SSE 착수 전 처리 필요)도 여전히 미착수 상태임을 재확인. 최근 커밋(Task 025~027) 대상 정적 분석
+    (double/float·`BigDecimal.equals()`·Circuit Breaker 누락·403 대신 404 컨벤션·N+1·`@Transactional` 경계 등)
+    위반 0건
+  - ✅ **프론트엔드 테스트 환경 수정** — `npm run test`가 168개 중 73개가 `localStorage.setItem is not a function`으로
+    실패하던 문제. 원인은 Node 20.13+/22+가 `globalThis.localStorage`를 실험적 내장 전역으로 미리 점유하는데
+    `--localstorage-file` 미지정 시 `setItem` 등 메서드가 없는 빈 stub이 등록되고, vitest의 happy-dom 환경이 자체
+    `window.localStorage`로 교체를 시도해도 동일한 깨진 stub을 그대로 반환함을 실측으로 확인(원인 규명 과정에서
+    `NODE_OPTIONS=--no-experimental-webstorage`로는 168/168 통과함을 먼저 확인했으나, Node 버전·환경변수에
+    의존하지 않는 해결을 위해 코드 레벨로 수정). `frontend/src/test/setup.ts`에 메모리 기반 `Storage` 구현
+    (`MemoryStorage` 클래스)을 추가해 `globalThis.localStorage`를 명시적으로 교체 — 168/168 테스트 통과 확인
+  - ⚠️ **백엔드 `./gradlew test` 실행 불가 — 원인 규명 완료, 수정은 보류(사용자 결정, 2026-09-11)**:
+    `ClassNotFoundException: worker.org.gradle.process.internal.worker.GradleWorkerMain`으로 테스트 태스크
+    자체가 실패한다. 최초엔 `build/tmp/compileJava/.../stash-dir/`의 증분 컴파일 잔재(Task 025의 "병렬 에이전트가
+    Gradle 프로세스를 kill -9로 죽인 사고"와 유사한 흔적)로 추정했으나, `./gradlew clean` 후에도 동일하게
+    재현되어 기각됐다. `--debug` 로그로 테스트 워커 실행 커맨드를 추적한 결과, 클래스패스가 길어 Gradle이
+    `@인자파일`(`gradle-worker-classpath*.txt`) 방식으로 JVM을 포크하는데, 이 파일은 UTF-8로 정상 작성돼 있음에도
+    (바이트 직접 검증 완료) Java 네이티브 런처가 이를 이 시스템의 `sun.jnu.encoding`(Windows 비유니코드 프로그램용
+    코드페이지, 이 환경에선 **MS949**)으로 디코딩해, 파일 안의 한글 경로(`C:\Users\mcocoa-개발팀\...\이정환\...`)가
+    깨지면서 존재하지 않는 클래스패스를 가리키게 된다. `JAVA_TOOL_OPTIONS=-Dsun.jnu.encoding=UTF-8`로도 해결
+    안 됨(네이티브 런처의 인자파일 디코딩은 JVM 부트스트랩 이전 단계라 이 시점엔 적용 불가, 실측 확인). 근본
+    해결책(Windows 시스템 로캘을 UTF-8로 전환 — 재부팅 필요, 또는 프로젝트·`GRADLE_USER_HOME`을 ASCII 전용
+    경로로 이동 — 재설정 필요) 둘 다 사용자 결정이 필요한 시스템 차원 변경이라, 사용자가 **일단 보류**를
+    확정했다(2026-09-11). 재개 시 이 두 옵션 중 선택부터 필요 — 그 전까지 백엔드 동적 검증(테스트 실행)은
+    이 저장소에서 불가능한 상태로 남는다
+  - 담당: 코디네이터(직접 진단·프론트 수정) — 빌드·테스트 인프라 진단은 기존 에이전트 라우팅 범위 밖으로 판단해
+    위임하지 않았다
+
+- **Task 027 이월 Minor 5건 수정** ✅ — 완료 (2026-09-11)
+  - 대상: 위 Task 027 「남은 갭」에 등재된 Minor 5건(Esc/blur 시 `activeIndex` 미리셋, `hidden` 전환 이후 약해진
+    테스트 단언 2곳, 목록이 열린 채 Enter로 폼 제출 불가, 옵션 미선택 제출 시 에러 문구 불일치, `SearchThrottle`
+    한도 산정 근거 부정확)
+  - ✅ **`senior-frontend`**(`SearchCombobox.tsx`/`.test.tsx`) — Escape 분기·`onBlur` 핸들러 양쪽에
+    `setActiveIndex(-1)` 추가. Enter 처리를 `activeIndex >= 0 && results[activeIndex]`일 때만
+    `preventDefault()`+`selectResult()`로 좁히고, 활성 옵션이 없으면 `preventDefault()`를 호출하지 않아
+    브라우저 기본 폼 제출이 그대로 흐르게 함(APG 콤보박스 autoselect-없음 패턴과 일치). 기존 테스트 2곳에
+    닫힌 상태의 `aria-activedescendant`가 `null`인지 단언을 추가해 activeIndex 리셋 회귀를 실제로 고정(리셋
+    코드를 잠깐 지워 단언이 실패하는 것으로 검출력 실증), Enter/폼제출 회귀 테스트 1건 신규
+  - ✅ **`ui-ux-designer`**(`frontend/src/lib/messages.ts`, `docs/DESIGN.md` v1.9.0→1.9.1) —
+    `SEARCH_SELECTION_REQUIRED_MESSAGE = '종목을 검색해 목록에서 선택하세요.'` 신규 상수(`VALIDATION_MESSAGES`의
+    `REQUIRED`는 1:1 매핑 원칙대로 불변). **결정**: ticker/name이 비어 있으면(REQUIRED) 사용자가 검색창에
+    타이핑했는지 여부와 무관하게 항상 이 문구를 쓴다 — 문구 하나로 "아직 안 침"과 "치고 안 고름" 둘 다에서
+    참이 되게 해 `SearchCombobox`의 내부 `query`를 부모로 끌어올리는 상태 이중화를 피했다(CLAUDE.md §2)
+  - ✅ **`senior-frontend`(배선)**(`AssetNewPage.tsx`/`.test.tsx`) — `searchComboboxErrorMessage(code)` 헬퍼로
+    `SearchCombobox`의 `error` prop을 `tickerError`/`nameError === 'REQUIRED'`일 때만
+    `SEARCH_SELECTION_REQUIRED_MESSAGE`, 그 외 코드는 기존 `VALIDATION_MESSAGES[code]`로 분기. CASH 분기의
+    `TextField` 2개는 미변경(영향 없음 확인). "타이핑 이력 없이 제출해도 같은 문구" 회귀 테스트 신규
+  - ✅ **`senior-backend`**(`application.yml`, `SearchThrottle.java`, `SearchThrottleProperties.java`,
+    `SearchIntegrationTest.java`, `SearchRateLimitExceededException.java`, `infra/cache/CLAUDE.md`) —
+    극단 케이스(디바운스 350ms 논스톱 타이핑 10초 = 최대 28회 × KRW/USD 2건 = 56건) 실측 계산 후
+    `allfolio.search-throttle.limit`을 **30 → 60**으로 상향. 근거 주석·Javadoc·테스트 리터럴(31→61)·
+    `infra/cache/CLAUDE.md`를 값과 함께 동기화
+  - ✅ `code-reviewer` 독립 검증 — **Blocker 0건·Major 0건**. Minor 3건(60건 반영이 누락된 주석 3곳:
+    `SearchRateLimitExceededException.java`의 옛 "30건/10초" Javadoc, `infra/cache/CLAUDE.md` 「분리 이유」
+    문단의 잔존 30건, `SearchThrottleProperties.java` Javadoc에 팬아웃 근거 부재) 전부 반영 완료. 5건 상호
+    충돌·회귀 없음(Enter 변경이 기존 클릭/키보드 선택 흐름을 깨지 않음, CASH 경로 미영향)을 실측으로 확인.
+    검증 중 발견한 범위 밖 항목 — 다른 에이전트가 작업 도중 `gradle.properties`에 끼워 넣은
+    `systemProp.file.encoding=UTF-8` 한 줄(위 "백엔드 `./gradlew test` 실행 불가" 항목과 동일한 문제를
+    독자적으로 손대려 한 흔적으로 추정, 사용자의 보류 결정과 상충하고 실측으로도 효과 없음 확인)을 코디네이터가
+    직접 되돌렸다. `.mcp.json`은 이 세션 시작 전부터 있던 사용자 본인의 변경이라 미개입
+  - 프론트 최종 테스트: **170/170 통과**(`typecheck`/`lint`/`build` 포함). 백엔드는 위 Gradle 환경 문제로
+    동적 검증 불가 — `compileJava`/`compileTestJava`는 정상 통과, 값 대응(60 ↔ 61=limit+1)은 정적 확인 완료
+  - 담당: `senior-frontend`(구조·배선) ↔ `ui-ux-designer`(문구) 병행 → `senior-backend`(Throttle, 별도 병렬) →
+    `code-reviewer`(독립 검증) → `senior-backend`(Minor 3건 반영) → 코디네이터(범위 밖 파일 정리·문서)
+
+- **Task 028 착수 전 MDC traceId 비동기 전파 준비** ✅ — 완료 (2026-09-11, formal Task 번호 없이 진행)
+  - 대상: Task 014가 남긴 "Phase 5 Task 028(SSE)에서 MVC 비동기 처리가 들어오면 MDC가 비동기 디스패치 시작
+    시점에 지워져 emitter 콜백에 traceId가 없다"는 갭(위 Task 014 「남은 갭」). 아직 SSE 코드 자체는 없는
+    상태에서(`grep`으로 `SseEmitter`/`@Async`/`CompletableFuture` 0건 확인) Task 028이 바로 재사용할 인프라를
+    미리 준비했다.
+  - **1차 구현(반려됨)**: `senior-backend`가 `MdcFilter.java`에 `request.isAsyncStarted()`이면 즉시
+    `MDC.clear()`하지 않고 `AsyncListener`(`onComplete`/`onTimeout`/`onError`)로 완료 시점까지 미루는 분기를
+    추가. `code-reviewer` 독립 검증에서 **Major 2건** 발견: (1) `AsyncListener` 콜백이 호출되는 스레드는
+    원 요청 스레드와 다른 ThreadLocal이라, 정작 지워야 할 원 요청 스레드의 MDC는 안 지워지고 **콜백이 우연히
+    실행된 무관한 스레드의 MDC가 대신 지워지는 부수 피해**가 실제 스레드 실행 하네스로 실증됨. 게다가
+    `spring-web 7.0.8`의 `OncePerRequestFilter.shouldNotFilterAsyncDispatch()`가 바이트코드 확인 결과
+    기본 `true`라, 애초에 비동기 재디스패치에서 이 필터가 재실행되지 않아 이 분기가 풀려던 문제(비동기
+    작업이 계속 같은 요청 스레드에서 로그를 남긴다는 전제) 자체가 성립하지 않았다. (2) `isAsyncStarted()`
+    확인과 `addListener()` 등록 사이 경쟁 조건 — 그 사이 비동기가 먼저 끝나면 `getAsyncContext()`가
+    `IllegalStateException`을 던져 필터 밖으로 유출되고(정상 요청이 500으로 뒤집힘) `finally`의 clear도
+    건너뛴다.
+  - ✅ **최종 구현(code-reviewer 권장안 그대로 적용)**: `MdcFilter.java`는 **Task 014 원본 그대로**(무조건
+    `finally { MDC.clear(); }`) 되돌렸다 — 이 필터는 스레드 경계를 신경 쓸 필요가 없다는 게 재검토 결론이다.
+    대신 실제 문제(MDC가 ThreadLocal이라 스레드 경계를 못 넘음)를 푸는 신규 유틸을 `infra/logging`에 추가:
+    - `MdcPropagation.java` — `wrap(Runnable)`/`wrap(Callable<V>)` 정적 메서드로, 호출 시점(래핑 시점이
+      아니라 **실행 시점**)에 캡처된 MDC 맵을 대상 스레드에 주입하고 실행 종료 후 그 스레드의 원래 MDC로
+      복원(원래 비어있었으면 `clear()`)한다. 특정 Executor 구현에 종속되지 않는 범용 형태
+    - `MdcTaskDecorator.java` — 위 로직을 `org.springframework.core.task.TaskDecorator`로도 노출(Task 028이
+      `TaskExecutor` 빈을 쓰는 방식을 택할 경우 대비)
+    - `MdcFilter.java` Javadoc에 "이 필터가 스레드 경계를 신경 안 써도 되는 이유"와 "Task 028은 SSE 이벤트를
+      보내는 백그라운드 작업을 반드시 `MdcPropagation`/`MdcTaskDecorator`로 감싸야 한다"는 지침을 명시
+    - `MdcPropagationTest.java`(가상 스레드 2개로 전파·복원·오염 방지·스냅샷 불변성 검증) 신규,
+      1차 구현을 검증하던 `MdcFilterAsyncTest.java`는 더 이상 유효하지 않아 삭제
+  - ✅ `code-reviewer` 2회 독립 검증(1차: Major 2건 발견, 실제 스레드 실행 하네스로 실증 — Gradle 테스트가
+    이 저장소의 한글 경로+MS949 환경 문제로 안 돌아가 Mockito/Testcontainers 없는 독립 하네스를 직접
+    컴파일·실행해 검증했다. 2차: 롤백 후 재검증, 같은 하네스로 "동기 경로는 즉시 clear, 비동기 시작 요청도
+    리스너 등록 0건에 즉시 clear"를 실측 재확인) — **Blocker 0건·Major 0건**. Minor 1건(Javadoc 오타
+    "리다이스패치"→"재디스패치")은 코디네이터가 직접 수정
+  - ✅ Task 028 착수 시 적용 지점(code-reviewer·senior-backend 정리) — ① SSE emitter 등록/해제 로그는
+    원 요청 스레드(비동기 시작 전)에서 나가므로 별도 조치 불필요 ② **실제 `emitter.send()`를 호출하는
+    백그라운드 스레드/executor는 반드시 `MdcPropagation.wrap(...)` 또는 `TaskExecutor.setTaskDecorator(new
+    MdcTaskDecorator())`로 감싸야 한다** — 안 그러면 이벤트 전송 로그에 traceId/userId가 비어 어느 요청이
+    촉발했는지 추적 불가 ③ heartbeat처럼 특정 요청 하나에 안 묶이는 전역 스케줄러 브로드캐스트는 "요청 단위
+    traceId" 개념 자체가 안 맞을 수 있어 전파 대상에서 제외하거나 별도 마커만 남길지 Task 028 설계 시 판단
+  - 프론트 영향 없음(전부 백엔드 `infra/logging` 패키지). 백엔드는 `./gradlew compileJava compileTestJava`
+    정상 통과, `./gradlew test`는 기존 한글 경로+MS949 환경 문제로 이번에도 동적 검증 불가(무관한 기존 이슈)
+  - 담당: `senior-backend`(1차 구현 → 롤백·재구현) → `code-reviewer`(독립 검증 2회) → 코디네이터(오타 수정·문서)
 
 - **배포 체크리스트 선행 조건**: Twelve Data 무료 플랜은 "Internal non-display usage"라 상용 배포 전 반드시
   Enterprise 계약이 선행돼야 한다 — Task 032(배포 파이프라인)의 체크리스트에 반영할 것
