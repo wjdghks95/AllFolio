@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-09-10
+**최종 수정:** 2026-09-14
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~5와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -694,10 +694,25 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
 
 ### Phase 5: 고급 기능 및 최적화
 
-- **Task 028: SSE 실시간 시세 스트리밍 및 실시간 차트 (F007)**
-  - 백엔드 SSE + 프론트 차트, 내 평단가 수평선
-  - `price_snapshots` 파티셔닝
-  - 이벤트 스키마는 구 PRD v1.2.0 §8.3 참조 필요 (`git show cf24471:docs/PRD.md`)
+- **Task 028: SSE 실시간 시세 스트리밍 및 실시간 차트 (F007)** ✅ — 완료 (2026-09-14)
+  - ✅ 신규 외부 WebSocket 수집 파이프라인·신규 PostgreSQL 테이블(`price_snapshots` 등) 없이, 기존 REST 클라이언트(Upbit/공공데이터포털/Twelve Data)와 Redis 캐시 패턴을 확장하는 방향으로 구 PRD v1.2.0(§8.3, WebSocket 상시 수집 전제)과 다르게 설계(사용자 확정, 2026-09-11) — 구 PRD의 이벤트 스키마는 참고만 하고 그대로 쓰지 않았다
+  - ✅ COIN(업비트)은 1분봉~년봉 지원 + SSE 실시간 스트리밍(캐시 없는 패스스루 — 업비트 호출 한도가 여유로워 과설계 방지, 년봉은 월봉을 받아 `UpbitPriceClient.aggregateYears()`로 집계). STOCK(국내 공공데이터포털·해외 Twelve Data)은 일/주/월/년봉만 REST 제공, SSE 없음(EOD 성격) — 일봉 원본을 `CandleCacheStore`(티커당 1개 Redis 키)에 캐싱하고 주/월/년봉은 `CandleAggregator`로 캐시에서 집계, 벤더 재호출 없음
+  - ✅ `price_snapshots` 파티셔닝은 이번 Task 범위에서 제외(사용자 확정, 위 항목의 원 계획을 대체) — STOCK은 캐시 미스 시 KRW·USD 둘 다 벤더가 줄 수 있는 최대 범위를 한 번에 요청하는 전략이라 Redis 캐시만으로 충분하고, 원천적으로 "더 페이징할 과거 데이터"가 없다(아래 code-reviewer M2 참고)
+  - ✅ cache stampede 방지는 `CandleRangeLock`(티커 단위 Redis 락, `PriceThrottle`의 Lua Script 패턴 재사용)만 두고 선제적 사용자별 Throttle(`CandleThrottle`)은 신설하지 않음(의도적 결정)
+  - ✅ 신규 엔드포인트 2종: `GET /v1/assets/{id}/candles`(REST, COIN/STOCK), `GET /v1/assets/{id}/candles/stream`(SSE, COIN 전용) — 아래 「API 규격」 절에 반영
+  - ✅ SSE 인증: `JwtFilter`가 `/v1/assets/{id}/candles/stream` 경로에서만 쿼리 파라미터 `?token=` 폴백을 허용(브라우저 `EventSource`가 커스텀 헤더를 못 붙이는 제약, 정규식으로 적용 범위를 그 경로 하나로 최소화)
+  - ✅ MDC traceId/userId 전파: SSE 백그라운드 전송 스레드를 `MdcPropagation.wrap()`으로 감싸 emitter별로 정확한 userId를 전파(폴링 틱 단위 traceId는 별도 발급해 "같은 폴링 사이클" 상관 정보와 "어느 유저의 연결인지" 정보를 둘 다 남김) — 실제 서버 로그로 실측 확인(아래 code-reviewer 검증 참고)
+  - ✅ 프론트: `lightweight-charts`(TradingView) 신규 도입, `CandlestickChart` 컴포넌트가 캔들 렌더링과 현재/예상 평단선(`createPriceLine`)을 함께 그림. `docs/DESIGN.md` §6-5 신설. REST(내림차순 응답을 오름차순으로 뒤집어 보관)와 SSE(마지막 원소의 `bucketStart` 비교로 교체/추가) 병합 계약 확정
+  - ✅ 담당: senior-backend(캔들 클라이언트 4종·캐시·SSE) · stock-price-api/twelvedata-api(벤더별 일봉 시계열 실측) · senior-frontend(차트 구조·SSE 연동) · ui-ux-designer(시각·문구) · code-reviewer(통합 검증)
+  - ✅ code-reviewer 통합 검증(실제 서버 기동+curl/SSE 클라이언트 실측, 독립 하네스 병행 — `./gradlew test`는 이 환경의 기존 한글 경로+MS949 이슈로 이번에도 우회) — **Blocker 0건**. Major 5건 발견, 3건 코드 수정 완료·2건 문서화로 해소:
+    - **(수정 완료)** `CandleRangeLock`이 TTL 만료 후 재획득 시 이전 보유자가 새 보유자의 락을 삭제하는 결함(인-프로세스 공유 토큰 맵의 한계, 실제 Redis로 재현) — `tryLock`이 토큰을 반환하고 `unlock(key, token)`으로 그 토큰을 받아야만 해제하도록 변경. 재검증 완료
+    - **(수정 완료)** STOCK `hasMoreHistory`가 영구 `true`로 남아 "이전 구간 더 보기"가 매번 벤더를 재호출하고 503을 반환하던 결함(실제 서버+curl로 재현) — KRW·USD 둘 다 캐시 미스 시 벤더가 줄 수 있는 최대 범위를 한 번에 요청하는 전략이라 원천적으로 더 페이징할 데이터가 없음을 확인, STOCK은 캐시가 채워진 뒤 `hasMoreHistory=false` 고정으로 수정(무의미했던 `needsExtension` 확장 로직 제거)
+    - **(수정 완료)** SSE 연결 종료마다 `AuthorizationDeniedException` ERROR 로그가 남던 문제(실제 서버로 재현) — Spring Security의 `AuthorizationFilter`가 기본적으로 ASYNC 디스패치에도 인가를 적용하는데 `JwtFilter`(`OncePerRequestFilter`)는 ASYNC 재디스패치에서 재실행되지 않아 그 시점 SecurityContext가 비어있던 게 원인(Task 014가 남긴 "MDC는 스레드 경계 신경 안 써도 됨" 갭과 같은 배경 사실). `SecurityConfig`에 `.dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()` 추가로 해소, 재검증 완료
+    - **(문서화로 해소)** SSE 쿼리 파라미터 토큰 보안 영향 — 실측 결과 적용 범위가 `/v1/assets/{id}/candles/stream` 경로 하나로 정확히 제한됨을 확인(다른 엔드포인트에 `?token=`을 붙여도 401), `EventSource`는 하위 리소스 요청이 아니라 Referer 유출 경로도 없음. 잔여 위험은 "프록시/LB 접근 로그에 쿼리스트링이 그대로 남을 수 있다"는 점 하나로 좁혀져 **조건부 수용**으로 결론(코드 수정 불필요) — Task 032 배포 체크리스트에 완화 조건 추가(아래)
+    - **(문서화로 해소)** 신규 엔드포인트 2종이 「API 규격」 표에 미등재 — 이번 갱신으로 해소(Task 019 때와 동일한 지적 유형)
+    - 캔들 집계 경계값(COIN `UpbitPriceClient.aggregateYears` vs STOCK `CandleAggregator`, 서로 다른 파일의 두 독립 구현)은 부분 구간·구간 라벨 고정(연초/월초/주 시작 월요일)·정렬·스케일 보존을 다루는 26개 단언으로 대조해 드리프트 없음을 확인
+    - Minor 10건 중 `CandleCacheEntry.newestCovered` 미사용(최신 봉이 캐시 TTL을 넘겨 고정될 수 있음), `CandlePushScheduler`의 구독 키 순차 폴링 성능(Task 031 부하검증 재검토 대상), STOCK 캐시 실패 네거티브 캐싱 부재, COIN 과거 페이징 시 경계 버킷 부분집계 고정 등은 이번엔 보류
+  - ⚠️ 남은 갭: 위 Minor 보류 항목들, 그리고 Capacitor의 `CapacitorHttp`가 기본 `EventSource`를 가로채는 공개 버그(ionic-team/capacitor#6582)는 Task 030(하이브리드 앱 패키징)에서 재검토
 
 - **Task 029: 푸시 알림 (FCM/APNs)**
   - `device_tokens` 테이블, `revoked_at IS NULL` 부분 인덱스
@@ -709,12 +724,14 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
 
 - **Task 031: 부하 검증 및 성능 튜닝**
   - Virtual Thread 1,000+ 동시 SSE 커넥션, k6 벤치마크
+  - Task 028 code-reviewer 2차 검증(Minor m6·m7)이 이관한 항목: (a) `GET /v1/assets/{id}/candles`(STOCK)가 페이지 크기 제한 없이 캐시 전량(실측 최대 ~2,450건/10년)을 한 응답으로 반환 — 응답 크기·지연 실측 후 `limit` 파라미터 도입 여부 결정, (b) `GET /v1/assets/{id}/candles`(COIN)는 캐시·Throttle이 전혀 없는 패스스루라 요청 1건=업비트 호출 1건(count=200) — `GET /v1/assets/{id}/price`(1건/초 Throttle 적용)와의 비대칭이 실제 남용으로 이어지는지 부하 시나리오에 포함해 확인
 
 - **Task 032: 배포 파이프라인 및 운영 관측 체계**
   - CI/CD, 프론트 배포 방식 확정(JAR 통합 vs 분리 호스팅)
   - OpenTelemetry Bridge, Grafana Loki/Tempo
   - 인프라 벤더 미결정 유지 — 벤더 확정 시 (a) ADOT Collector에 exporter 추가(앱 코드 변경 없음) 또는 (b) `micrometer-registry-cloudwatch` 의존성 추가로 이중 발행 가능
   - Twelve Data Enterprise 계약 체결 확인(Phase 4 선행 조건) — 무료 플랜 그대로 배포하면 약관 위반
+  - **SSE 쿼리 파라미터 토큰(Task 028) 완화 조건**: `GET /v1/assets/{id}/candles/stream`은 `EventSource`가 커스텀 헤더를 못 붙여 Access Token을 `?token=` 쿼리 파라미터로 받는다(적용 범위는 이 경로 하나로 제한 확인됨, code-reviewer 검증). 프록시·로드밸런서가 앞단에 붙으면 기본 액세스 로그 포맷이 쿼리스트링을 그대로 남길 수 있으므로, 배포 전 **프록시/LB 액세스 로그에서 `token` 쿼리 파라미터 마스킹 또는 쿼리스트링 로깅 비활성화**를 반드시 확인할 것
 
 ---
 
@@ -738,6 +755,8 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
 | `GET` | `/v1/portfolio` | 200 | 취득원가(Task 013, F005a) + `evaluationKrw`·`unrealizedPnl`·`weight`·합계 2개를 실제 시세로 계산(Task 023, F005b). 단건 조회용 Throttle 미적용, 일부 자산의 시세 조회가 실패해도 항상 200이고 그 항목의 3개 필드만 `null` |
 | `POST` | `/v1/simulate/avg-price` | 200 | DB 저장 없음 |
 | `GET` | `/v1/assets/{id}/price` | 200 / 206 / 400 / 404 / 429 / 503 | 외부 시세 단건 조회(STOCK/COIN/CASH-USD). 타 유저 접근 시 404, STOCK·CASH(KRW) 자산에 요청 시 400 `PRICE_NOT_APPLICABLE`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN`(Task 021). Redis 캐시 stale 폴백 시 206 + 응답 본문 `isStale:true`, 사용자당 초당 1건 Throttle 초과 시 429 `PRICE_RATE_LIMITED`(Task 022) |
+| `GET` | `/v1/assets/{id}/candles` | 200 / 400 / 404 / 503 | 캔들스틱 조회(F007, Task 028). `interval`(COIN: `minute1~minute240`/`day`/`week`/`month`/`year`, STOCK: `day`/`week`/`month`/`year`)·`before`(선택, 이전 응답 마지막 bar의 `bucketStart` 그대로 재사용) 쿼리 파라미터. 타 유저 접근 시 404, CASH 자산·STOCK+분봉 조합은 400(전자는 `PRICE_NOT_APPLICABLE`, 후자는 `VALIDATION_ERROR`), 잘못된 `interval`/`before` 값도 400 `VALIDATION_ERROR`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN`. 응답은 `{bars: [{bucketStart, open, high, low, close}], hasMoreHistory}` — `bars`는 최신순(내림차순) |
+| `GET` | `/v1/assets/{id}/candles/stream` | 200 / 400 / 401 / 404 | 캔들 실시간 스트리밍(SSE, COIN 전용, F007, Task 028). `Content-Type: text/event-stream`, 인증은 `Authorization` 헤더 또는 이 경로 전용 `?token=` 쿼리 파라미터 폴백(브라우저 `EventSource`가 커스텀 헤더를 못 붙이는 제약 — 완화 조건은 「배포 파이프라인」 Task 032 참고). STOCK/CASH 자산 요청 시 400 `VALIDATION_ERROR`(SSE는 COIN 전용), 타 유저 접근 시 404. 이벤트 이름 `candle`(payload는 REST와 동일한 bar 1건) + `: heartbeat` 코멘트(30초 주기) |
 
 **Bean Validation 규칙**
 - `ticker`: 1~20자, 공백 불가
@@ -870,6 +889,8 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 **구현된 코드 (Task 019)**: `INVALID_REFRESH_TOKEN`(401, Refresh Token이 존재하지 않거나·이미 폐기됐거나·만료됨 — 세 상황을 구분하지 않는 단일 코드로 응답해 토큰 존재 여부가 새지 않게 함)
 
 **구현된 코드 (Task 021)**: `PRICE_NOT_APPLICABLE`(400, STOCK·CASH(KRW) 자산에 시세를 요청 — 서로 다른 메시지로 로그 구분 가능하나 코드는 동일), `EXTERNAL_API_DOWN`(503, 외부 시세 API 장애 또는 Circuit Breaker Open. 응답 파싱/매칭 실패(예: 존재하지 않는 티커)는 CB 실패 집계에서 제외되지만 클라이언트 응답 코드는 동일하게 503)
+
+**구현된 코드 (Task 028)**: 신규 에러 코드 없음 — `GET /v1/assets/{id}/candles`(캔들 조회)와 `GET /v1/assets/{id}/candles/stream`(SSE)이 기존 코드를 그대로 재사용한다. `PRICE_NOT_APPLICABLE`은 이제 "시세 조회"뿐 아니라 "CASH 자산에 캔들을 요청"한 경우에도 쓰인다(캔들 개념 자체가 없음 — avg_price=1 고정이 이미 평가금액). `VALIDATION_ERROR`는 잘못된 `interval`/`before` 파싱 실패, STOCK 자산에 분봉 요청, STOCK/CASH 자산에 SSE 스트림 요청(COIN 전용) 4가지 경우에 공통으로 쓰인다(`InvalidCandleQueryException`, `AvgPriceRequiredException`/`InvalidCursorException`과 동일 패턴 — 매칭되는 전용 코드가 없을 때 기존 코드 재사용)
 
 **구현된 코드 (Task 022)**: `PRICE_RATE_LIMITED`(429, 캐시 미스/스테일 상태에서 사용자당 초당 1건 Throttle 한도 초과 — 캐시 히트는 이 한도를 소모하지 않음). 캐시 stale 폴백은 에러가 아닌 성공 응답이라 이 표의 `{code,message,timestamp}` 포맷 대신 206 + 응답 본문 `isStale:true`로 표현한다
 

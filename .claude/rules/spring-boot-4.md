@@ -18,6 +18,9 @@ Phase와 무관하게 이 저장소에서 계속 유효한 환경 제약입니�
 | Jackson 2 → 3 전환 | Spring Boot 4.1은 기본 JSON 라이브러리를 Jackson 3(`tools.jackson.*`)으로 전환해 `com.fasterxml.jackson.databind.ObjectMapper`(Jackson 2) 빈을 더 이상 자동 등록하지 않음(Task 022 실측). Spring Data Redis의 `Jackson2JsonRedisSerializer`(deprecated)를 주입하려 하면 `NoSuchBeanDefinitionException`이 남 — `JacksonJsonRedisSerializer`(`tools.jackson.databind.ObjectMapper` 사용)처럼 각 라이브러리의 "Jackson 2" 접미사 없는 버전을 찾아 써야 함 |
 | Self-invocation | 같은 빈 내부에서 `this.privateMethod()`로 `@Transactional` 메서드를 호출하면 AOP 프록시를 안 거쳐 트랜잭션이 조용히 무시됨(Task 023 실측). 클래스 분리 대신 `TransactionTemplate`으로 해당 구간만 명시적으로 감쌀 것 |
 | `ValidationAutoConfiguration` 패키지 이동 | Spring Boot 4.1에서 `org.springframework.boot.autoconfigure.validation.ValidationAutoConfiguration`이 `org.springframework.boot.validation.autoconfigure.ValidationAutoConfiguration`으로 이동(Task 025 실측) — `ApplicationContextRunner`로 `@Validated` 바인딩을 테스트할 때 옛 패키지로 import하면 컴파일 에러 |
+| `@ConfigurationProperties` 빈 등록 | 이 프로젝트는 `@ConfigurationPropertiesScan`을 쓰지 않는다 — 새 `@ConfigurationProperties` 클래스는 반드시 관련 `@Configuration` 클래스(예: `config/CacheConfig.java`)의 `@EnableConfigurationProperties({...})` 목록에 수동 추가해야 빈으로 등록된다. 빠뜨리면 컴파일은 되지만 기동 시(또는 그 빈을 주입받는 다른 빈 생성 시) `NoSuchBeanDefinitionException`으로 실패한다(Task 028 실측) |
+| Virtual Thread + `TaskDecorator`를 동시에 쓰는 `TaskScheduler` | `ThreadPoolTaskScheduler`는 고정 풀 기반이라 "Virtual Threads 활성 상태에서 풀 기반 설정 추가 금지" 원칙과 맞지 않는다. `SimpleAsyncTaskScheduler`가 `setVirtualThreads(true)`와 `setTaskDecorator(...)`를 모두 지원하는 유일한 표준 구현체다(Task 028 실측, `spring-context`/`spring-boot-autoconfigure` jar 디컴파일로 확인) |
+| SSE/ASYNC 디스패치 + Spring Security | `AuthorizationFilter`는 기본적으로 ASYNC 디스패치에도 인가를 적용하는데, `OncePerRequestFilter` 기반 커스텀 인증 필터(예: `JwtFilter`)는 ASYNC 재디스패치에서 재실행되지 않아 그 시점 `SecurityContext`가 비어 `AuthorizationDeniedException`이 던져진다(SSE 연결 종료마다 재현, Task 028 실측). `.dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()`로 ASYNC를 인가 대상에서 제외할 것 |
 
 ## Virtual Threads 활성화
 
