@@ -5,6 +5,7 @@ import com.allfolio.domain.exception.AvgPriceRequiredException;
 import com.allfolio.domain.exception.EmailAlreadyExistsException;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.InsufficientHoldingQuantityException;
+import com.allfolio.domain.exception.InvalidCandleQueryException;
 import com.allfolio.domain.exception.InvalidCredentialsException;
 import com.allfolio.domain.exception.InvalidCursorException;
 import com.allfolio.domain.exception.PriceRateLimitExceededException;
@@ -197,6 +198,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     /** GET /v1/assets/{id}/transactions의 cursor 파라미터가 파싱 불가능한 값일 때 (docs/ROADMAP.md Task 024). */
     @ExceptionHandler(InvalidCursorException.class)
     public ResponseEntity<ErrorResponse> handleInvalidCursor(InvalidCursorException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("VALIDATION_ERROR", e.getMessage()));
+    }
+
+    /** GET /v1/assets/{id}/candles의 interval·before 파라미터가 파싱 불가능한 값일 때 (docs/ROADMAP.md Task 028). */
+    @ExceptionHandler(InvalidCandleQueryException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCandleQuery(InvalidCandleQueryException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of("VALIDATION_ERROR", e.getMessage()));

@@ -15,6 +15,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Bearer 토큰을 검증해 SecurityContext에 인증을 채운다.
@@ -29,6 +30,16 @@ public class JwtFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "Bearer ";
 
+    /**
+     * 브라우저의 {@code EventSource} API는 커스텀 헤더(Authorization)를 붙일 수 없어, SSE 구독
+     * 엔드포인트(Task 028)만 쿼리 파라미터 {@code ?token=}으로 폴백한다. 다른 경로는 이 폴백을
+     * 적용하지 않는다 — 쿼리 파라미터에 토큰을 싣는 방식은 서버 접근 로그·Referer 헤더로 토큰이
+     * 노출될 수 있는 보안 트레이드오프가 있어, 적용 범위를 이 경로 하나로 최대한 좁힌다(조건부 수용 —
+     * Task 032 배포 체크리스트로 완화 조건(프록시/LB 접근 로그 마스킹)을 이관, Task 028 code-reviewer
+     * 통합 검증 결론).
+     */
+    private static final Pattern SSE_STREAM_PATH = Pattern.compile("^/v1/assets/[^/]+/candles/stream$");
+
     private final JwtIssuer jwtIssuer;
 
     public JwtFilter(JwtIssuer jwtIssuer) {
@@ -40,8 +51,13 @@ public class JwtFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
+        String token = null;
         if (header != null && header.startsWith(BEARER_PREFIX)) {
-            String token = header.substring(BEARER_PREFIX.length());
+            token = header.substring(BEARER_PREFIX.length());
+        } else if (header == null && SSE_STREAM_PATH.matcher(request.getRequestURI()).matches()) {
+            token = request.getParameter("token");
+        }
+        if (token != null) {
             jwtIssuer.resolveUserId(token).ifPresent(userId -> authenticate(userId, request));
         }
 

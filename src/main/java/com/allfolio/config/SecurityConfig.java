@@ -3,6 +3,7 @@ package com.allfolio.config;
 import com.allfolio.infra.security.JwtFilter;
 import com.allfolio.infra.security.JwtIssuer;
 import com.allfolio.infra.security.JwtProperties;
+import jakarta.servlet.DispatcherType;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -40,6 +41,16 @@ public class SecurityConfig {
                 .logout(logout -> logout.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // SSE(Task 028)는 emitter 완료 시 서블릿 컨테이너가 ASYNC로 필터 체인을 재디스패치한다.
+                        // JwtFilter(OncePerRequestFilter)는 기본적으로 ASYNC 재디스패치에서 재실행되지 않아
+                        // (docs/ROADMAP.md 657~659행 실측 — MdcFilter와 동일한 배경) 그 시점엔 SecurityContext가
+                        // 비어 있는데, AuthorizationFilter는 기본값(shouldFilterAllDispatcherTypes=true)으로
+                        // ASYNC에도 인가를 적용해 매번 AuthorizationDeniedException을 던진다(원 요청은 이미
+                        // 정상 인증을 통과했으므로 재디스패치 시점의 재검사는 불필요 — Task 028 code-reviewer M3
+                        // 실측). ASYNC 디스패치는 인가 대상에서 제외한다.
+                        // 주의: 이 permitAll은 SSE 경로 전용이 아니라 전역 ASYNC 디스패치에 적용된다 —
+                        // 향후 다른 비동기 엔드포인트를 추가할 때 이 사실을 재검토할 것(Task 028 code-reviewer m8).
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         // 와일드카드 대신 명시 나열한다. refresh/logout이 permitAll이어도 안전한 이유:
                         // 인증 주체는 URL 접근 권한이 아니라 요청 본문의 Refresh Token 자체다.
                         .requestMatchers("/v1/auth/signup", "/v1/auth/login",
