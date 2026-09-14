@@ -283,7 +283,11 @@ class CandleSseStreamIntegrationTest extends AbstractIntegrationTest {
         return queue;
     }
 
-    /** SSE 프레임(id/event/data 라인 + 빈 줄 구분)에서 data: 라인의 JSON 본문만 꺼낸다. */
+    /**
+     * SSE 프레임(id/event/data 라인 + 빈 줄 구분)에서 data: 라인의 JSON 본문만 꺼낸다. data: 라인
+     * 뒤에는 항상 프레임 종결용 빈 줄이 하나 더 오는데(SSE 스펙), 이를 같이 소비하지 않으면 다음
+     * dedup 검증에서 {@code lines.poll()}이 이 빈 줄을 새 이벤트로 오인해 집어간다.
+     */
     private String awaitDataLine(BlockingQueue<String> lines) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (System.nanoTime() < deadline) {
@@ -292,6 +296,7 @@ class CandleSseStreamIntegrationTest extends AbstractIntegrationTest {
                 break;
             }
             if (line.startsWith("data:")) {
+                lines.poll(5, TimeUnit.SECONDS); // 프레임 종결 빈 줄 소비
                 return line.substring("data:".length()).trim();
             }
         }
