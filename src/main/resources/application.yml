@@ -17,7 +17,10 @@ spring:
       host: localhost
       port: 6379
   http:
-    client:
+    # Spring Boot 4.1에서 RestClient.Builder의 기본 타임아웃 프로퍼티 프리픽스가 "client"(단수)가 아닌
+    # "clients"(복수)로 바뀌었다(실측: HttpClientsProperties가 spring.http.clients에 바인딩됨, 단수형
+    # spring.http.client는 조용히 무시되어 타임아웃이 전혀 적용되지 않았었다).
+    clients:
       connect-timeout: 2s
       read-timeout: 3s
   jpa:
