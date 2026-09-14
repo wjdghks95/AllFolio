@@ -94,6 +94,23 @@ export interface SearchResult {
   currency: Currency;
 }
 
+// GET /v1/assets/{id}/candles 응답 원소(Task 028). bucketStart는 COIN이면 Instant.toString()
+// (예: "2026-09-11T00:00:00Z"), STOCK이면 LocalDate.toString()(예: "2026-09-11")이다 — 두 자산유형이
+// 시간 표현 자체가 달라 공통 타입으로 통일하지 않는다(백엔드 CandleBarResponse Javadoc과 동일 설명).
+export interface CandleBarResponse {
+  bucketStart: string;
+  open: Money;
+  high: Money;
+  low: Money;
+  close: Money;
+}
+
+// bars는 최신순(내림차순)으로 온다 — 차트는 오름차순을 기대하므로 호출부(AssetDetailPage)가 뒤집는다.
+export interface CandleSeriesResponse {
+  bars: CandleBarResponse[];
+  hasMoreHistory: boolean;
+}
+
 export interface SimulateAvgPriceRequest {
   assetId: string;
   additionalPrice: Money;

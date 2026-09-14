@@ -1,16 +1,19 @@
 // 구조·동작: senior-frontend / 시각 표현·문구: ui-ux-designer
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import type {
   Asset,
   AssetType,
+  CandleBarResponse,
   PortfolioItem,
   SimulateAvgPriceResponse,
   UpdateHoldingRequest,
 } from '../api/types';
 import { deleteAsset, getAsset, getPortfolio, simulateAvgPrice, updateHolding } from '../api/assetApi';
+import { fetchCandles } from '../api/candleApi';
 import { ApiError } from '../api/authApi';
 import { useAuth } from '../auth/useAuth';
+import { useCandleStream } from '../hooks/useCandleStream';
 import { ERROR_MESSAGES, VALIDATION_MESSAGES, messageForErrorCode } from '../lib/messages';
 import {
   formatAmount,
@@ -22,6 +25,7 @@ import {
   toEditableQuantity,
 } from '../lib/money';
 import { Dec, toScaledString } from '../lib/big';
+import { CHART_LINE_COLOR } from '../lib/chartColors';
 import {
   validateAdditionalQuantity,
   validateAvgPrice,
@@ -31,7 +35,9 @@ import {
 import Alert from '../components/Alert';
 import Button from '../components/Button';
 import Card from '../components/Card';
+import CandlestickChart, { type PriceLineSpec } from '../components/CandlestickChart';
 import ConfirmDialog from '../components/ConfirmDialog';
+import SegmentToggle, { type SegmentToggleOption } from '../components/SegmentToggle';
 import TextField from '../components/TextField';
 import type { Flash } from './PortfolioPage';
 
@@ -56,13 +62,31 @@ const TONE_MARK: Record<'gain' | 'loss' | 'flat' | 'unknown', string> = {
   flat: '',
   unknown: '',
 };
-// 차트 두 번째 선(예상 평단가)의 테두리·배지 색 — text-*와 같은 톤 축이지만
-// border/bg 유틸이 필요해 별도 테이블로 둔다.
-const TONE_LINE_CLASS: Record<'gain' | 'loss' | 'flat', { border: string; bg: string }> = {
-  gain: { border: 'border-gain', bg: 'bg-gain' },
-  loss: { border: 'border-loss', bg: 'bg-loss' },
-  flat: { border: 'border-ink', bg: 'bg-ink' },
+// 캔들 차트 기간 선택지(F007, Task 028 프론트 7번째 하위 태스크). 백엔드 CandleInterval 전체
+// 12종을 다 노출하지 않고 실용적인 하위집합만 보여준다(태스크 지시 — 전체 노출은 강제 아님).
+// value는 GET /v1/assets/{id}/candles의 interval 쿼리 파라미터 그대로다(대소문자 무관하게
+// 백엔드가 파싱하지만, 소문자로 통일해 넘긴다).
+//
+// 라벨은 캔들 하나가 담는 기간이다 — 화면에 보이는 구간의 길이가 아니다(그래서 필드 이름도
+// "기간"이 아니라 "캔들 단위"다). 국내 증권·거래소 앱이 쓰는 어휘 그대로 `1분`·`일`·`주`·`월`·`년`
+// 으로 두고, 375px에서 5칸이 한 줄에 들어가도록 두 글자를 넘기지 않는다(`1개월`·`1년`처럼 늘리면
+// 칸당 35px 남짓한 글자 자리를 넘긴다 — 실측).
+const CANDLE_INTERVAL_OPTIONS: Record<'STOCK' | 'COIN', readonly SegmentToggleOption<string>[]> = {
+  STOCK: [
+    { value: 'day', label: '일', testIdSuffix: 'day' },
+    { value: 'week', label: '주', testIdSuffix: 'week' },
+    { value: 'month', label: '월', testIdSuffix: 'month' },
+    { value: 'year', label: '년', testIdSuffix: 'year' },
+  ],
+  COIN: [
+    { value: 'minute1', label: '1분', testIdSuffix: 'minute1' },
+    { value: 'day', label: '일', testIdSuffix: 'day' },
+    { value: 'week', label: '주', testIdSuffix: 'week' },
+    { value: 'month', label: '월', testIdSuffix: 'month' },
+    { value: 'year', label: '년', testIdSuffix: 'year' },
+  ],
 };
+const DEFAULT_CANDLE_INTERVAL = 'day';
 
 // 자산 상세 조회 상태. GET /v1/assets/{id}(자산 자체)와 GET /v1/portfolio(비중 등 파생 필드의
 // 출처)를 병렬 조회한다 — Promise.all이 아니라 Promise.allSettled를 쓰는 이유는 후자가 실패해도
@@ -191,6 +215,135 @@ export default function AssetDetailPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteSubmitError, setDeleteSubmitError] = useState<string | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
+  // 캔들 차트 상태(F007, Task 028 프론트 7번째 하위 태스크). REST 정적 조회만 다룬다 — SSE
+  // 실시간 갱신은 다음 하위 태스크(8번) 범위다. 'day'는 COIN/STOCK 모두 유효한 공통 interval이라
+  // 자산유형을 몰라도(로딩 중에도) 안전한 기본값으로 쓸 수 있다.
+  const [candleInterval, setCandleInterval] = useState(DEFAULT_CANDLE_INTERVAL);
+  const [candleState, setCandleState] = useState<
+    | { status: 'loading' }
+    | { status: 'error'; code: string }
+    | { status: 'ready'; bars: CandleBarResponse[]; hasMoreHistory: boolean }
+  >({ status: 'loading' });
+  const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+
+  // 자산이 바뀌면(다른 자산 상세로 이동) 이전 자산 기준으로 고른 interval이 새 자산에서도
+  // 유효하다는 보장이 없다(예: STOCK 상세에서 COIN 상세로) — 기본값으로 되돌린다.
+  useEffect(() => {
+    if (!asset) return;
+    setCandleInterval(DEFAULT_CANDLE_INTERVAL);
+  }, [asset]);
+
+  // CASH는 캔들 조회 대상이 아니다(400 PRICE_NOT_APPLICABLE, ROADMAP Task 028) — 화면도 이미
+  // 차트 카드 자체를 렌더하지 않으므로 호출하지 않는다. interval 전환 시에도 이 effect가 재실행돼
+  // 새로 조회한다.
+  useEffect(() => {
+    if (!asset || asset.assetType === 'CASH') return;
+    let cancelled = false;
+    setCandleState({ status: 'loading' });
+    setLoadMoreError(null);
+    fetchCandles(asset.id, candleInterval)
+      .then((res) => {
+        if (cancelled) return;
+        // 백엔드는 최신순(내림차순)으로 내려준다 — 차트는 과거→현재 오름차순을 기대하므로 뒤집는다.
+        setCandleState({
+          status: 'ready',
+          bars: [...res.bars].reverse(),
+          hasMoreHistory: res.hasMoreHistory,
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.code === 'UNAUTHORIZED') {
+          auth.logout();
+          navigate('/login', { replace: true, state: { from: location } });
+          return;
+        }
+        setCandleState({
+          status: 'error',
+          code: err instanceof ApiError ? err.code : 'NETWORK_ERROR',
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asset?.id, asset?.assetType, candleInterval]);
+
+  // SSE 실시간 갱신(F007, Task 028 프론트 8번째 하위 태스크). COIN 자산에서만 연결한다 —
+  // STOCK/CASH는 이 스트림을 지원하지 않아 구독하면 400을 준다. 새로 들어온 bar 1건을
+  // 오름차순 배열의 마지막 원소와 bucketStart로 비교해, 같으면 교체(같은 봉의 갱신)하고
+  // 늦으면 추가(새 봉 시작)한다 — REST 초기 로드와 SSE 델타 사이의 병합 계약. 이르면(시간
+  // 역행) lightweight-charts의 series.setData()가 오름차순을 요구해 throw하므로 조용히 버린다
+  // (실제 재현된 적은 없는 이론적 방어 — code-reviewer Task 028 2차 검증 m9).
+  const handleStreamedBar = useCallback((bar: CandleBarResponse) => {
+    setCandleState((prev) => {
+      if (prev.status !== 'ready') return prev;
+      const last = prev.bars.at(-1);
+      if (last && new Date(bar.bucketStart).getTime() < new Date(last.bucketStart).getTime()) {
+        console.warn('SSE candle bar가 시간 역행해 무시함', bar.bucketStart, last.bucketStart);
+        return prev;
+      }
+      const bars =
+        last && last.bucketStart === bar.bucketStart
+          ? [...prev.bars.slice(0, -1), bar]
+          : [...prev.bars, bar];
+      return { ...prev, bars };
+    });
+  }, []);
+  useCandleStream(
+    asset?.id ?? '',
+    candleInterval,
+    asset?.assetType === 'COIN',
+    handleStreamedBar,
+  );
+
+  // 시뮬레이션 결과가 있을 때만 예상 평단선의 색(방향: 상승/하락/변화없음)을 계산한다.
+  // 색은 손익의 좋고나쁨이 아니라 가격의 방향(상승=빨강/하락=파랑, 한국 증권 앱 관례)을 따른다.
+  // diffText는 차트 아래 변화량 줄(§6-4 "두 선 사이에 변화량을 둔다")이 쓴다 — 두 평단선은
+  // 캔버스 위에서 색으로만 갈리므로, 부호·▲▼가 붙은 이 한 줄이 색 없이 읽는 경로가 된다(§2-2).
+  // 아래 candleChartPriceLines useMemo가 이 값을 필요로 해서, Hook은 이른 조건부 return(§ 아래
+  // loading/error/not-found 분기) 이전에 호출돼야 한다(react-hooks/rules-of-hooks) — 그래서 이
+  // 계산도 함께 여기로 올라와 있다. asset은 아직 null일 수 있어 여기서만 옵셔널 가드를 둔다.
+  let diffTone: 'gain' | 'loss' | 'flat' | null = null;
+  let diffText: string | null = null;
+  if (asset && simResult) {
+    const priceOpts = { currency: asset.currency, assetType: asset.assetType };
+    const priceScale = scaleFor(priceOpts);
+    const diff = toScaledString(
+      Dec(simResult.expectedAvgPrice).minus(Dec(simResult.currentAvgPrice)),
+      priceScale,
+    );
+    const signed = formatSignedAmount(diff, priceOpts);
+    diffText = signed.text;
+    diffTone = signed.tone === 'unknown' ? 'flat' : signed.tone;
+  }
+
+  // 캔들 차트에 그릴 평단선. 현재 평단선은 항상, 시뮬레이션 결과가 있을 때만 예상 평단선을
+  // 추가로 겹쳐 그린다(기존 CSS 흉내 구현이 하던 것과 동일한 기능, 렌더링 수단만 캔들 차트로
+  // 바뀌었다). title은 사람이 읽는 라벨(축에 그대로 표시), id는 테스트·디버깅용 안정 식별자다.
+  // 뱃지 라벨은 `현재`/`예상` 두 단어로 고정한다(§6-4). 값은 같은 선이 가격축에 찍는 라벨이
+  // 이미 말하므로, 선 위에까지 금액을 적으면 같은 숫자가 나란히 두 번 나오고 코인(소수 8자리)
+  // 에서는 그 문자열이 플롯 폭을 가로지른다.
+  // useMemo로 안정화한다 — 매 렌더 새 배열을 넘기면 CandlestickChart의 평단선 effect가 매 렌더
+  // 지웠다 다시 긋기를 반복해, interval 전환으로 이 컴포넌트가 unmount될 때 disposed 에러가 날
+  // 확률을 불필요하게 높인다(위 CandlestickChart.tsx의 disposedRef 수정과는 별개의 원인 축소).
+  const candleChartPriceLines = useMemo<PriceLineSpec[]>(() => {
+    if (!asset || asset.assetType === 'CASH') return [];
+    const lines: PriceLineSpec[] = [
+      { id: 'current', price: asset.avgPrice, color: CHART_LINE_COLOR.current, title: '현재' },
+    ];
+    if (simResult && diffTone) {
+      lines.push({
+        id: 'expected',
+        price: simResult.expectedAvgPrice,
+        color: CHART_LINE_COLOR[diffTone],
+        title: '예상',
+      });
+    }
+    return lines;
+  }, [asset, simResult, diffTone]);
 
   if (state.status === 'loading') {
     return (
@@ -352,6 +505,38 @@ export default function AssetDetailPage() {
     }
   };
 
+  // 과거 캔들 더 불러오기(페이징) — 현재 화면에 있는 가장 오래된 bar의 bucketStart를 그대로
+  // before 커서로 넘긴다(포맷을 다시 만들 필요 없음, ROADMAP Task 028). 실패해도 기존 화면은
+  // 무너지지 않고, 버튼 위 안내만 보여준 뒤 다시 누를 수 있게 둔다.
+  const handleLoadMoreHistory = async () => {
+    if (candleState.status !== 'ready' || !candleState.hasMoreHistory || candleState.bars.length === 0) {
+      return;
+    }
+    const oldest = candleState.bars[0];
+    setLoadingMoreHistory(true);
+    setLoadMoreError(null);
+    try {
+      const res = await fetchCandles(asset.id, candleInterval, oldest.bucketStart);
+      const olderAscending = [...res.bars].reverse();
+      // 서버가 before 커서를 배타적으로 처리한다는 보장이 없어 프론트에서도 한 번 더 중복을 거른다.
+      const existingStarts = new Set(candleState.bars.map((bar) => bar.bucketStart));
+      const merged = [
+        ...olderAscending.filter((bar) => !existingStarts.has(bar.bucketStart)),
+        ...candleState.bars,
+      ];
+      setCandleState({ status: 'ready', bars: merged, hasMoreHistory: res.hasMoreHistory });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'UNAUTHORIZED') {
+        auth.logout();
+        navigate('/login', { replace: true, state: { from: location } });
+        return;
+      }
+      setLoadMoreError(messageForErrorCode(err instanceof ApiError ? err.code : 'NETWORK_ERROR'));
+    } finally {
+      setLoadingMoreHistory(false);
+    }
+  };
+
   const priceOpts = { currency: asset.currency, assetType: asset.assetType };
   // portfolioItem은 옵셔널이다(Minor 4) — 없으면 파생 필드는 전부 null로 두어 기존
   // NULL_DISPLAY("—") 규칙이 자연히 타게 한다.
@@ -361,33 +546,10 @@ export default function AssetDetailPage() {
   const weight = portfolioItem?.weight ?? null;
   const pnl = formatSignedAmount(unrealizedPnl, { currency: 'KRW' });
 
-  // 시뮬레이션 결과가 있을 때만 차트 두 번째 선(예상 평단가)의 방향(상승/하락/변화없음)을 계산한다.
-  // 색은 손익의 좋고나쁨이 아니라 가격의 방향(상승=빨강/하락=파랑, 한국 증권 앱 관례)을 따른다.
   // 현금은 평단가 자체가 없다 — 서버가 넣어주는 avgPrice=1은 저장상의 약속이지 사용자가 읽을
   // 값이 아니다(ROADMAP 결정 #1). 평단가에 딸린 표시(평단가 행·취득원가 행·평단가 차트)는
   // 현금 화면에서 전부 내린다 (docs/DESIGN.md §6-4).
   const isCash = asset.assetType === 'CASH';
-
-  let diffTone: 'gain' | 'loss' | 'flat' | null = null;
-  let diffText = '';
-  if (simResult) {
-    const priceScale = scaleFor(priceOpts);
-    const diff = toScaledString(
-      Dec(simResult.expectedAvgPrice).minus(Dec(simResult.currentAvgPrice)),
-      priceScale,
-    );
-    const diffFormatted = formatSignedAmount(diff, priceOpts);
-    diffTone = diffFormatted.tone === 'unknown' ? 'flat' : diffFormatted.tone;
-    diffText = diffFormatted.text;
-  }
-
-  // 평단선의 세로 위치. 스케일 계산은 하지 않는다(정적 더미) — 다만 **평단이 오르는데 선을
-  // 아래에 긋는 것**은 가격축에서 방향이라는 유일한 시각 정보가 거짓말을 하는 것이라,
-  // 방향에 따라 미리 정해둔 두 좌표 중 하나를 고른다. 현재 평단선은 어느 경우에도 움직이지
-  // 않는다 — 기준선이 계산할 때마다 자리를 옮기면 기준선이 아니다 (docs/DESIGN.md §6-4).
-  const expectedAbove = diffTone === 'gain';
-  const expectedTopClass = expectedAbove ? 'top-[20%]' : 'top-[80%]';
-  const diffTopClass = expectedAbove ? 'top-[20%]' : 'top-[50%]';
 
   return (
     <div>
@@ -500,64 +662,115 @@ export default function AssetDetailPage() {
           ) : null}
         </Card>
 
-        {/* F007: 시세 차트 자체는 Phase 4 범위다. 지금 이 카드가 그리는 것은 평단선(§5 시그니처)
-            하나뿐이고, 시뮬레이션 결과가 있으면 예상 평단선을 위나 아래에 겹쳐 그린다.
+        {/* F007(Task 028 프론트 7번째 하위 태스크): REST로 받은 캔들을 CandlestickChart로 그리고,
+            평단선(현재/예상)을 겹친다. SSE 실시간 갱신은 다음 하위 태스크(8번) 범위다.
             현금은 평단가가 없으므로 카드째 렌더하지 않는다. */}
         {isCash ? null : (
-          <Card title="평단가 차트" testId="asset-detail-chart">
-            <div className="plot-grid relative h-40 rounded-control border border-rule bg-grid px-4">
-              {/* 현재 평단선은 언제나 플롯 한가운데 — 예상선이 위로 붙든 아래로 붙든 기준선은
-                  자리를 지킨다. `-translate-y-1/2`는 absolute top이 줄의 **윗변**을 잡기 때문에
-                  건다. 보정하지 않으면 선이 뱃지 높이의 절반만큼 내려앉아, 두 선 사이에 놓는
-                  변화량 라벨과 겹친다(375px 코인 화면에서 실측). */}
-              <div className="absolute inset-x-4 top-[50%] flex -translate-y-1/2 items-center">
-                <span className="h-0 flex-1 border-t-2 border-dashed border-ink" />
-                <span
-                  className="ml-2 shrink-0 rounded-full bg-ink px-2.5 py-0.5 font-mono text-[11px] font-medium text-grid"
-                  data-testid="asset-detail-chart-current"
-                >
-                  현재 {formatAmount(asset.avgPrice, priceOpts)}
-                </span>
-              </div>
-
-              {simResult && diffTone ? (
-                <>
-                  <div
-                    className={`absolute inset-x-4 flex -translate-y-1/2 items-center ${expectedTopClass}`}
-                  >
-                    <span
-                      className={`h-0 flex-1 border-t-2 border-dashed ${TONE_LINE_CLASS[diffTone].border}`}
-                    />
-                    <span
-                      className={`ml-2 shrink-0 rounded-full px-2.5 py-0.5 font-mono text-[11px] font-medium text-surface ${TONE_LINE_CLASS[diffTone].bg}`}
-                      data-testid="asset-detail-chart-expected"
-                    >
-                      예상 {formatAmount(simResult.expectedAvgPrice, priceOpts)}
-                    </span>
-                  </div>
-                  {/* 변화량은 두 선 사이 빈 칸에 놓는다 — 무엇과 무엇의 차이인지를 자리가 말한다.
-                      색만으로 방향을 말하지 않으므로 부호(+/−)와 ▲▼를 함께 쓴다(§2-2). */}
-                  <div
-                    className={`absolute left-4 flex h-[30%] items-center gap-1.5 ${diffTopClass} ${TONE_CLASS[diffTone]}`}
-                    data-testid="asset-detail-chart-diff"
-                  >
-                    {TONE_MARK[diffTone] ? (
-                      <span aria-hidden="true" className="text-[10px] leading-none">
-                        {TONE_MARK[diffTone]}
-                      </span>
-                    ) : null}
-                    <span className="font-mono text-[11px] leading-none">{diffText}</span>
-                  </div>
-                </>
-              ) : null}
+          <Card title="가격 흐름 차트" testId="asset-detail-chart">
+            {/* 토글은 두 글자짜리 칸 4~5개짜리 한 필드다 — 카드 폭(768px)을 다 쓰면 칸 하나가
+                150px로 벌어져 "일" 한 글자가 빈 밭 한가운데 뜬다. 카드 안 입력을 max-w-md로
+                묶는 규칙(§6-4)과 같은 이유로, 이 필드는 내용에 맞춰 320px로 더 좁힌다. */}
+            <div className="flex max-w-xs flex-col gap-1.5">
+              <span
+                id="asset-detail-chart-interval-label"
+                className="text-[13px] font-medium tracking-tight text-ink-soft"
+              >
+                캔들 단위
+              </span>
+              <SegmentToggle
+                value={candleInterval}
+                options={CANDLE_INTERVAL_OPTIONS[asset.assetType as 'STOCK' | 'COIN']}
+                onChange={setCandleInterval}
+                ariaLabelledBy="asset-detail-chart-interval-label"
+                testId="asset-detail-chart-interval"
+              />
             </div>
-            {/* "시세를 연동하면"이라고 쓸 수 없게 됐다 — 바로 위 카드가 실제 시세로 계산한 평가금액을
-                이미 보여주고 있어, 같은 화면에서 두 문장이 서로를 부정한다. 아직 없는 것은 시세 연동이
-                아니라 **가격의 흐름을 그리는 차트**이므로(docs/DESIGN.md §9 — Task 025 범위),
-                없는 것의 이름을 정확히 부른다. */}
-            <p className="mt-3 text-xs leading-5 text-ink-soft">
-              가격 흐름 차트는 준비 중입니다. 지금은 평단가 기준선만 그립니다.
-            </p>
+
+            <div className="mt-3">
+              {candleState.status === 'loading' ? (
+                /* 캐시가 비어 있으면 첫 조회가 눈에 띄게 걸린다. 자리표시자는 차트가 놓일 자리를
+                   같은 높이(24px 모듈 8/12칸)·같은 격자로 미리 깔아 두어 캔들이 도착할 때
+                   카드가 튀지 않게 한다. 진행 표시는 검색 콤보박스와 같은 회전 고리 + 한 문장이다
+                   — 펄스 애니메이션만으로 알리면 prefers-reduced-motion에서 신호가 통째로
+                   사라진다(index.css가 모든 애니메이션을 0.01ms로 끈다). */
+                <div
+                  className="plot-grid flex h-48 items-center justify-center rounded-control border border-rule bg-surface sm:h-72"
+                  data-testid="asset-detail-chart-loading"
+                >
+                  <p className="flex items-center gap-2 text-sm text-ink-soft">
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 16 16"
+                      className="size-3.5 shrink-0 animate-spin"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <circle cx="8" cy="8" r="6" strokeOpacity="0.25" />
+                      <path d="M8 2a6 6 0 0 1 4.24 10.24" strokeLinecap="round" />
+                    </svg>
+                    시세를 불러오는 중…
+                  </p>
+                </div>
+              ) : candleState.status === 'error' ? (
+                <Alert tone="error" testId="asset-detail-chart-error">
+                  {messageForErrorCode(candleState.code)}
+                </Alert>
+              ) : (
+                <>
+                  <CandlestickChart
+                    bars={candleState.bars}
+                    priceLines={candleChartPriceLines}
+                    testId="asset-detail-chart-canvas"
+                  />
+                  {/* 두 평단선 사이의 변화량. 캔버스 위에서 현재선과 예상선을 가르는 것은 색
+                      하나뿐이라(잉크 ↔ 빨강/파랑), 부호와 ▲▼가 붙은 이 한 줄이 색을 못 읽는
+                      사용자의 읽는 경로가 된다(§2-2). 값은 캔들 밖 흰 표면에 두어 플롯 안에
+                      글자를 얹지 않는다 — 플롯 위 라벨은 뱃지(현재/예상) 둘로 끝낸다(§6-4). */}
+                  {simResult && diffTone && diffText ? (
+                    <p
+                      className="mt-2 text-xs leading-5 text-ink-soft"
+                      data-testid="asset-detail-chart-diff"
+                    >
+                      예상 평단가 변화{' '}
+                      <span className={`font-mono font-medium ${TONE_CLASS[diffTone]}`}>
+                        {TONE_MARK[diffTone] ? (
+                          <span aria-hidden="true" className="mr-0.5 text-[10px]">
+                            {TONE_MARK[diffTone]}
+                          </span>
+                        ) : null}
+                        {diffText}
+                      </span>
+                    </p>
+                  ) : null}
+                  {/* 실패 안내는 버튼 위에 둔다 — 이 버튼이 곧 재시도 수단이라, 읽고 나서
+                      바로 아래 손이 닿는 자리에 눌러야 할 것이 있어야 한다(§6-3 배너의 자리). */}
+                  {loadMoreError ? (
+                    <div className="mt-3">
+                      <Alert tone="error" testId="asset-detail-chart-load-more-error">
+                        {loadMoreError}
+                      </Alert>
+                    </div>
+                  ) : null}
+                  {candleState.hasMoreHistory ? (
+                    // 차트에서 과거는 왼쪽이다 — 버튼 라벨이 "무엇이 더 나오는지"를 말한다.
+                    // 진행 중에는 라벨을 바꾼다(§6-1: 로그인 → 로그인 중). 회색으로 죽은
+                    // 버튼만 남기면 눌렸는지 안 눌렸는지를 화면이 말하지 않는다.
+                    <div className="mt-3 flex justify-center">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleLoadMoreHistory}
+                        disabled={loadingMoreHistory}
+                        testId="asset-detail-chart-load-more"
+                      >
+                        {loadingMoreHistory ? '불러오는 중' : '과거 구간 더 보기'}
+                      </Button>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
           </Card>
         )}
 

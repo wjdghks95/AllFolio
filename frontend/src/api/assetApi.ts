@@ -53,7 +53,9 @@ async function doFetch<T>(path: string, options: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function authorizedRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+// candleApi.ts(Task 028 프론트 7번째 하위 태스크)가 재사용한다 — 401 시 refresh 후 1회 재시도하는
+// 로직을 캔들 엔드포인트에서 다시 구현하지 않기 위해 export한다.
+export async function authorizedRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   try {
     return await doFetch<T>(path, options);
   } catch (e) {
