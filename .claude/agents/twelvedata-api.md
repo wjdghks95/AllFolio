@@ -26,7 +26,8 @@ AllFolio의 STOCK(주식) 자산 중 **USD(미국 주식)** 시세를 조회하�
 조사만으로 작성됐으나, **Task 025 구현 시(2026-09-08) 실제 발급받은 API 키로 curl 실측을 마쳤다** —
 아래 「`/quote` 엔드포인트」·「에러 코드」 절의 실측 결과를 반영해 갱신했다. `/symbol_search`(Task 026,
 STOCK+USD 검색 부분)도 **2026-09-09 curl 실측을 마쳤다** — 아래 「`/symbol_search` 엔드포인트」 절
-참고. "잠정 스펙" 표기는 제거했다.
+참고. `/time_series`(Task 028, 해외주식 일봉 시계열)도 **2026-09-11 curl 실측을 마쳤다** — 아래
+「`/time_series` 엔드포인트」 절 참고. "잠정 스펙" 표기는 제거했다.
 
 ## API 서비스 개요 (공식 문서 조사)
 
@@ -126,6 +127,70 @@ ROADMAP Task 026은 "응답에 가격을 넣지 않는다"(검색 다건에 시�
 이미 원칙으로 못박았다 — `symbol_search` 응답을 그대로 매핑할 때 가격 필드를 끌어오지 않는다(애초에
 `/symbol_search` 응답 자체에도 가격 필드가 없다).
 
+## `/time_series` 엔드포인트 (Task 028, 해외주식 일봉 시계열 — 캔들 차트)
+
+```
+GET https://api.twelvedata.com/time_series?symbol={ticker}&interval=1day&outputsize={n}
+```
+
+SSE 없이 REST 폴링만 쓰기로 확정된 해외주식 캔들 차트(F007)의 데이터 소스다. `/time_series`가
+일봉을 직접 주므로, **일봉 원본을 받아오는 것까지만 `TwelveDataClient.getDailySeries`의 책임**이고
+주/월/년봉 집계는 이 일봉을 모아 후속 태스크(백엔드 집계 서비스)가 계산한다 — 벤더에 주봉/월봉을
+별도로 요청하지 않는다.
+
+**실제 API 키로 curl 검증 완료(2026-09-11)**:
+
+- **`outputsize` 상한은 1~5000이다(핵심 확인 사항).** `outputsize=5000`은 정상 응답(실제로
+  정확히 5000건 반환), `outputsize=5001`은 **HTTP 400** + `{"code":400,"message":"Invalid
+  outputsize provided: 5001. Accepts values in the range from 1 to 5000 inclusive.",
+  "status":"error"}`로 확인했다. 에러 메시지가 플랜을 언급하지 않고 범위만 언급하는 것으로 보아
+  **무료 플랜 한정이 아니라 API 자체의 하드 제한**으로 판단된다(상위 플랜에서 더 큰 값이 허용되는지는
+  확인할 수단이 없었다 — 무료 플랜으로 테스트했으므로 "무료 플랜에서도 5000까지는 확실히 된다"까지만
+  확정할 수 있다). 일봉 기준 5000건이면 약 19년치(연 250 거래일 기준)를 한 번에 커버해, AllFolio가
+  UI에서 실제로 노출할 조회 기간(수년 이내로 예상)보다 훨씬 넉넉하다.
+- **에러 케이스는 `/quote`와 완전히 동일한 패턴**이다 — 존재하지 않는 심볼은 HTTP 404
+  (`{"code":404,"message":"**symbol** or **figi** parameter is missing or invalid...",
+  "status":"error"}`), 잘못된 apikey는 HTTP 401(동일 스키마). "200이지만 실패" 함정은 여기도 없다.
+- **응답 구조**: `{"meta":{"symbol":...,"interval":"1day","currency":"USD","exchange":...,
+  "mic_code":...},"values":[{"datetime":"2026-09-10","open":"316.67001","high":"326.73999",
+  "low":"316.51001","close":"326.57001","volume":"69925100"}, ...],"status":"ok"}`. `values[]`는
+  **최신순(내림차순)**으로 온다(실측 예시에서 첫 항목이 가장 최근 거래일). `open`/`high`/`low`/
+  `close`는 `/quote`의 `close`와 마찬가지로 따옴표 붙은 문자열 — Jackson이 `BigDecimal`로 그대로
+  변환한다. `datetime`은 시각 없이 날짜만(`"2026-09-10"`) — 일봉이라는 개념 자체가 날짜 단위라 이
+  필드 하나로 충분하다(`/quote`의 `datetime`과 달리 별도 보정 필드가 필요 없다). `TwelveDataClient`는
+  이 원본을 `DailyBar(LocalDate date, BigDecimal open, high, low, close)`로 매핑한다.
+- **credit 소비는 `outputsize` 크기와 무관하게 요청 1회당 1**이다. 응답 헤더
+  `api-credits-used`/`api-credits-left`/`api-credits-request`로 실측 확인했다 — `outputsize=5`
+  요청과 `outputsize=5000` 요청 모두 `api-credits-request: 1`이었고, 연속 호출마다
+  `api-credits-left`가 정확히 1씩 감소했다(예: 7 → 6). 즉 `/time_series`도 `/quote`·`/symbol_search`와
+  동일하게 "요청 수 = credit"이다.
+
+### 일봉 시계열과 분당 호출 한도 영향 분석
+
+ROADMAP Task 028의 캔들 차트 설계 전제는 "티커당 REST 호출 1회로 일/주/월/년 여러 interval을
+모두 커버한다"(주/월/년봉은 이 일봉을 집계해 만든다)는 것이다. 이 설계와 위 실측 결과(outputsize
+최대 5000, credit 소비는 outputsize와 무관하게 1)를 결합하면:
+
+- **자산 1건의 캔들 차트를 처음 그리는 데 필요한 API 호출은 정확히 1회**다 — `outputsize`를 몇으로
+  주든(예: 500건이든 5000건이든) credit은 동일하게 1이므로, "여러 interval을 커버하기 위해 충분히
+  넉넉한 outputsize로 한 번만 요청한다"는 전략에 추가 비용이 없다. `/quote`(시세 1건 조회)와 같은
+  비용으로 차트 전체 히스토리를 받아올 수 있다.
+- **따라서 캔들 차트 자체는 무료 플랜의 분당 8회 한도에 상대적으로 여유가 있다** — 사용자가 자산
+  상세 화면을 열 때마다 1회씩만 쓰면, 분당 8회 한도 안에서 이론상 분당 최대 8개 서로 다른 자산의
+  차트를 새로 열 수 있다(캐시 없이 매번 호출한다고 가정해도). `PriceCacheProperties.stockUsFreshTtl`
+  (1분)이 이미 `/quote` 쪽 호출 빈도를 억제하고 있으므로, 같은 원칙(짧은 freshTtl로 캐싱)을
+  캔들 데이터에도 적용하면 반복 조회 시 실제 API 호출은 더 줄어든다 — 다만 **캔들 데이터의 캐싱
+  TTL·정책 자체는 이 태스크 범위 밖**(후속 태스크)이므로 여기서 값을 확정하지 않는다.
+- **주의할 함정**: 같은 자산에 대해 일봉/주봉/월봉/년봉을 각각 별도 API 호출로 구현하면(예:
+  interval을 `1week`/`1month`로 바꿔 4번 호출) 자산 1건당 credit 소비가 4배로 늘어 분당 8회 한도를
+  훨씬 빨리 소진한다 — 이것이 애초에 "일봉만 받고 나머지는 백엔드가 집계"하기로 설계를 확정한
+  이유와 정확히 일치한다(이 문서가 재확인할 뿐, 새로 결정하는 것은 아니다). 후속 태스크(집계 서비스)
+  구현 시 이 원칙을 어기고 interval별로 별도 호출을 추가하지 않도록 주의할 것.
+- **429(rate limit) 응답 스키마는 이번에도 재현하지 않았다** — 무료 플랜 한도 소진을 의도적으로
+  피했다(위 「에러 코드」 절과 동일한 사유). 문서상 일반 4xx 계열로 온다고 가정하고 `getDailySeries`도
+  `getPrice`/`search`와 동일하게 generic 4xx/5xx 처리로 방어한다(후속 실측 필요 항목, 아래 「검증
+  절차」에 반영).
+
 ## 에러 코드 (공식 문서)
 
 | HTTP 코드 | 의미 |
@@ -189,12 +254,14 @@ grep -rn "double \|float " src/main/java --include="*.java"
 5. 429(rate limit) 실제 응답 스키마 — **미실측**(무료 플랜 한도 소진을 피하려 의도적으로 재현하지 않음, generic 4xx 처리로 방어). `/symbol_search`는 인증 없이도 200이 오는 것으로 실측 확인돼(항목 6 참고), 401 재현도 마찬가지로 못했다 — 두 항목 모두 후속 확인 필요
 6. ~~구현이 실제로 쓰는 헤더 인증 방식(`Authorization: apikey {키}`)이 200을 반환하는지~~ — **완료(2026-09-09, 코드 리뷰 후속)**: curl로 재검증, HTTP 200 확인(위 「`/quote` 엔드포인트」 절 참고). `TwelveDataClientTest`에 헤더 매칭 회귀 테스트 추가
 7. ~~`/symbol_search`의 '결과 없음'이 어떤 형태로 오는지(404 vs 200+빈 배열)~~ — **완료(2026-09-09, Task 026 서브태스크)**: `symbol=ZZZZINVALIDNOTHING`으로 재현, HTTP 200 + `{"data":[],"status":"ok"}`(위 「`/symbol_search` 엔드포인트」 절 참고)
+8. ~~`/time_series`의 `outputsize` 상한(무료 플랜 기준), OHLC 필드 존재 여부, 에러 패턴이 `/quote`와 같은지~~ — **완료(2026-09-11, Task 028 서브태스크)**: 상한 1~5000(`outputsize=5001`은 HTTP 400), `values[]`에 `open`/`high`/`low`/`close` 모두 존재(문자열), 에러 패턴은 `/quote`와 동일(404/401이 정상 4xx). credit 소비도 `outputsize` 크기와 무관하게 요청 1회당 1(응답 헤더 `api-credits-used`로 확인). 자세한 내용과 캔들 조회 rate limit 영향 분석은 위 「`/time_series` 엔드포인트」 절 참고. **429 응답 스키마는 이번에도 미실측**(항목 5와 동일 사유)
 
 ## 역할 경계
 
 | 영역 | 담당 |
 |---|---|
-| `/quote`·`/symbol_search` 스펙·파싱·에러 처리, `TwelveDataClient`/`TwelveDataProperties` 구현 | **twelvedata-api**(이 에이전트) |
+| `/quote`·`/symbol_search`·`/time_series` 스펙·파싱·에러 처리, `TwelveDataClient`/`TwelveDataProperties` 구현 | **twelvedata-api**(이 에이전트) |
+| 일봉을 모은 주/월/년봉 집계 서비스, 캔들 캐싱, `GET` 캔들 조회 컨트롤러 | senior-backend(후속 태스크, 이 에이전트 범위 밖) |
 | `infra/price`의 다른 클라이언트(Upbit/ExchangeRate/공공데이터포털), `PriceService` 라우팅(통화별 분기·환율 환산·캐시 저장), `PriceConfig`, `resilience4j` yml의 다른 인스턴스 | senior-backend |
 | `GET /v1/assets/search` 컨트롤러·요청 검증·응답 스키마·검색 전용 Throttle 설계 | senior-backend |
 | STOCK+KRW 검색(`likeItmsNm`/`likeSrtnCd`) | `stock-price-api` |

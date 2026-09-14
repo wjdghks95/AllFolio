@@ -2,6 +2,7 @@ package com.allfolio.infra.price;
 
 import com.allfolio.AbstractIntegrationTest;
 import com.allfolio.domain.AssetType;
+import com.allfolio.domain.DailyBar;
 import com.allfolio.domain.Price;
 import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
@@ -18,6 +19,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
@@ -220,6 +222,92 @@ class TwelveDataClientTest extends AbstractIntegrationTest {
                                 """)));
 
         assertThatThrownBy(() -> twelveDataClient.getPrice(TICKER))
+                .isInstanceOf(ExternalPriceApiException.class);
+    }
+
+    /**
+     * 해외주식 일봉 시계열(F007) — {@code /time_series?interval=1day} 실제 curl 검증(2026-09-11):
+     * {@code values[]}의 각 항목은 {@code datetime}(날짜만)·{@code open}/{@code high}/{@code low}/
+     * {@code close}(모두 따옴표 붙은 문자열)를 담고 있고, 오래된 순서가 아니라 최신순(내림차순)으로
+     * 온다(AAPL 5건 기준 "2026-09-10"이 첫 항목).
+     */
+    @Test
+    void getDailySeriesMapsValuesToDailyBarInApiOrder() {
+        wireMockServer.stubFor(get(urlEqualTo("/time_series?symbol=" + TICKER + "&interval=1day&outputsize=5"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "meta": {
+                                    "symbol": "AAPL",
+                                    "interval": "1day",
+                                    "currency": "USD",
+                                    "exchange_timezone": "America/New_York",
+                                    "exchange": "NASDAQ",
+                                    "mic_code": "XNGS",
+                                    "type": "Common Stock"
+                                  },
+                                  "values": [
+                                    {"datetime": "2026-09-10", "open": "316.67001", "high": "326.73999", "low": "316.51001", "close": "326.57001", "volume": "69925100"},
+                                    {"datetime": "2026-09-09", "open": "315.48999", "high": "319.14999", "low": "309.89999", "close": "315.34000", "volume": "65640000"}
+                                  ],
+                                  "status": "ok"
+                                }
+                                """)));
+
+        List<DailyBar> bars = twelveDataClient.getDailySeries(TICKER, 5);
+
+        assertThat(bars).containsExactly(
+                new DailyBar(LocalDate.of(2026, 9, 10), new BigDecimal("316.67001"), new BigDecimal("326.73999"),
+                        new BigDecimal("316.51001"), new BigDecimal("326.57001")),
+                new DailyBar(LocalDate.of(2026, 9, 9), new BigDecimal("315.48999"), new BigDecimal("319.14999"),
+                        new BigDecimal("309.89999"), new BigDecimal("315.34000")));
+    }
+
+    /**
+     * 실제로 존재하지 않는 심볼(ZZZZINVALID)로 {@code /time_series}를 호출해 확인한 진짜 응답
+     * (2026-09-11): {@code /quote}와 동일하게 HTTP 404 + {@code {"code":404,...,"status":"error"}}.
+     */
+    @Test
+    void getDailySeriesThrowsTickerNotFoundExceptionOnUnknownSymbol() {
+        wireMockServer.stubFor(get(urlEqualTo("/time_series?symbol=" + TICKER + "&interval=1day&outputsize=5"))
+                .willReturn(aResponse()
+                        .withStatus(404)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "code": 404,
+                                  "message": "**symbol** or **figi** parameter is missing or invalid.",
+                                  "status": "error"
+                                }
+                                """)));
+
+        assertThatThrownBy(() -> twelveDataClient.getDailySeries(TICKER, 5))
+                .isInstanceOf(TickerNotFoundException.class);
+    }
+
+    /**
+     * 실제로 outputsize=5001(상한 5000 초과)로 호출해 확인한 진짜 응답(2026-09-11): HTTP 400 +
+     * {@code {"code":400,"message":"Invalid outputsize provided: 5001. Accepts values in the
+     * range from 1 to 5000 inclusive.","status":"error"}}. 클라이언트는 별도 사전 검증 없이 이
+     * 4xx를 RestClient 기본 동작대로 예외化해 ExternalPriceApiException으로 변환한다.
+     */
+    @Test
+    void getDailySeriesThrowsExternalPriceApiExceptionWhenOutputsizeExceedsLimit() {
+        wireMockServer.stubFor(get(urlEqualTo("/time_series?symbol=" + TICKER + "&interval=1day&outputsize=5001"))
+                .willReturn(aResponse()
+                        .withStatus(400)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "code": 400,
+                                  "message": "Invalid outputsize provided: 5001. Accepts values in the range from 1 to 5000 inclusive.",
+                                  "status": "error"
+                                }
+                                """)));
+
+        assertThatThrownBy(() -> twelveDataClient.getDailySeries(TICKER, 5001))
                 .isInstanceOf(ExternalPriceApiException.class);
     }
 

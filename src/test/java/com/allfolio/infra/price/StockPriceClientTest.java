@@ -2,6 +2,7 @@ package com.allfolio.infra.price;
 
 import com.allfolio.AbstractIntegrationTest;
 import com.allfolio.domain.AssetType;
+import com.allfolio.domain.DailyBar;
 import com.allfolio.domain.Price;
 import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
@@ -261,6 +262,105 @@ class StockPriceClientTest extends AbstractIntegrationTest {
                                 """)));
 
         assertThatThrownBy(() -> stockPriceClient.search("삼성전자"))
+                .isInstanceOf(ExternalPriceApiException.class);
+    }
+
+    /**
+     * beginBasDt/endBasDt 범위 필터·OHLC 필드(mkp/hipr/lopr/clpr) 매핑을 실제 서비스키 curl
+     * 검증(2026-09-11)에 맞춰 재현한다. 응답은 basDt 내림차순(최신 우선)으로 오지만,
+     * {@link StockPriceClient#getDailySeries}는 캔들 차트 소비를 배려해 오름차순으로 뒤집는다.
+     */
+    @Test
+    void getDailySeriesMapsOhlcAndSortsAscendingByDate() {
+        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+                + "&numOfRows=10&pageNo=1&resultType=json&likeSrtnCd=" + TICKER
+                + "&beginBasDt=20260901&endBasDt=20260910";
+        wireMockServer.stubFor(get(urlEqualTo(requestPath))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "response": {
+                                    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+                                    "body": {
+                                      "numOfRows": 10, "pageNo": 1, "totalCount": 2,
+                                      "items": {"item": [
+                                        {"basDt": "20260902", "srtnCd": "005930", "itmsNm": "삼성전자",
+                                         "mkp": "252000", "hipr": "255500", "lopr": "249500", "clpr": "250500"},
+                                        {"basDt": "20260901", "srtnCd": "005930", "itmsNm": "삼성전자",
+                                         "mkp": "256500", "hipr": "262500", "lopr": "254000", "clpr": "261000"}
+                                      ]}
+                                    }
+                                  }
+                                }
+                                """)));
+
+        List<DailyBar> bars = stockPriceClient.getDailySeries(
+                TICKER, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 10));
+
+        assertThat(bars).containsExactly(
+                new DailyBar(LocalDate.of(2026, 9, 1), new BigDecimal("256500"), new BigDecimal("262500"),
+                        new BigDecimal("254000"), new BigDecimal("261000")),
+                new DailyBar(LocalDate.of(2026, 9, 2), new BigDecimal("252000"), new BigDecimal("255500"),
+                        new BigDecimal("249500"), new BigDecimal("250500")));
+    }
+
+    /**
+     * "해당 티커 없음"과 "그 범위에 거래일 데이터 없음"을 API 응답만으로 구분할 수 없다(둘 다 200 +
+     * 빈 배열, 2026-09-11 curl 실측). getPrice와 달리 TickerNotFoundException을 던지지 않고
+     * search와 동일하게 빈 리스트를 반환한다.
+     */
+    @Test
+    void getDailySeriesReturnsEmptyListWhenNoItemsMatch() {
+        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+                + "&numOfRows=10&pageNo=1&resultType=json&likeSrtnCd=" + TICKER
+                + "&beginBasDt=20261001&endBasDt=20261010";
+        wireMockServer.stubFor(get(urlEqualTo(requestPath))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "response": {
+                                    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+                                    "body": {
+                                      "numOfRows": 10, "pageNo": 1, "totalCount": 0,
+                                      "items": {"item": []}
+                                    }
+                                  }
+                                }
+                                """)));
+
+        List<DailyBar> bars = stockPriceClient.getDailySeries(
+                TICKER, LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 10));
+
+        assertThat(bars).isEmpty();
+    }
+
+    @Test
+    void getDailySeriesThrowsExternalPriceApiExceptionOnAuthError() {
+        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+                + "&numOfRows=10&pageNo=1&resultType=json&likeSrtnCd=" + TICKER
+                + "&beginBasDt=20260901&endBasDt=20260910";
+        wireMockServer.stubFor(get(urlEqualTo(requestPath))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "OpenAPI_ServiceResponse": {
+                                    "cmmMsgHeader": {
+                                      "errMsg": "SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+                                      "returnAuthMsg": "등록되지 않은 서비스키",
+                                      "returnReasonCode": "30"
+                                    }
+                                  }
+                                }
+                                """)));
+
+        assertThatThrownBy(() -> stockPriceClient.getDailySeries(
+                TICKER, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 10)))
                 .isInstanceOf(ExternalPriceApiException.class);
     }
 }
