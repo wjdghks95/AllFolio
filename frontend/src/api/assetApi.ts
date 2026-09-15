@@ -4,6 +4,7 @@
 // 토큰이 없는 상태에서 호출되므로 이 헤더가 없다 — 그것이 이 파일과의 유일한 차이).
 import { ApiError, refresh as refreshTokens } from './authApi';
 import { getToken, getRefreshToken, setToken, setRefreshToken } from '../auth/tokenStorage';
+import { apiUrl } from '../lib/apiBase';
 import type {
   Asset,
   AssetType,
@@ -38,7 +39,7 @@ async function doFetch<T>(path: string, options: RequestInit): Promise<T> {
 
   let res: Response;
   try {
-    res = await fetch(path, { ...options, headers });
+    res = await fetch(apiUrl(path), { ...options, headers });
   } catch {
     throw new ApiError('NETWORK_ERROR');
   }

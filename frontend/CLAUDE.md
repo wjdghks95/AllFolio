@@ -13,6 +13,17 @@ npm run typecheck   # tsc -b --noEmit
 npm run lint        # oxlint
 ```
 
+## Capacitor 패키징 빌드
+
+Capacitor로 패키징된 앱은 `capacitor://localhost`(iOS)/`https://localhost`(Android, Capacitor 기본 androidScheme) 같은 커스텀 스킴 origin에서 돌기 때문에, 개발 중 쓰던 Vite 프록시가 없어 상대경로(`/v1/...`) fetch가 백엔드에 도달하지 못한다. `src/lib/apiBase.ts`의 `apiUrl()`이 이를 해결하며, 빌드 시 `VITE_API_BASE_URL`에 백엔드 절대 URL을 지정해야 실제로 동작한다(현재는 로컬/개발 환경 기준 — 배포용 실제 URL 확정은 ROADMAP Task 032(배포 파이프라인) 소관).
+
+```bash
+# frontend/.env(git 미추적, .env.example 참고)에 VITE_API_BASE_URL 설정 후
+npm run build && npx cap sync
+```
+
+**Android cleartext 제약**: Android는 API 28+부터 암호화되지 않은 http 통신을 기본 차단한다. 에뮬레이터에서 로컬 백엔드를 `http://10.0.2.2:8080`처럼 `http://`로 가리키면 Capacitor의 `server.cleartext` 기본값(`false`)에 막혀 요청이 실패한다 — 필요하면 `capacitor.config.ts`에 `server: { cleartext: true }`를 추가해야 한다(현재 미설정, 로컬 개발자가 필요 시 판단).
+
 ## 디렉터리 구조
 
 ```

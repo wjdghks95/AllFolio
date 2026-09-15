@@ -1,6 +1,7 @@
 // 인증 API 클라이언트. 에러는 code만 담아 던지고 문구는 만들지 않는다 —
 // 문구 조회(messageForErrorCode)는 이 API를 호출하는 화면 컴포넌트의 책임이다.
 import type { SignupRequest, LoginRequest, TokenResponse, ErrorResponse } from './types'
+import { apiUrl } from '../lib/apiBase'
 
 export class ApiError extends Error {
   code: string
@@ -13,7 +14,7 @@ export class ApiError extends Error {
 async function postAuth<TReq, TRes>(path: string, body: TReq): Promise<TRes> {
   let res: Response
   try {
-    res = await fetch(path, {
+    res = await fetch(apiUrl(path), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

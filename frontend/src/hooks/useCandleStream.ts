@@ -23,14 +23,17 @@
 // 태스크 범위 밖이다.
 //
 // [Capacitor 관련] Capacitor의 CapacitorHttp가 기본 EventSource를 가로채는 공개 버그가 있다
-// (ionic-team/capacitor#6582) — Task 030(하이브리드 앱 패키징)에서 재검토한다. 이번 태스크는
-// 웹 SPA 기준 표준 EventSource만 다룬다.
+// (ionic-team/capacitor#6582) — capacitor.config.ts에서 CapacitorHttp.enabled를 false로 꺼
+// 표준 EventSource가 그대로 쓰이도록 회피했다(Task 030).
 import { useEffect, useRef } from 'react';
 import { getToken } from '../auth/tokenStorage';
+import { apiUrl } from '../lib/apiBase';
 import type { CandleBarResponse } from '../api/types';
 
 function streamUrl(assetId: string, interval: string, token: string): string {
-  return `/v1/assets/${assetId}/candles/stream?interval=${interval}&token=${encodeURIComponent(token)}`;
+  return apiUrl(
+    `/v1/assets/${assetId}/candles/stream?interval=${interval}&token=${encodeURIComponent(token)}`,
+  );
 }
 
 export function useCandleStream(
