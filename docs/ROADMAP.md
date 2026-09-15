@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-09-14
+**최종 수정:** 2026-09-15
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~5와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -718,10 +718,15 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
   - `device_tokens` 테이블, `revoked_at IS NULL` 부분 인덱스
   - ⚠️ **착수 순서**: 번호는 029지만 실제 작업은 Task 030(Capacitor) 이후로 미룬다(사용자 확정, 2026-09-15) — 푸시 알림은 하이브리드 앱(Capacitor WebView)에서 쓸 용도라 앱 패키징이 먼저 있어야 FCM/APNs 등록·테스트가 의미가 있다
 
-- **Task 030: Capacitor 하이브리드 앱 패키징**
-  - Vite `dist/`를 WebView에 탑재
-  - 앱은 `capacitor://` 출처에서 도는 별도 origin이라 개발 중 프록시로 우회하던 CORS 설정이 여기서 실제로 필요해진다.
-  - 웹폰트(Instrument Sans · Gothic A1 · Reddit Mono) self-host 전환 검토 — `frontend/index.html`이 Google Fonts CDN에서 로드해, 오프라인/제한된 네트워크 환경에서 로드 실패 시 `--font-sans` 폴백으로 떨어질 수 있음
+- **Task 030: Capacitor 하이브리드 앱 패키징** ✅ — 완료 (2026-09-15)
+  - ✅ `frontend/`에 `@capacitor/core`·`ios`·`android`(dependencies)·`cli`(devDependencies) 도입, `capacitor.config.ts` 신규 작성(`appId: com.allfolio.app`, `appName: AllFolio`, `webDir: dist`). `npx cap add ios/android`로 `frontend/ios/`·`frontend/android/` 네이티브 프로젝트 생성, `npm run build && npx cap sync`로 Vite `dist/` 산출물을 WebView에 반영
+  - ✅ `plugins.CapacitorHttp.enabled: false` 설정 — Capacitor의 `CapacitorHttp`가 표준 `EventSource`를 가로채는 공개 버그(ionic-team/capacitor#6582, Task 028이 남긴 갭)를 회피. 이 앱은 표준 `fetch`/`EventSource`만 쓰므로 기능 손실 없음
+  - ✅ API 베이스 URL 절대화(코드 조사로 발견한 선행조건, ROADMAP 원문엔 없던 항목) — 신규 `frontend/src/lib/apiBase.ts`의 `apiUrl(path)` 헬퍼가 `VITE_API_BASE_URL` 환경변수(빌드타임)로 절대 URL을 만든다. 값이 없으면(웹 dev 모드) 빈 문자열을 더해 기존 상대경로+Vite 프록시 동작을 그대로 유지 — `capacitor://`/`https://localhost` 같은 커스텀 origin에서는 상대경로 fetch가 백엔드에 도달하지 못하는 문제를 해결. `authApi.ts`의 `postAuth`, `assetApi.ts`의 `doFetch`, `useCandleStream.ts`의 `streamUrl` 3개 호출부에 최소 삽입(기존 구조 무변경). `frontend/.env.example` 신규 + `frontend/CLAUDE.md`에 패키징 빌드 절차·Android API 28+ cleartext(암호화 안 된 http 차단) 제약 문서화
+  - ✅ 백엔드 CORS 실제 활성화 — `SecurityConfig.java`에 `CorsConfigurationSource` Bean 신규 추가, 기존 `.cors(cors -> cors.disable())` 한 줄만 `.cors(cors -> cors.configurationSource(...))`로 교체(JwtFilter 위치·ASYNC permitAll 등 나머지 필터 체인 구조 무변경). 허용 origin은 `capacitor://localhost`(iOS)·`https://localhost`(Android, Capacitor 기본 `androidScheme=https`) 2개만 명시, 와일드카드 없음. `allowedHeaders`에 `Last-Event-ID`도 포함(SSE 재연결 시 브라우저가 자동으로 붙이는 헤더 — 없으면 캔들 스트리밍 재연결이 프리플라이트에서 막힘)
+  - ✅ 웹폰트(Instrument Sans·Gothic A1·Reddit Mono) self-host 전환은 이번엔 보류 — 기존 폴백 스택(`--font-sans` 등)으로 CDN 실패 시에도 기능은 유지되고, 제대로 하려면 실제 사용 글리프 범위를 감사한 서브셋 작업(+ui-ux-designer 검수)이 별도로 필요해 이번 프론트 범위와 결이 다르다고 판단(코드 변경 없음, 후속 과제로 남김)
+  - ✅ 앱 아이콘·스플래시 화면을 Capacitor 기본 템플릿에서 AllFolio 브랜드로 교체(ui-ux-designer, ROADMAP 원문 범위 밖이었으나 사용자 추가 요청으로 이번 Task에서 함께 처리) — 기존 `favicon.svg`의 마크(잉크 타일+막대 3개+평단선 점선)를 그대로 재사용해 iOS/Android 각 해상도 30장 생성, Android 적응형 아이콘 배경색도 흰색→잉크색(`#0E1C31`)으로 변경. `docs/DESIGN.md` 1.10.0→1.11.0(§5-1 신설, 폐기안·후속 과제 기록)
+  - ✅ code-reviewer 독립 검증 2회(실제 서버 기동+curl 프리플라이트 실측) — 1차 Blocker 0건·Major 3건 발견: (a) Capacitor 기본 `androidScheme`이 실제로는 `https`인데 `http://localhost`를 허용해 Android 앱의 모든 API 호출이 CORS로 막히던 결함(리포에 내려받은 Capacitor 소스로 근거 확인 후 `https://localhost`로 정정) (b) `VITE_API_BASE_URL`이 어디에도 문서화돼 있지 않아 패키징 빌드가 여전히 상대경로를 쓰던 문제(문서화로 해소) (c) SSE 재연결용 `Last-Event-ID` 헤더 미허용(허용 목록에 추가로 해소). 즉시 조치 Minor 2건(테스트 커버리지 공백, CORS 백엔드 테스트 부재)도 함께 수정. 2차 재검증에서 Blocker 0건·Major 0건 확인 — 재검증 중 `.env.example`이 빈 블롭으로 스테이징된 신규 갭을 발견해 코디네이터가 `git add`로 즉시 해소
+  - ⚠️ 남은 갭: 보류 Minor 3건(`capacitor.config.ts`가 `tsconfig` 검사 대상 밖이라 typecheck가 그 파일을 안 봄, `apiUrl()`이 베이스 URL 후행 슬래시를 정규화하지 않음, CORS `Access-Control-Max-Age` 미설정으로 모바일에서 비단순 요청마다 프리플라이트 왕복이 추가됨) — 저위험으로 판단해 보류. 실제 Xcode/Android Studio 시뮬레이터·실기기 실행은 로컬 환경 제약(둘 다 미설치)으로 검증 못 함 — 아이콘·스플래시는 파일 크기·포맷·색상까지 확인했으나 실제 홈 화면·부팅 화면 렌더링은 미확인, Android 12+ 전용 시스템 스플래시 테마 속성(`windowSplashScreenBackground`)도 같은 이유로 손대지 않음
 
 - **Task 031: 부하 검증 및 성능 튜닝**
   - Virtual Thread 1,000+ 동시 SSE 커넥션, k6 벤치마크
