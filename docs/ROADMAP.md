@@ -716,6 +716,7 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
 
 - **Task 029: 푸시 알림 (FCM/APNs)**
   - `device_tokens` 테이블, `revoked_at IS NULL` 부분 인덱스
+  - ⚠️ **착수 순서**: 번호는 029지만 실제 작업은 Task 030(Capacitor) 이후로 미룬다(사용자 확정, 2026-09-15) — 푸시 알림은 하이브리드 앱(Capacitor WebView)에서 쓸 용도라 앱 패키징이 먼저 있어야 FCM/APNs 등록·테스트가 의미가 있다
 
 - **Task 030: Capacitor 하이브리드 앱 패키징**
   - Vite `dist/`를 WebView에 탑재
