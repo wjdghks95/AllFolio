@@ -4,6 +4,7 @@ import com.allfolio.infra.security.JwtFilter;
 import com.allfolio.infra.security.JwtIssuer;
 import com.allfolio.infra.security.JwtProperties;
 import jakarta.servlet.DispatcherType;
+import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,6 +16,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
 @EnableWebSecurity
@@ -27,15 +31,37 @@ public class SecurityConfig {
     }
 
     /**
+     * Capacitor(Task 030) 패키징 앱은 Vite dev 서버 프록시를 거치지 않고 이 커스텀 origin에서 직접
+     * API를 호출한다 — iOS는 capacitor://localhost, Android는 https://localhost(포트 없음)가 WebView
+     * 기본 스킴이다(capacitor.config.ts가 androidScheme을 커스터마이즈하지 않았으므로 Capacitor
+     * 기본값 그대로 androidScheme=https 적용 — secure context가 필요한 Web API 때문에 Capacitor가
+     * http 대신 https를 기본값으로 권장). 두 origin만 명시 나열한다 — 이 API는 Authorization 헤더로
+     * 인증하는 신뢰된 클라이언트만 호출하므로 origin을 넓히지 않는다.
+     */
+    @Bean
+    CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.of("capacitor://localhost", "https://localhost"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Last-Event-ID"));
+        configuration.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
+
+    /**
      * entryPoint를 필드가 아닌 메서드 파라미터로 받는다.
      * RestAuthenticationEntryPoint가 handlerExceptionResolver에 의존하므로 필드 주입 시 순환이 생긴다.
      */
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http, JwtIssuer jwtIssuer,
-                                    AuthenticationEntryPoint entryPoint) throws Exception {
+                                    AuthenticationEntryPoint entryPoint,
+                                    CorsConfigurationSource corsConfigurationSource) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
-                .cors(cors -> cors.disable())
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .httpBasic(basic -> basic.disable())
                 .formLogin(form -> form.disable())
                 .logout(logout -> logout.disable())

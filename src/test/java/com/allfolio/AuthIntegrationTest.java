@@ -277,6 +277,38 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void corsPreflightFromCapacitorIosOriginIsAllowed() {
+        MvcTestResult result = preflight("capacitor://localhost");
+
+        assertThat(result).hasStatusOk();
+        assertThat(result.getResponse().getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN))
+                .isEqualTo("capacitor://localhost");
+    }
+
+    @Test
+    void corsPreflightFromCapacitorAndroidOriginIsAllowed() {
+        MvcTestResult result = preflight("https://localhost");
+
+        assertThat(result).hasStatusOk();
+        assertThat(result.getResponse().getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN))
+                .isEqualTo("https://localhost");
+    }
+
+    @Test
+    void corsPreflightFromUntrustedOriginHasNoAllowOriginHeader() {
+        MvcTestResult result = preflight("https://evil.example.com");
+
+        assertThat(result.getResponse().getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN)).isNull();
+    }
+
+    private MvcTestResult preflight(String origin) {
+        return mvc.options().uri("/v1/assets")
+                .header(HttpHeaders.ORIGIN, origin)
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .exchange();
+    }
+
+    @Test
     void actuatorHealthIsAccessibleAnonymously() {
         assertThat(mvc.get().uri("/actuator/health").exchange()).hasStatusOk();
     }
