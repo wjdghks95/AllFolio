@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -19,6 +20,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.UnsupportedEncodingException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -51,6 +53,9 @@ class CandleIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
 
     private String tokenA;
     private String tokenB;
@@ -228,6 +233,56 @@ class CandleIntegrationTest extends AbstractIntegrationTest {
         MvcTestResult result = mvc.get().uri("/v1/assets/" + assetId + "/candles?interval=DAY").exchange();
 
         assertThat(result).hasStatus(HttpStatus.UNAUTHORIZED);
+    }
+
+    /**
+     * Redis에서 throttle:candle:{userId} 키를 limit(3)+1=4로 직접 설정해 Throttle 초과를 재현한다.
+     * userId는 (SearchIntegrationTest처럼 "첫 요청으로 키를 만든 뒤 keys()로 찾는" 방식 대신)
+     * UserRepository로 직접 조회해 키를 미리 세팅한다 — 실제 요청을 먼저 보낸 뒤 그 키를 다시
+     * 찾아 덮어쓰는 2단계 방식은, 전체 스위트를 여러 테스트 클래스와 함께 병렬 실행할 때 시스템
+     * 부하로 그 사이 지연이 커지면 키를 찾거나 값을 덮어쓰기 전에 첫 요청의 카운터가 이미 반영돼
+     * 있어야 한다는 타이밍 의존성이 남는다(실측: 단독 실행은 항상 통과, 전체 스위트 동시 실행 시
+     * 간헐적으로 실패 — `.claude/rules/testing.md`의 기존 Testcontainers 인프라 이슈와 같은 유형).
+     * 요청을 아예 보내기 전에 키를 직접 세팅하면 이 타이밍 의존성 자체가 없어진다.
+     */
+    @Test
+    void getCandlesForCoinExceedingThrottleReturns429() {
+        upbitWireMock.stubFor(get(urlPathEqualTo("/v1/candles/days"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json").withBody("[]")));
+        String assetId = idOf(createAsset(tokenA, coinRequest("KRW-CDL6", "캔들코인6", "1", "100000000")));
+
+        String userId = userRepository.findByEmail("candle-trader-a@example.com").orElseThrow().getId().toString();
+        stringRedisTemplate.opsForValue().set("throttle:candle:" + userId, "4", Duration.ofSeconds(10));
+
+        assertThat(authorizedGet("/v1/assets/" + assetId + "/candles?interval=DAY", tokenA))
+                .hasStatus(HttpStatus.TOO_MANY_REQUESTS)
+                .bodyJson().extractingPath("$.code").asString().isEqualTo("PRICE_RATE_LIMITED");
+    }
+
+    /**
+     * STOCK candles는 캐시가 있는 별개 경로라 CandleThrottle의 영향을 받지 않는다(ROADMAP Task 031
+     * 서브태스크 4 — COIN 전용임을 확인). COIN 한도(3건/1초)를 넘겨도 같은 사용자의 STOCK 요청은
+     * 계속 성공해야 한다.
+     */
+    @Test
+    void getCandlesForStockIsNotAffectedByCandleThrottle() {
+        stockWireMock.stubFor(get(urlPathEqualTo("/getStockPriceInfo"))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},
+                                  "body":{"items":{"item":[
+                                    {"basDt":"20260910","srtnCd":"005931","itmsNm":"삼성전자우",
+                                     "mkp":"71000","hipr":"72000","lopr":"70000","clpr":"71500"}
+                                  ]}}}}
+                                """)));
+        String assetId = idOf(createAsset(tokenA, stockRequest("005931", "삼성전자우", "KRW", "10", "70000")));
+
+        // COIN Throttle 키를 한도 초과 상태로 직접 세팅한다 — 같은 사용자라도 STOCK 요청은 이 키를
+        // 아예 조회하지 않아야 한다.
+        String userId = userRepository.findByEmail("candle-trader-a@example.com").orElseThrow().getId().toString();
+        stringRedisTemplate.opsForValue().set("throttle:candle:" + userId, "999", Duration.ofSeconds(1));
+
+        assertThat(authorizedGet("/v1/assets/" + assetId + "/candles?interval=DAY", tokenA)).hasStatusOk();
     }
 
     private MvcTestResult signup(String email, String password) {

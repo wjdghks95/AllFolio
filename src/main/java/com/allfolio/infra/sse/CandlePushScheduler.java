@@ -5,6 +5,7 @@ import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Candle;
 import com.allfolio.domain.PrecisionScale;
 import com.allfolio.domain.service.CandleService;
+import com.allfolio.infra.cache.PriceCacheProperties;
 import com.allfolio.infra.logging.MdcKeys;
 import com.allfolio.infra.logging.MdcPropagation;
 import com.allfolio.web.dto.CandleBarResponse;
@@ -18,7 +19,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -40,10 +44,13 @@ public class CandlePushScheduler {
 
     private final CandleSseRegistry registry;
     private final CandleService candleService;
+    private final Duration pollTickJoinTimeout;
 
-    public CandlePushScheduler(CandleSseRegistry registry, CandleService candleService) {
+    public CandlePushScheduler(CandleSseRegistry registry, CandleService candleService,
+            PriceCacheProperties priceCacheProperties) {
         this.registry = registry;
         this.candleService = candleService;
+        this.pollTickJoinTimeout = priceCacheProperties.coinFreshTtl();
     }
 
     /**
@@ -60,14 +67,56 @@ public class CandlePushScheduler {
      * (공유 브로드캐스트) 틱 단위로 유일하게 정할 수 없다. 대신 emitter별 전송 직전에
      * {@link #sendAsync}가 {@link CandleSseRegistry#userIdOf}로 그 emitter의 소유자를 조회해
      * 개별 스냅샷에만 채운다.
+     *
+     * <p><b>구독 키 단위 병렬화(Task 031 실측 반영)</b>: k6로 실측한 결과 순차 for-loop는 구독 키
+     * 하나마다 업비트에 블로킹 HTTP 호출을 보내는 구조라 N이 늘수록 한 틱 소요 시간이 그대로
+     * 늘어났다(N=100→평균 34초, N=500→평균 62초, 목표 10초 대비 각각 3.4배/6.2배, `loadtest/results.md`
+     * 참고). 그래서 키별 처리(`pushIfChanged`)를 {@code Thread.ofVirtual()}로 병렬 실행한다 — 이미
+     * emitter 단위 전송({@link #sendAsync})이 같은 패턴을 쓰고 있어 일관된 방식이다. traceId는
+     * 루프 안(스케줄러 스레드 컨텍스트)에서 {@code MdcPropagation.wrap()}을 호출해 캡처하므로 틱
+     * 단위 traceId가 그대로 전파된다.
+     *
+     * <p><b>틱 경계 보존(fixedDelay 세대 중첩 방지, code-reviewer M1 실측 수정)</b>: 병렬화한
+     * 스레드를 그냥 던지고 반환하면(fire-and-forget) Spring의 {@code fixedDelay}가 "이전 실행이
+     * 끝난 뒤 N초 후 다음 실행"을 보장한다는 전제가 깨진다 — 이 메서드의 "실행 완료"가 실제 작업
+     * (업비트 호출 포함) 완료보다 훨씬 먼저 반환돼버려서, 업스트림이 느려지면 다음 틱이 이전 틱의
+     * 처리가 끝나기도 전에 시작될 수 있었다(실측: 업비트 응답 2.5초 지연 스텁 + 구독 키 1개로 20초
+     * 관찰 시 같은 키에 대한 동시 in-flight 요청이 항상 3건 유지됨 — 3세대의 폴링 스레드가 같은
+     * 키를 동시에 처리하고 있었다). 그래서 이 루프에서 던진 스레드를 모아 두었다가
+     * {@link Thread#join(Duration)}으로 전부 기다린 뒤에야 반환한다.
+     *
+     * <p>join 타임아웃은 폴링 주기 자체({@code coinFreshTtl}, 기본 10초)로 둔다 — 그보다 짧게 잡으면
+     * 정상적인 처리(수십~수백ms)도 여유 없이 타임아웃에 걸릴 위험이 있고, 그보다 훨씬 길게 잡으면
+     * 병리적으로 느린 키 하나가 다음 틱 전체를 무기한 지연시킬 수 있다. 폴링 주기와 동일하게 두면
+     * 정상 케이스에서는 "이번 틱 처리가 다음 틱 시작 전에 끝난다"가 실질적으로 항상 성립하고,
+     * 병리적으로 느린 응답이 있어도 세대 중첩이 최대 2세대로 제한된다(join이 타임아웃돼도 그
+     * 가상 스레드를 강제로 취소하지는 않는다 — Virtual Thread에 적절한 취소 API가 없고, 늦게 와도
+     * {@code pushIfChanged}의 dedup(valueEquals)로 걸러지므로 안전하다). 세대가 무한정 쌓이는
+     * 것(3세대 이상)은 이 타임아웃으로 방지되지만, 세대가 전혀 안 겹치는 것까지는 보장하지 않는다.
+     *
+     * <p>트레이드오프: 이 join 때문에 {@code pollAndPush()} 자체의 실행 시간이 팬아웃한 구독 키
+     * 처리 중 가장 느린 것까지 포함하게 된다 — {@code fixedDelay} 계약(다음 실행은 이번 실행이
+     * 실질적으로 끝난 뒤에 시작)을 지키려면 이게 목적 자체이므로 의도된 트레이드오프다. 키 간
+     * 순서 보장은 여전히 하지 않는다(원래도 요구사항이 아니었다) — {@link CandleSseRegistry#lastPushed}/
+     * {@link CandleSseRegistry#updateLastPushed}가 {@code ConcurrentHashMap} 기반이라 여러 키를
+     * 병렬로 갱신해도 안전함은 유지된다.
      */
     @Scheduled(fixedDelayString = "${allfolio.price-cache.coin-fresh-ttl}",
             scheduler = SseSchedulerConfig.SSE_TASK_SCHEDULER)
     void pollAndPush() {
         MDC.put(MdcKeys.TRACE_ID, UUID.randomUUID().toString());
         try {
+            List<Thread> tickThreads = new ArrayList<>();
             for (CandleSubscriptionKey key : registry.activeKeys()) {
-                pushIfChanged(key);
+                tickThreads.add(Thread.ofVirtual().start(MdcPropagation.wrap(() -> pushIfChanged(key))));
+            }
+            for (Thread thread : tickThreads) {
+                try {
+                    thread.join(pollTickJoinTimeout);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
         } finally {
             MDC.clear();

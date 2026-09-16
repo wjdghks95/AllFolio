@@ -77,6 +77,14 @@ allfolio:
     # 잡는다 — 5초로는 벤더가 조금만 느려져도 fetch 도중 락이 만료돼 cache stampede 방지 목적이
     # 무력화된다(Task 028 code-reviewer m3 실측).
     range-lock-ttl: 15s
+  # COIN 캔들 조회(GET /v1/assets/{id}/candles, COIN 자산) 사용자당 Throttle(Task 031 서브태스크 4).
+  # 이 경로는 캐시가 전혀 없는 순수 패스스루라(candle-cache는 STOCK 전용) 30 VUs·30초 부하만으로도
+  # 업비트가 실제 429를 반환하기 시작하고 우리 서버 응답의 98%가 503으로 저하됨을 실측 확인했다
+  # (loadtest/results.md 시나리오 4). PriceThrottle(1건/1초)보다 약간 여유를 둔 값 — 근거는
+  # CandleThrottleProperties Javadoc 참고.
+  candle-throttle:
+    limit: 3
+    window: 1s
   # 통합 종목 검색(GET /v1/assets/search) 결과 캐시(Task 026 서브태스크 3). 종목명·마켓 목록은
   # 시세와 달리 실시간성이 필요 없어 하루 단위로 넉넉하게 잡는다.
   search-cache:

@@ -7,6 +7,7 @@ import com.allfolio.domain.DailyBar;
 import com.allfolio.domain.User;
 import com.allfolio.domain.exception.AssetNotFoundException;
 import com.allfolio.domain.exception.InvalidCandleQueryException;
+import com.allfolio.domain.exception.PriceRateLimitExceededException;
 import com.allfolio.domain.exception.PriceUnavailableException;
 import com.allfolio.domain.repository.AssetRepository;
 import com.allfolio.domain.service.CandleService;
@@ -14,6 +15,7 @@ import com.allfolio.infra.cache.CandleCacheEntry;
 import com.allfolio.infra.cache.CandleCacheProperties;
 import com.allfolio.infra.cache.CandleCacheStore;
 import com.allfolio.infra.cache.CandleRangeLock;
+import com.allfolio.infra.cache.CandleThrottle;
 import com.allfolio.infra.price.StockPriceClient;
 import com.allfolio.infra.price.TwelveDataClient;
 import com.allfolio.infra.price.UpbitPriceClient;
@@ -38,6 +40,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -74,6 +77,9 @@ class CandleServiceTest {
     @Mock
     private CandleRangeLock candleRangeLock;
 
+    @Mock
+    private CandleThrottle candleThrottle;
+
     private CandleCacheProperties candleCacheProperties;
 
     private CandleService candleService;
@@ -84,8 +90,11 @@ class CandleServiceTest {
     @BeforeEach
     void setUp() {
         candleCacheProperties = new CandleCacheProperties(Duration.ofHours(12), 10, Duration.ofSeconds(5));
+        // COIN 경로만 CandleThrottle을 소모한다 — STOCK 전용 테스트에서는 이 스텁이 쓰이지 않으므로
+        // lenient()로 strict stubbing 실패(UnnecessaryStubbingException)를 피한다.
+        lenient().when(candleThrottle.tryAcquire(any())).thenReturn(true);
         candleService = new CandleService(assetRepository, upbitPriceClient, stockPriceClient, twelveDataClient,
-                candleCacheStore, candleRangeLock, candleCacheProperties);
+                candleCacheStore, candleRangeLock, candleCacheProperties, candleThrottle);
     }
 
     @Test
@@ -222,6 +231,38 @@ class CandleServiceTest {
         assertThatThrownBy(() -> candleService.getCandles(userId, assetId, "MINUTE1", null))
                 .isInstanceOf(InvalidCandleQueryException.class);
         verifyNoInteractions(candleCacheStore, stockPriceClient, twelveDataClient, candleRangeLock);
+    }
+
+    /**
+     * COIN candles는 캐시가 전혀 없는 순수 패스스루라 모든 요청에 균일하게 Throttle을 적용한다
+     * (ROADMAP Task 031 서브태스크 4).
+     */
+    @Test
+    void coinThrottleExceededThrowsPriceRateLimitExceeded() {
+        givenAsset(AssetType.COIN, "KRW", "BTC");
+        when(candleThrottle.tryAcquire(userId)).thenReturn(false);
+
+        assertThatThrownBy(() -> candleService.getCandles(userId, assetId, "DAY", null))
+                .isInstanceOf(PriceRateLimitExceededException.class);
+        verifyNoInteractions(upbitPriceClient);
+    }
+
+    /**
+     * STOCK candles는 캐시가 있는 별개 경로라 CandleThrottle의 영향을 받지 않는다 — 한도 초과
+     * 상태에서도 STOCK 요청은 그대로 성공해야 한다.
+     */
+    @Test
+    void stockAssetIsNotAffectedByCandleThrottle() {
+        givenAsset(AssetType.STOCK, "KRW", "005930");
+        CandleCacheEntry cached = new CandleCacheEntry(
+                List.of(new DailyBar(LocalDate.now(), bd("100"), bd("110"), bd("90"), bd("105"))),
+                LocalDate.now().minusYears(10), LocalDate.now(), Instant.now());
+        when(candleCacheStore.find("candle:STOCK:005930")).thenReturn(Optional.of(cached));
+
+        CandleSeriesResponse response = candleService.getCandles(userId, assetId, "DAY", null);
+
+        assertThat(response.bars()).hasSize(1);
+        verifyNoInteractions(candleThrottle);
     }
 
     private List<Candle> fullPageOfCoinCandles(int size) {
@@ -362,7 +403,7 @@ class CandleServiceTest {
     void stockLockAcquireFailsPollsThenFallsBackToDirectFetchAndSaves() {
         CandleCacheProperties shortLockProperties = new CandleCacheProperties(Duration.ofHours(12), 10, Duration.ofMillis(10));
         CandleService serviceWithShortLock = new CandleService(assetRepository, upbitPriceClient, stockPriceClient,
-                twelveDataClient, candleCacheStore, candleRangeLock, shortLockProperties);
+                twelveDataClient, candleCacheStore, candleRangeLock, shortLockProperties, candleThrottle);
         givenAsset(AssetType.STOCK, "KRW", "005930");
         when(candleCacheStore.find("candle:STOCK:005930")).thenReturn(Optional.empty());
         when(candleRangeLock.tryLock("candle:STOCK:005930")).thenReturn(null);

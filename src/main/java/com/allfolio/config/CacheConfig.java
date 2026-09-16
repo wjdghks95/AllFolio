@@ -1,6 +1,7 @@
 package com.allfolio.config;
 
 import com.allfolio.infra.cache.CandleCacheProperties;
+import com.allfolio.infra.cache.CandleThrottleProperties;
 import com.allfolio.infra.cache.PriceCacheProperties;
 import com.allfolio.infra.cache.PriceThrottleProperties;
 import com.allfolio.infra.cache.SearchCacheProperties;
@@ -10,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 @EnableConfigurationProperties({PriceCacheProperties.class, PriceThrottleProperties.class,
-        SearchCacheProperties.class, SearchThrottleProperties.class, CandleCacheProperties.class})
+        SearchCacheProperties.class, SearchThrottleProperties.class, CandleCacheProperties.class,
+        CandleThrottleProperties.class})
 public class CacheConfig {
 }

@@ -1,5 +1,6 @@
 package com.allfolio;
 
+import com.allfolio.infra.cache.CandleThrottleProperties;
 import com.allfolio.infra.cache.PriceCacheProperties;
 import com.allfolio.infra.cache.PriceThrottleProperties;
 import com.allfolio.infra.price.ExchangeRateProperties;
@@ -37,6 +38,9 @@ class PricePropertiesTest extends AbstractIntegrationTest {
 
     @Autowired
     private PriceThrottleProperties priceThrottleProperties;
+
+    @Autowired
+    private CandleThrottleProperties candleThrottleProperties;
 
     @Test
     void upbitBaseUrlIsBound() {
@@ -79,5 +83,12 @@ class PricePropertiesTest extends AbstractIntegrationTest {
     void priceThrottleLimitAndWindowAreBound() {
         assertThat(priceThrottleProperties.limit()).isEqualTo(1);
         assertThat(priceThrottleProperties.window()).isEqualTo(Duration.ofSeconds(1));
+    }
+
+    /** allfolio.candle-throttle 바인딩 확인(Task 031 서브태스크 4). */
+    @Test
+    void candleThrottleLimitAndWindowAreBound() {
+        assertThat(candleThrottleProperties.limit()).isEqualTo(3);
+        assertThat(candleThrottleProperties.window()).isEqualTo(Duration.ofSeconds(1));
     }
 }

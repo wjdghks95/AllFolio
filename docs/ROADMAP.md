@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-09-15
+**최종 수정:** 2026-09-16
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~5와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -698,7 +698,7 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
   - ✅ 신규 외부 WebSocket 수집 파이프라인·신규 PostgreSQL 테이블(`price_snapshots` 등) 없이, 기존 REST 클라이언트(Upbit/공공데이터포털/Twelve Data)와 Redis 캐시 패턴을 확장하는 방향으로 구 PRD v1.2.0(§8.3, WebSocket 상시 수집 전제)과 다르게 설계(사용자 확정, 2026-09-11) — 구 PRD의 이벤트 스키마는 참고만 하고 그대로 쓰지 않았다
   - ✅ COIN(업비트)은 1분봉~년봉 지원 + SSE 실시간 스트리밍(캐시 없는 패스스루 — 업비트 호출 한도가 여유로워 과설계 방지, 년봉은 월봉을 받아 `UpbitPriceClient.aggregateYears()`로 집계). STOCK(국내 공공데이터포털·해외 Twelve Data)은 일/주/월/년봉만 REST 제공, SSE 없음(EOD 성격) — 일봉 원본을 `CandleCacheStore`(티커당 1개 Redis 키)에 캐싱하고 주/월/년봉은 `CandleAggregator`로 캐시에서 집계, 벤더 재호출 없음
   - ✅ `price_snapshots` 파티셔닝은 이번 Task 범위에서 제외(사용자 확정, 위 항목의 원 계획을 대체) — STOCK은 캐시 미스 시 KRW·USD 둘 다 벤더가 줄 수 있는 최대 범위를 한 번에 요청하는 전략이라 Redis 캐시만으로 충분하고, 원천적으로 "더 페이징할 과거 데이터"가 없다(아래 code-reviewer M2 참고)
-  - ✅ cache stampede 방지는 `CandleRangeLock`(티커 단위 Redis 락, `PriceThrottle`의 Lua Script 패턴 재사용)만 두고 선제적 사용자별 Throttle(`CandleThrottle`)은 신설하지 않음(의도적 결정)
+  - ✅ cache stampede 방지는 `CandleRangeLock`(티커 단위 Redis 락, `PriceThrottle`의 Lua Script 패턴 재사용)만 두고 선제적 사용자별 Throttle(`CandleThrottle`)은 신설하지 않음(의도적 결정) — **Task 031에서 실측으로 재검토됨**: REST 캔들 조회(`GET /v1/assets/{id}/candles`, COIN)는 실제 남용이 확인돼 `CandleThrottle`을 도입했다(SSE 스트리밍 경로는 여전히 미적용 — Task 031 「남은 갭」 참고)
   - ✅ 신규 엔드포인트 2종: `GET /v1/assets/{id}/candles`(REST, COIN/STOCK), `GET /v1/assets/{id}/candles/stream`(SSE, COIN 전용) — 아래 「API 규격」 절에 반영
   - ✅ SSE 인증: `JwtFilter`가 `/v1/assets/{id}/candles/stream` 경로에서만 쿼리 파라미터 `?token=` 폴백을 허용(브라우저 `EventSource`가 커스텀 헤더를 못 붙이는 제약, 정규식으로 적용 범위를 그 경로 하나로 최소화)
   - ✅ MDC traceId/userId 전파: SSE 백그라운드 전송 스레드를 `MdcPropagation.wrap()`으로 감싸 emitter별로 정확한 userId를 전파(폴링 틱 단위 traceId는 별도 발급해 "같은 폴링 사이클" 상관 정보와 "어느 유저의 연결인지" 정보를 둘 다 남김) — 실제 서버 로그로 실측 확인(아래 code-reviewer 검증 참고)
@@ -742,9 +742,20 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
   - ✅ code-reviewer 독립 검증 2회(실제 서버 기동+curl 프리플라이트 실측) — 1차 Blocker 0건·Major 3건 발견: (a) Capacitor 기본 `androidScheme`이 실제로는 `https`인데 `http://localhost`를 허용해 Android 앱의 모든 API 호출이 CORS로 막히던 결함(리포에 내려받은 Capacitor 소스로 근거 확인 후 `https://localhost`로 정정) (b) `VITE_API_BASE_URL`이 어디에도 문서화돼 있지 않아 패키징 빌드가 여전히 상대경로를 쓰던 문제(문서화로 해소) (c) SSE 재연결용 `Last-Event-ID` 헤더 미허용(허용 목록에 추가로 해소). 즉시 조치 Minor 2건(테스트 커버리지 공백, CORS 백엔드 테스트 부재)도 함께 수정. 2차 재검증에서 Blocker 0건·Major 0건 확인 — 재검증 중 `.env.example`이 빈 블롭으로 스테이징된 신규 갭을 발견해 코디네이터가 `git add`로 즉시 해소
   - ⚠️ 남은 갭: 보류 Minor 3건(`capacitor.config.ts`가 `tsconfig` 검사 대상 밖이라 typecheck가 그 파일을 안 봄, `apiUrl()`이 베이스 URL 후행 슬래시를 정규화하지 않음, CORS `Access-Control-Max-Age` 미설정으로 모바일에서 비단순 요청마다 프리플라이트 왕복이 추가됨) — 저위험으로 판단해 보류. 실제 Xcode/Android Studio 시뮬레이터·실기기 실행은 로컬 환경 제약(둘 다 미설치)으로 검증 못 함 — 아이콘·스플래시는 파일 크기·포맷·색상까지 확인했으나 실제 홈 화면·부팅 화면 렌더링은 미확인, Android 12+ 전용 시스템 스플래시 테마 속성(`windowSplashScreenBackground`)도 같은 이유로 손대지 않음
 
-- **Task 031: 부하 검증 및 성능 튜닝**
-  - Virtual Thread 1,000+ 동시 SSE 커넥션, k6 벤치마크
-  - Task 028 code-reviewer 2차 검증(Minor m6·m7)이 이관한 항목: (a) `GET /v1/assets/{id}/candles`(STOCK)가 페이지 크기 제한 없이 캐시 전량(실측 최대 ~2,450건/10년)을 한 응답으로 반환 — 응답 크기·지연 실측 후 `limit` 파라미터 도입 여부 결정, (b) `GET /v1/assets/{id}/candles`(COIN)는 캐시·Throttle이 전혀 없는 패스스루라 요청 1건=업비트 호출 1건(count=200) — `GET /v1/assets/{id}/price`(1건/초 Throttle 적용)와의 비대칭이 실제 남용으로 이어지는지 부하 시나리오에 포함해 확인
+- **Task 031: 부하 검증 및 성능 튜닝** ✅ — 완료 (2026-09-16)
+  - ✅ 이 저장소에 k6(부하 테스트 도구)를 처음 도입 — `loadtest/`(`README.md`·`results.md` + k6 스크립트 4종: SSE 브로드캐스트/SSE 다중 구독 키/STOCK candles/COIN candles) 신설. 표준 k6가 SSE(`EventSource`)를 지원하지 않음을 실측 확인(`k6/experimental/sse` 등 관련 모듈 전부 미등록) — `http.get()`이 타임아웃까지 연결을 붙들고 끊길 때까지 수신한 바디를 그대로 보존한다는 특성을 이용한 근사 측정 방식을 README에 근거와 함께 기록, 별도 curl 보조 스크립트는 불필요했다
+  - ✅ SSE 커넥션 수용 자체(Tomcat/Virtual Thread 계층)는 병목이 아님을 실측 확인 — 단일 구독 키(브로드캐스트)에 1,000개 동시 커넥션 100% 유지, 거부·실패 0건
+  - ✅ **(a) `CandlePushScheduler` 순차 폴링 지연(Task 028 이관 항목) — 실측 확인 후 병렬화**: 구독 키 500개 기준 순차 폴링 시 한 틱 평균 62초(목표 10초의 6.2배)까지 벌어짐을 실측, `pollAndPush()`의 for-loop를 `Thread.ofVirtual()` 기반으로 병렬화(기존 `sendAsync`와 동일 패턴 재사용)해 10.7초까지 개선. **code-reviewer 통합 검증에서 Major 발견**: 병렬화한 스레드를 join하지 않고 즉시 반환해 Spring `fixedDelay`의 "이전 실행 완료 후 N초" 보장이 깨져, 업스트림이 느리면 폴링 틱이 세대를 넘어 겹칠 수 있었다(실측: 업비트 응답 2.5초 지연 스텁 + 구독 키 1개로 20초 관찰 시 동시 in-flight 요청이 항상 3건 유지). 던진 스레드를 모아 `join(coinFreshTtl)`(기본 10초)로 기다린 뒤 반환하도록 수정해 재검증 완료(41개 틱 전부 겹침 0건), 회귀 테스트(`CandlePushSchedulerTickOverlapTest`) 추가
+  - ✅ **(b) STOCK candles 무제한 응답(Task 028 이관 항목) — 실측 후 `limit` 미도입 결정**: 캐시 히트 상태 응답 232KB(2,609건/10년치)·P99 20.6ms로 지연은 문제없음을 확인. STOCK은 분봉 미지원 + `candle-cache.max-history-years`(10년) 캡으로 응답 크기가 이미 사실상 고정 상한이라 "무제한 응답"이라는 우려 전제 자체가 실측으로 반박됨 — `limit` 파라미터를 도입하지 않았다(코드 변경 없음). **부수 발견**: HTTP 압축(gzip)이 전역적으로 꺼져 있어(`server.compression` 미설정) 같은 응답이 압축 시 약 28.5KB(87% 감소)로 줄어듦을 실측 확인 — candles 전용 판단 범위를 벗어난 전역 설정이라 이번엔 코드를 건드리지 않고 후속 과제로 남겼다(사용자 확정)
+  - ✅ **(c) COIN candles Throttle 부재(Task 028 이관 항목) — 실측 확인 후 `CandleThrottle` 도입**: 30명 동시 요청·30초만으로 업비트가 실제 429를 반환하고 우리 서버 응답 98%가 503으로 저하, Resilience4j `upbit` Circuit Breaker가 `half_open`까지 진입함을 실측(`GET /v1/assets/{id}/price`의 사용자당 초당 1건 Throttle과 달리 이 경로는 무방비였음). `SearchThrottle` 선례를 따라 `PriceThrottle`과 독립된 `CandleThrottle`(사용자당 3건/1초, Redis Lua INCR+PEXPIRE)을 신설해 COIN candles REST 조회에만 적용 — 재측정 결과 429 응답 99.9%로 남용이 완전히 차단됐고 CB는 `closed` 유지. STOCK candles는 캐시가 있는 경로라 이 Throttle 대상이 아니다
+  - ✅ **인프라 튜닝(HikariCP/Tomcat) — 병목 없음 실측 확인, 변경 없음**: 1,000 VUs SSE 부하를 재현하며 `hikaricp_connections_pending`을 1초 간격 90회 폴링해 전 구간 0.0을 확인(기본 풀 10개 중 최대 1개만 사용). Virtual Threads 활성 상태에서는 Tomcat 스레드 풀 관련 Prometheus 메트릭 자체가 노출되지 않음도 확인(고정 크기 워커 풀이 없어 "Tomcat 스레드 튜닝" 개념이 이 구성에는 성립하지 않는다)
+  - ✅ code-reviewer 통합 검증(실제 서버 기동 + curl/k6 실측 병행) — **Blocker 0건**. Major 2건 발견, 전부 해소: 위 (a) 틱 겹침 결함(코드 수정 완료) / API 규격 표·에러 코드 절에 COIN candles의 신규 429 상태 미등재(이번 갱신으로 해소, 아래 「API 규격」·「에러 응답 포맷」 절 참고). Minor 다수(문서 오타 정정, `CandleThrottle` fail-open 분기 테스트 추가, `infra/cache/CLAUDE.md`에 `CandleThrottle` 절 추가 등)도 함께 해소
+  - ✅ 담당: senior-backend(k6 스크립트·실측·모든 코드 변경) · code-reviewer(통합 검증, Major 발견) · 코디네이터(서브태스크 분할·위임·최종 문서화)
+  - ⚠️ 남은 갭(이번엔 보류, 후속 과제):
+    - `CandleSseRegistry`가 SSE 클라이언트가 타임아웃으로 소켓을 끊을 때 구독 키를 즉시 정리하지 못하는 사례가 실측 재현됐다(`onError`/`onCompletion` 콜백이 바로 발화하지 않는 것으로 보임) — 원인 진단·수정 미착수, 재측정 시엔 앱 재시작으로만 회피했다
+    - HTTP 압축(gzip) 전역 미적용(위 (b) 참고) — candles뿐 아니라 포트폴리오·자산 목록 등 다른 JSON 응답도 함께 가벼워질 수 있는 전역 설정이다. 적용 시 SSE(`text/event-stream`)가 실수로 압축 대상에 포함되지 않는지 회귀 확인이 필요하다
+    - `CandlePushScheduler`의 폴링 틱 내 팬아웃(구독 키 수만큼 동시에 나가는 업비트 호출)에는 동시성 상한이 없다 — N=500 재측정에서 틱 겹침은 해소됐지만, 그 재측정 자체에서 업비트 429(97건)·CB `not_permitted_calls_total`(13,019건) 발생과 테스트 종료 시점 CB `half_open`을 재확인했다. REST 조회 경로(위 (c))는 `CandleThrottle`로 막았지만 SSE 폴링 경로는 여전히 무방비 상태다 — `Semaphore` 등으로 팬아웃 동시성 자체를 업비트 한도 이하로 제한할지는 다음 착수 시 판단이 필요하다
+    - `AssetDetailPage.tsx`의 candles 조회 effect가 `[asset.id, assetType, candleInterval]`에만 의존해, 같은 `interval`을 다시 눌러도 재조회되지 않는다 — 위 429 응답을 받은 뒤 같은 interval을 다시 클릭해도 에러 상태가 풀리지 않고 다른 interval로 갔다 와야 한다(code-reviewer 발견, 프론트 미착수)
 
 - **Task 032: 배포 파이프라인 및 운영 관측 체계**
   - CI/CD, 프론트 배포 방식 확정(JAR 통합 vs 분리 호스팅)
@@ -775,7 +786,7 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
 | `GET` | `/v1/portfolio` | 200 | 취득원가(Task 013, F005a) + `evaluationKrw`·`unrealizedPnl`·`weight`·합계 2개를 실제 시세로 계산(Task 023, F005b). 단건 조회용 Throttle 미적용, 일부 자산의 시세 조회가 실패해도 항상 200이고 그 항목의 3개 필드만 `null` |
 | `POST` | `/v1/simulate/avg-price` | 200 | DB 저장 없음 |
 | `GET` | `/v1/assets/{id}/price` | 200 / 206 / 400 / 404 / 429 / 503 | 외부 시세 단건 조회(STOCK/COIN/CASH-USD). 타 유저 접근 시 404, STOCK·CASH(KRW) 자산에 요청 시 400 `PRICE_NOT_APPLICABLE`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN`(Task 021). Redis 캐시 stale 폴백 시 206 + 응답 본문 `isStale:true`, 사용자당 초당 1건 Throttle 초과 시 429 `PRICE_RATE_LIMITED`(Task 022) |
-| `GET` | `/v1/assets/{id}/candles` | 200 / 400 / 404 / 503 | 캔들스틱 조회(F007, Task 028). `interval`(COIN: `minute1~minute240`/`day`/`week`/`month`/`year`, STOCK: `day`/`week`/`month`/`year`)·`before`(선택, 이전 응답 마지막 bar의 `bucketStart` 그대로 재사용) 쿼리 파라미터. 타 유저 접근 시 404, CASH 자산·STOCK+분봉 조합은 400(전자는 `PRICE_NOT_APPLICABLE`, 후자는 `VALIDATION_ERROR`), 잘못된 `interval`/`before` 값도 400 `VALIDATION_ERROR`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN`. 응답은 `{bars: [{bucketStart, open, high, low, close}], hasMoreHistory}` — `bars`는 최신순(내림차순) |
+| `GET` | `/v1/assets/{id}/candles` | 200 / 400 / 404 / 429 / 503 | 캔들스틱 조회(F007, Task 028). `interval`(COIN: `minute1~minute240`/`day`/`week`/`month`/`year`, STOCK: `day`/`week`/`month`/`year`)·`before`(선택, 이전 응답 마지막 bar의 `bucketStart` 그대로 재사용) 쿼리 파라미터. 타 유저 접근 시 404, CASH 자산·STOCK+분봉 조합은 400(전자는 `PRICE_NOT_APPLICABLE`, 후자는 `VALIDATION_ERROR`), 잘못된 `interval`/`before` 값도 400 `VALIDATION_ERROR`, COIN 자산은 사용자당 3건/1초 Throttle 초과 시 429 `PRICE_RATE_LIMITED`(STOCK은 캐시 있는 경로라 이 Throttle 대상 아님, Task 031), 외부 API 장애 시 503 `EXTERNAL_API_DOWN`. 응답은 `{bars: [{bucketStart, open, high, low, close}], hasMoreHistory}` — `bars`는 최신순(내림차순) |
 | `GET` | `/v1/assets/{id}/candles/stream` | 200 / 400 / 401 / 404 | 캔들 실시간 스트리밍(SSE, COIN 전용, F007, Task 028). `Content-Type: text/event-stream`, 인증은 `Authorization` 헤더 또는 이 경로 전용 `?token=` 쿼리 파라미터 폴백(브라우저 `EventSource`가 커스텀 헤더를 못 붙이는 제약 — 완화 조건은 「배포 파이프라인」 Task 032 참고). STOCK/CASH 자산 요청 시 400 `VALIDATION_ERROR`(SSE는 COIN 전용), 타 유저 접근 시 404. 이벤트 이름 `candle`(payload는 REST와 동일한 bar 1건) + `: heartbeat` 코멘트(30초 주기) |
 | `POST` | `/v1/devices` | 201 / 400 / 401 | 기기(FCM) 토큰 등록(Task 029). 같은 토큰을 같은 유저가 재등록하면 기존 레코드를 재활성화(UPSERT), 다른 유저가 재등록하면 이전 레코드를 삭제하고 새 유저 명의로 재생성(`uk_device_tokens_token`이 `revoked_at`과 무관한 전체 UNIQUE 제약이라 revoke만으로는 공존 불가). `token`이 4096자 초과면 400 `VALIDATION_ERROR`. 응답에 토큰 원문은 포함하지 않는다 |
 | `DELETE` | `/v1/devices/{id}` | 204 / 401 / 404 | 기기 토큰 해제(Task 029). 경로는 토큰 원문이 아닌 `device_tokens` 자체 UUID(민감값 노출 방지). 존재하지 않거나 타 유저 소유면 404 `DEVICE_NOT_FOUND`(403 대신 404로 ID 유출 방지, 기존 컨벤션과 동일). 이미 해제된 기기를 다시 호출해도 idempotent하게 204 |
@@ -920,6 +931,8 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 
 **구현된 코드 (Task 029)**: `DEVICE_NOT_FOUND`(404, `DELETE /v1/devices/{id}`에서 존재하지 않거나 타 유저 소유 기기 — `ASSET_NOT_FOUND`와 동일하게 403 대신 404). `token` 길이 초과(4096자)는 신규 코드 없이 기존 `VALIDATION_ERROR`로 응답한다(`AvgPriceRequiredException`과 동일 패턴, code-reviewer 검증에서 지적된 `@Size(max=4096)` 미비를 이 갱신으로 해소)
 
+**구현된 코드 (Task 031)**: 신규 에러 코드 없음 — `GET /v1/assets/{id}/candles`의 COIN 경로가 사용자당 3건/1초 Throttle(`CandleThrottle`) 초과 시 기존 `PRICE_RATE_LIMITED`(Task 022, `GET /v1/assets/{id}/price`와 동일 코드)를 재사용한다. 이 경로는 캐시가 없는 패스스루라 "캐시 히트는 소모하지 않는다"는 `PriceThrottle`의 전제와 달리 모든 요청에 균일 적용된다(STOCK candles는 캐시가 있어 이 Throttle 대상이 아니다)
+
 ---
 
 ## 금융 정밀도 규칙
@@ -942,6 +955,10 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 
 - **시뮬레이터 응답시간 P99**: ≤ 5ms (1,000회 반복 호출, holding 단건 조회 포함한 수치, JVM 워밍업 후 검증)
 - **메트릭**: `allfolio_simulation_duration_seconds` (Prometheus 히스토그램)
+- **SSE 동시 커넥션(Task 031, k6 로컬 실측)**: 단일 구독 키(브로드캐스트) 1,000개 동시 연결 100% 유지 확인 — 같은 물리 머신에서 측정해 네트워크 지연은 0에 가깝다. 절대치보다 "이 규모에서 Tomcat/Virtual Thread 계층이 병목이 아니다"라는 사실이 핵심
+- **CandlePushScheduler 폴링 틱(Task 031)**: 목표 10초(`allfolio.price-cache.coin-fresh-ttl`) 이내, 구독 키 500개까지 실측 확인(병렬화 + `join(coinFreshTtl)`로 세대 중첩 방지 적용 후). 틱 내 업비트 팬아웃 자체의 동시성 상한은 아직 미도입(위 Task 031 「남은 갭」 참고)
+- **STOCK candles(캐시 히트) 응답시간(Task 031)**: P99 ≤ 25ms 실측(10 VUs, 로컬) — 응답 크기(최대 약 232KB/10년치)는 HTTP 압축 미적용 상태의 수치
+- **측정 도구**: `loadtest/`(k6, Task 031에서 이 저장소에 최초 도입) — 로컬 Docker 수동 실행까지만 지원, CI 통합은 아직 없음(Task 032 범위)
 
 ---
 

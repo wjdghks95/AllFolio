@@ -10,12 +10,14 @@ import com.allfolio.domain.PrecisionScale;
 import com.allfolio.domain.exception.AssetNotFoundException;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.InvalidCandleQueryException;
+import com.allfolio.domain.exception.PriceRateLimitExceededException;
 import com.allfolio.domain.exception.PriceUnavailableException;
 import com.allfolio.domain.repository.AssetRepository;
 import com.allfolio.infra.cache.CandleCacheEntry;
 import com.allfolio.infra.cache.CandleCacheProperties;
 import com.allfolio.infra.cache.CandleCacheStore;
 import com.allfolio.infra.cache.CandleRangeLock;
+import com.allfolio.infra.cache.CandleThrottle;
 import com.allfolio.infra.price.StockPriceClient;
 import com.allfolio.infra.price.TwelveDataClient;
 import com.allfolio.infra.price.UpbitPriceClient;
@@ -101,11 +103,12 @@ public class CandleService {
     private final CandleCacheStore candleCacheStore;
     private final CandleRangeLock candleRangeLock;
     private final CandleCacheProperties candleCacheProperties;
+    private final CandleThrottle candleThrottle;
 
     public CandleService(AssetRepository assetRepository, UpbitPriceClient upbitPriceClient,
             StockPriceClient stockPriceClient, TwelveDataClient twelveDataClient,
             CandleCacheStore candleCacheStore, CandleRangeLock candleRangeLock,
-            CandleCacheProperties candleCacheProperties) {
+            CandleCacheProperties candleCacheProperties, CandleThrottle candleThrottle) {
         this.assetRepository = assetRepository;
         this.upbitPriceClient = upbitPriceClient;
         this.stockPriceClient = stockPriceClient;
@@ -113,6 +116,7 @@ public class CandleService {
         this.candleCacheStore = candleCacheStore;
         this.candleRangeLock = candleRangeLock;
         this.candleCacheProperties = candleCacheProperties;
+        this.candleThrottle = candleThrottle;
     }
 
     /**
@@ -130,7 +134,7 @@ public class CandleService {
         }
 
         return switch (asset.getAssetType()) {
-            case COIN -> coinCandles(asset, interval, beforeParam);
+            case COIN -> coinCandles(userId, asset, interval, beforeParam);
             case STOCK -> stockCandles(asset, interval, beforeParam);
             case CASH -> throw new PriceUnavailableException("CASH 자산은 캔들 조회 대상이 아닙니다.");
         };
@@ -173,7 +177,17 @@ public class CandleService {
     // COIN — 캐시 없는 패스스루
     // ---------------------------------------------------------------------
 
-    private CandleSeriesResponse coinCandles(Asset asset, CandleInterval interval, String beforeParam) {
+    /**
+     * COIN candles는 캐시가 전혀 없는 순수 패스스루라(위 클래스 Javadoc), 요청 1건이 곧 업비트 호출
+     * 1건이다 — 모든 요청에 균일하게 Throttle을 적용한다("캐시 히트는 소모하지 않는다"는 PriceThrottle의
+     * 전제가 여기선 성립하지 않는다). 실측(30 VUs·30초 부하로 업비트 429·우리 서버 503 98%, ROADMAP
+     * Task 031 서브태스크 4)으로 확인된 남용을 차단한다. {@link #fetchLatestCoinCandle}(SSE
+     * CandlePushScheduler 전용)은 이 검사 대상이 아니다 — SSE 스트리밍은 이번 태스크 범위 밖이다.
+     */
+    private CandleSeriesResponse coinCandles(UUID userId, Asset asset, CandleInterval interval, String beforeParam) {
+        if (!candleThrottle.tryAcquire(userId)) {
+            throw new PriceRateLimitExceededException("캔들 조회 요청이 너무 잦습니다. 잠시 후 다시 시도하세요.");
+        }
         Instant before = parseBeforeInstant(beforeParam);
         CoinFetch fetch = fetchCoinCandles(asset.getTicker(), asset.getCurrency(), interval, before);
 

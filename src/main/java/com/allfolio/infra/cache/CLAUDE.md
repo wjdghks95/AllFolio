@@ -43,6 +43,25 @@ Redis(Lettuce)에는 `INCR`과 `EXPIRE`를 한 번에 묶는 원자적 명령이
 `GET /v1/assets/{id}/price`(PriceThrottle, 1건/1s)와 `GET /v1/assets/search`(SearchThrottle, 60건/10s)는
 서로 한도를 공유하지 않는다.
 
+## CandleThrottle — 캐시 없는 패스스루 전용, 캐시 히트 예외 없음 (Task 031 서브태스크 4)
+
+`CandleThrottle`(@Component)도 `PriceThrottle`/`SearchThrottle`과 동일한 Lua INCR+PEXPIRE 스크립트를
+쓰는 독립 컴포넌트다. Redis 키는 `throttle:candle:{userId}`, `CandleThrottleProperties`(limit=3/window=1s,
+`allfolio.candle-throttle.*`)를 직접 주입받는다. `GET /v1/assets/{id}/candles`의 COIN 경로
+(`CandleService.coinCandles()`)에만 적용하고 `stockCandles()`는 대상이 아니다.
+
+**"캐시 히트는 소모하지 않는다"는 PriceThrottle의 전제가 여기서는 성립하지 않는다.** COIN candles는
+`CandleCacheStore`를 전혀 쓰지 않는 순수 패스스루(요청마다 업비트를 직접 호출)이므로 캐시 히트/미스
+구분 자체가 없다 — 그래서 진입하는 모든 요청에 균일하게 Throttle을 적용한다(`PriceService.resolve`
+같은 `enforceThrottle` 플래그 분기가 필요 없다). 실측 근거: 30 VUs·30초 부하만으로 업비트가 실제
+429를 반환하기 시작했고 우리 서버 응답의 98%가 503으로 저하됨을 확인했다(Throttle 도입 전,
+`loadtest/results.md` 시나리오 4). 도입 후에는 같은 부하에서 실제 업비트 호출이 87건(≈2.9 req/s)으로
+억제되고 Resilience4j `upbit` CB가 `closed`를 유지함을 재측정으로 확인했다(같은 문서 서브태스크 4).
+
+**분리 이유**: `SearchThrottle` 절과 동일하다 — `PriceThrottle`에 `keyPrefix`만 바꿔 재사용하면
+`PriceThrottleProperties`(1건/1초)가 실제 적용되는 함정이 있어, 별도 `@Component`로 분리해
+`CandleThrottleProperties`(3건/1초)를 독립 보장한다.
+
 ## SearchCacheStore — 종목 검색 결과 캐시 (Task 026)
 
 `SearchCacheStore`는 `PriceCacheStore`와 다르게 fresh/stale 2단계 없이 단일 TTL(6h,
