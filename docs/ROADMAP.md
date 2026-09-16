@@ -714,9 +714,23 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
     - Minor 10건 중 `CandleCacheEntry.newestCovered` 미사용(최신 봉이 캐시 TTL을 넘겨 고정될 수 있음), `CandlePushScheduler`의 구독 키 순차 폴링 성능(Task 031 부하검증 재검토 대상), STOCK 캐시 실패 네거티브 캐싱 부재, COIN 과거 페이징 시 경계 버킷 부분집계 고정 등은 이번엔 보류
   - ⚠️ 남은 갭: 위 Minor 보류 항목들, 그리고 Capacitor의 `CapacitorHttp`가 기본 `EventSource`를 가로채는 공개 버그(ionic-team/capacitor#6582)는 Task 030(하이브리드 앱 패키징)에서 재검토
 
-- **Task 029: 푸시 알림 (FCM/APNs)**
-  - `device_tokens` 테이블, `revoked_at IS NULL` 부분 인덱스
-  - ⚠️ **착수 순서**: 번호는 029지만 실제 작업은 Task 030(Capacitor) 이후로 미룬다(사용자 확정, 2026-09-15) — 푸시 알림은 하이브리드 앱(Capacitor WebView)에서 쓸 용도라 앱 패키징이 먼저 있어야 FCM/APNs 등록·테스트가 의미가 있다
+- **Task 029: 푸시 알림 인프라 (기기 토큰 등록·FCM 발송 계층)** ✅ — 완료 (2026-09-16)
+  - ✅ 범위를 "인프라만"으로 축소 확정(사용자 지시, 2026-09-16) — 무엇을(가격 등락·이벤트·공지사항 등) 언제 보낼지는 아직 미정이고, 이번엔 그 내용과 무관하게 항상 필요한 배관(기기 토큰 등록/해제 + FCM 발송 능력)만 구현했다. 트리거는 전부 후속 태스크로 이관(아래 메모 참고)
+  - ✅ `V4__device_tokens.sql` 신규 마이그레이션 — `RefreshToken`(V3) 구조를 재사용하되 FCM 토큰은 해시 없이 평문 저장(위협 모델이 다름 — 탈취돼도 그 기기로 알림을 보낼 수 있는 것 이상의 권한이 없고, FCM 발송 시 원문 토큰이 필요해 해시로는 기능이 성립하지 않음). ROADMAP이 명시했던 `revoked_at IS NULL` 부분 인덱스(`idx_device_tokens_active`) 포함. `DeviceToken`/`DevicePlatform` 엔티티·`DeviceTokenRepository` 신규
+  - ✅ `infra/push/FcmSender` — Firebase Admin SDK(firebase-admin 9.10.0) 기반 발송 컴포넌트. 자격증명(`ALLFOLIO_FCM_CREDENTIALS_JSON`) 미설정 시 부팅은 성공하고 실제 발송 시점에만 `FcmNotConfiguredException`을 던지는 관대한 패턴(`ALLFOLIO_STOCK_SERVICE_KEY`와 동일 방침). `fcm` Circuit Breaker + 연결/읽기 타임아웃(2s/3s) 적용
+  - ✅ 신규 엔드포인트 2종: `POST /v1/devices`(등록 — 같은 유저 재등록은 재활성화 UPSERT, 다른 유저 재등록은 이전 레코드 삭제 후 재생성)·`DELETE /v1/devices/{id}`(해제, 경로에 토큰 원문 대신 행 UUID 사용) — 아래 「API 규격」 절에 반영
+  - ✅ 프론트: `@capacitor/push-notifications` 도입. 로그인 성공 시 토큰 등록, 로그아웃 시 등록했던 기기 토큰 자동 해제(`pushRegistration.ts`, fire-and-forget). 알림 수신 리스너·탭 라우팅은 실제 알림이 아직 없어 검증 불가능한 코드라 범위 밖으로 제외
+  - ✅ code-reviewer 통합 검증(실서버 기동+curl 실호출+psql 인덱스 실측+보안 검토) — **Blocker 2건 발견 후 전부 수정**:
+    - **(수정 완료)** `FcmSender`가 FCM 등록 토큰을 `addAllFids`(Firebase Installation ID용 필드)로 잘못 조립해, 실제 발송 트리거가 붙는 순간 100% 전달 실패하는 구조적 결함(firebase-admin 9.9.0→9.10.0 버전업 과정에서 도입 — 바이트코드 실측으로 `token`/`fid`가 서로 다른 필드임을 확인). `addAllTokens`로 원복하고 `ArgumentCaptor` 기반 회귀 테스트로 재발을 막았다(이 테스트가 없었다면 조용히 숨는 버그였다)
+    - **(수정 완료)** `FcmSender`의 외부 호출(Google FCM)에 Circuit Breaker·타임아웃이 없던 결함 — 이 저장소의 다른 모든 외부 API 클라이언트(`ExchangeRateClient`/`StockPriceClient`/`TwelveDataClient`)는 예외 없이 보유하고 있었다. `fcm` Circuit Breaker 인스턴스를 신설(자격증명 미설정은 외부 장애가 아니므로 `ignore-exceptions`로 집계 제외)
+  - ✅ Major 4건도 같은 검증에서 발견돼 함께 수정: ROADMAP 미등재(이번 갱신으로 해소, Task 019·028 때와 동일한 반복 유형) / 로그아웃 시 기기 토큰이 해제되지 않던 문제(프론트에서 자동 DELETE 호출로 해소) / 4096자 초과 토큰이 400이 아닌 409로 새던 검증 누락(`RegisterDeviceRequest.token`에 `@Size(max=4096)` 추가로 해소) / `FirebaseApp` 중복 초기화 시(같은 JVM에서 여러 `@SpringBootTest` 컨텍스트가 뜨는 등) 부팅이 깨질 수 있던 결함(`FirebaseApp.getApps()` 기반 재사용 로직 추가로 해소)
+  - ⚠️ 남은 갭(Minor 8건, 이번엔 보류): 재등록 시 요청의 `platform`이 조용히 무시됨(`updatable=false` 매핑) / `sendToTokens`에 500건 청크 분할이 없어 활성 토큰 500개 초과 유저에서 실패 가능 / `registerPushToken()`이 로그인마다 리스너를 중복 등록 / revoked 행 retention 정책과 `POST /v1/devices` Throttle이 없어 행이 무한 증식 가능 / 재소유 시 이전 행을 하드 삭제해 감사 이력이 안 남음(설계 근거는 문서화돼 있어 수용 가능) — 저위험으로 판단해 후속 과제로 남김
+
+  **후속 트리거 설계 메모(이번 세션 논의, 아직 스키마·서비스 설계는 없음)**:
+  - "가격 등락 감지"는 이 인프라를 쓸 수 있는 여러 트리거 후보 중 하나일 뿐이다 — 이벤트·공지사항 등 다른 종류의 알림도 `DeviceTokenRepository.findByUser_IdAndRevokedAtIsNull` + `FcmSender.sendToTokens` 조합을 그대로 재사용할 수 있다
+  - 국내 주식(STOCK, KRW)은 공공데이터포털 API가 EOD(장 마감 후 일별) 데이터만 제공해, 장중 실시간 등락 감지가 이 벤더로는 원천적으로 불가능하다는 제약이 있다
+  - 해외 주식(STOCK, USD)은 Twelve Data 무료 플랜 기준 분당 8회 호출 한도가 있어, 유저별로 개별 폴링하면 금방 소진된다 — 배치·캐시 전략이 선행돼야 한다
+  - 가격 등락 트리거를 만들게 되면 `price_alert_states` 같은 단일행+조건부 `UPDATE`(예: `WHERE last_notified_price != :current`) 설계로 중복 발송을 막는 방향이 후보로 논의됐다 — 실제 설계는 후속 태스크에서 처음부터 진행할 것
 
 - **Task 030: Capacitor 하이브리드 앱 패키징** ✅ — 완료 (2026-09-15)
   - ✅ `frontend/`에 `@capacitor/core`·`ios`·`android`(dependencies)·`cli`(devDependencies) 도입, `capacitor.config.ts` 신규 작성(`appId: com.allfolio.app`, `appName: AllFolio`, `webDir: dist`). `npx cap add ios/android`로 `frontend/ios/`·`frontend/android/` 네이티브 프로젝트 생성, `npm run build && npx cap sync`로 Vite `dist/` 산출물을 WebView에 반영
@@ -763,6 +777,8 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
 | `GET` | `/v1/assets/{id}/price` | 200 / 206 / 400 / 404 / 429 / 503 | 외부 시세 단건 조회(STOCK/COIN/CASH-USD). 타 유저 접근 시 404, STOCK·CASH(KRW) 자산에 요청 시 400 `PRICE_NOT_APPLICABLE`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN`(Task 021). Redis 캐시 stale 폴백 시 206 + 응답 본문 `isStale:true`, 사용자당 초당 1건 Throttle 초과 시 429 `PRICE_RATE_LIMITED`(Task 022) |
 | `GET` | `/v1/assets/{id}/candles` | 200 / 400 / 404 / 503 | 캔들스틱 조회(F007, Task 028). `interval`(COIN: `minute1~minute240`/`day`/`week`/`month`/`year`, STOCK: `day`/`week`/`month`/`year`)·`before`(선택, 이전 응답 마지막 bar의 `bucketStart` 그대로 재사용) 쿼리 파라미터. 타 유저 접근 시 404, CASH 자산·STOCK+분봉 조합은 400(전자는 `PRICE_NOT_APPLICABLE`, 후자는 `VALIDATION_ERROR`), 잘못된 `interval`/`before` 값도 400 `VALIDATION_ERROR`, 외부 API 장애 시 503 `EXTERNAL_API_DOWN`. 응답은 `{bars: [{bucketStart, open, high, low, close}], hasMoreHistory}` — `bars`는 최신순(내림차순) |
 | `GET` | `/v1/assets/{id}/candles/stream` | 200 / 400 / 401 / 404 | 캔들 실시간 스트리밍(SSE, COIN 전용, F007, Task 028). `Content-Type: text/event-stream`, 인증은 `Authorization` 헤더 또는 이 경로 전용 `?token=` 쿼리 파라미터 폴백(브라우저 `EventSource`가 커스텀 헤더를 못 붙이는 제약 — 완화 조건은 「배포 파이프라인」 Task 032 참고). STOCK/CASH 자산 요청 시 400 `VALIDATION_ERROR`(SSE는 COIN 전용), 타 유저 접근 시 404. 이벤트 이름 `candle`(payload는 REST와 동일한 bar 1건) + `: heartbeat` 코멘트(30초 주기) |
+| `POST` | `/v1/devices` | 201 / 400 / 401 | 기기(FCM) 토큰 등록(Task 029). 같은 토큰을 같은 유저가 재등록하면 기존 레코드를 재활성화(UPSERT), 다른 유저가 재등록하면 이전 레코드를 삭제하고 새 유저 명의로 재생성(`uk_device_tokens_token`이 `revoked_at`과 무관한 전체 UNIQUE 제약이라 revoke만으로는 공존 불가). `token`이 4096자 초과면 400 `VALIDATION_ERROR`. 응답에 토큰 원문은 포함하지 않는다 |
+| `DELETE` | `/v1/devices/{id}` | 204 / 401 / 404 | 기기 토큰 해제(Task 029). 경로는 토큰 원문이 아닌 `device_tokens` 자체 UUID(민감값 노출 방지). 존재하지 않거나 타 유저 소유면 404 `DEVICE_NOT_FOUND`(403 대신 404로 ID 유출 방지, 기존 컨벤션과 동일). 이미 해제된 기기를 다시 호출해도 idempotent하게 204 |
 
 **Bean Validation 규칙**
 - `ticker`: 1~20자, 공백 불가
@@ -901,6 +917,8 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 **구현된 코드 (Task 022)**: `PRICE_RATE_LIMITED`(429, 캐시 미스/스테일 상태에서 사용자당 초당 1건 Throttle 한도 초과 — 캐시 히트는 이 한도를 소모하지 않음). 캐시 stale 폴백은 에러가 아닌 성공 응답이라 이 표의 `{code,message,timestamp}` 포맷 대신 206 + 응답 본문 `isStale:true`로 표현한다
 
 **구현된 코드 (Task 024)**: `INSUFFICIENT_QUANTITY`(400, `POST /v1/assets/{id}/transactions`에서 SELL 수량이 현재 보유 수량 초과). 잘못된 `cursor` 값은 신규 코드를 추가하지 않고 기존 `VALIDATION_ERROR`로 응답한다(`InvalidCursorException`, `AvgPriceRequiredException`과 동일 패턴)
+
+**구현된 코드 (Task 029)**: `DEVICE_NOT_FOUND`(404, `DELETE /v1/devices/{id}`에서 존재하지 않거나 타 유저 소유 기기 — `ASSET_NOT_FOUND`와 동일하게 403 대신 404). `token` 길이 초과(4096자)는 신규 코드 없이 기존 `VALIDATION_ERROR`로 응답한다(`AvgPriceRequiredException`과 동일 패턴, code-reviewer 검증에서 지적된 `@Size(max=4096)` 미비를 이 갱신으로 해소)
 
 ---
 
