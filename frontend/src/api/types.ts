@@ -154,6 +154,16 @@ export interface ErrorResponse {
   timestamp: string;
 }
 
+// POST /v1/devices 응답 (Task 029). 토큰 원문은 응답에 포함되지 않는다.
+export type DevicePlatform = 'ANDROID' | 'IOS' | 'WEB';
+
+export interface DeviceResponse {
+  id: string;
+  platform: DevicePlatform;
+  // ISO-8601 문자열
+  createdAt: string;
+}
+
 export interface SignupRequest {
   email: string;
   password: string;

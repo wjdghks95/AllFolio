@@ -16,6 +16,7 @@
     "@capacitor/android": "^8.5.2",
     "@capacitor/core": "^8.5.2",
     "@capacitor/ios": "^8.5.2",
+    "@capacitor/push-notifications": "^8.1.2",
     "big.js": "^7.0.1",
     "lightweight-charts": "^5.2.1",
     "react": "^19.2.8",
