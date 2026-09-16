@@ -48,6 +48,10 @@ allfolio:
   twelvedata:
     base-url: https://api.twelvedata.com
     api-key: ${ALLFOLIO_TWELVEDATA_API_KEY:}
+  fcm:
+    # Firebase 서비스 계정 JSON을 한 줄로 압축한 문자열. 미설정 시에도 부팅은 정상적으로 되고,
+    # 실제 발송 시점에만 실패한다(ALLFOLIO_STOCK_SERVICE_KEY와 동일 패턴, .claude/agents/firebase-fcm.md).
+    credentials-json: ${ALLFOLIO_FCM_CREDENTIALS_JSON:}
   price-cache:
     coin-fresh-ttl: 10s
     stock-fresh-ttl: 12h
@@ -121,6 +125,16 @@ resilience4j:
         # CB 실패 집계에서 제외한다.
         ignore-exceptions:
           - com.allfolio.domain.exception.TickerNotFoundException
+      fcm:
+        sliding-window-size: 4
+        minimum-number-of-calls: 4
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        # 자격증명 미설정(ALLFOLIO_FCM_CREDENTIALS_JSON 빈 값)은 외부 서비스 장애가 아니라 배포 설정
+        # 문제이므로 CB 실패 집계에서 제외한다(code-reviewer B2, 위 stock/upbit/twelvedata의
+        # TickerNotFoundException 제외 패턴과 동일한 이유).
+        ignore-exceptions:
+          - com.allfolio.infra.push.FcmNotConfiguredException
 
 management:
   endpoints:

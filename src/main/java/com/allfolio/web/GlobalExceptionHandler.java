@@ -2,6 +2,7 @@ package com.allfolio.web;
 
 import com.allfolio.domain.exception.AssetNotFoundException;
 import com.allfolio.domain.exception.AvgPriceRequiredException;
+import com.allfolio.domain.exception.DeviceTokenNotFoundException;
 import com.allfolio.domain.exception.EmailAlreadyExistsException;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.InsufficientHoldingQuantityException;
@@ -182,6 +183,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of("ASSET_NOT_FOUND", e.getMessage()));
+    }
+
+    /** 존재하지 않거나 남의 기기 — 403이 아닌 404(AssetNotFoundException과 동일한 컨벤션, Task 029). */
+    @ExceptionHandler(DeviceTokenNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleDeviceTokenNotFound(DeviceTokenNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ErrorResponse.of("DEVICE_NOT_FOUND", e.getMessage()));
     }
 
     /**
