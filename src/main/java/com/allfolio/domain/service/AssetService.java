@@ -3,6 +3,7 @@ package com.allfolio.domain.service;
 import com.allfolio.domain.Asset;
 import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Holding;
+import com.allfolio.domain.PrecisionScale;
 import com.allfolio.domain.Transaction;
 import com.allfolio.domain.TransactionType;
 import com.allfolio.domain.User;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -151,14 +153,15 @@ public class AssetService {
     }
 
     private AssetResponse toResponse(Asset asset, Holding holding) {
+        int avgPriceScale = PrecisionScale.scaleFor(asset.getAssetType(), asset.getCurrency());
         return new AssetResponse(
                 asset.getId(),
                 asset.getTicker(),
                 asset.getName(),
                 asset.getAssetType(),
                 asset.getCurrency(),
-                holding.getQuantity().toPlainString(),
-                holding.getAvgPrice().toPlainString(),
+                holding.getQuantity().setScale(PrecisionScale.QUANTITY_SCALE, RoundingMode.HALF_UP).toPlainString(),
+                holding.getAvgPrice().setScale(avgPriceScale, RoundingMode.HALF_UP).toPlainString(),
                 holding.getVersion(),
                 holding.getUpdatedAt());
     }

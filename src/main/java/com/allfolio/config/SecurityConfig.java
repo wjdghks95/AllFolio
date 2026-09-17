@@ -4,6 +4,7 @@ import com.allfolio.infra.security.JwtFilter;
 import com.allfolio.infra.security.JwtIssuer;
 import com.allfolio.infra.security.JwtProperties;
 import jakarta.servlet.DispatcherType;
+import java.time.Duration;
 import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -45,6 +46,7 @@ public class SecurityConfig {
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Last-Event-ID"));
         configuration.setAllowCredentials(true);
+        configuration.setMaxAge(Duration.ofHours(1));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

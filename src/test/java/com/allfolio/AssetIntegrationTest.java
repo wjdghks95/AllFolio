@@ -57,7 +57,7 @@ class AssetIntegrationTest extends AbstractIntegrationTest {
         assertThat(body.get("name")).isEqualTo("삼성전자");
         assertThat(body.get("assetType")).isEqualTo("STOCK");
         assertThat(body.get("currency")).isEqualTo("KRW");
-        assertThat(body.get("quantity")).isEqualTo("10");
+        assertThat(body.get("quantity")).isEqualTo("10.00000000");
         assertThat(body.get("avgPrice")).isEqualTo("60000");
         assertThat(body.get("version")).isEqualTo(0);
         assertThat(body.get("id")).isNotNull();
@@ -146,7 +146,7 @@ class AssetIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(result).hasStatusOk();
         Map<String, Object> body = bodyOf(result);
-        assertThat(body.get("quantity")).isEqualTo("20");
+        assertThat(body.get("quantity")).isEqualTo("20.00000000");
         assertThat(body.get("avgPrice")).isEqualTo("70000");
         assertThat(body.get("version")).isEqualTo(1);
     }
@@ -207,11 +207,13 @@ class AssetIntegrationTest extends AbstractIntegrationTest {
     }
 
     /**
-     * NUMERIC(28,8)(정수부 20자리+소수부 8자리)의 CreateAssetRequest.quantity/avgPrice 상한 근처
-     * 값이 DB 왕복 후에도 손실 없이 유지되는지 확인한다(docs/ROADMAP.md Task 016).
+     * NUMERIC(28,8)(정수부 20자리+소수부 8자리)의 CreateAssetRequest.quantity/avgPrice 상한 근처 값이
+     * DB 저장·조회 과정에서 오버플로 없이 처리되는지 확인한다. quantity는 PrecisionScale.QUANTITY_SCALE(8자리)과
+     * 스케일이 일치해 손실 없이 유지되지만, avgPrice는 응답 시 PrecisionScale.scaleFor(STOCK, "KRW")=0로
+     * HALF_UP 반올림되므로 상한값(...99999999)이 다음 정수로 올림된다(docs/ROADMAP.md Task 016).
      */
     @Test
-    void registeringAssetWithNumericUpperBoundValuesRoundTripsWithoutLoss() {
+    void registeringAssetWithNumericUpperBoundValuesRoundTripsWithoutOverflow() {
         String quantity = "12345678901234567890.12345678";
         String avgPrice = "99999999999999999999.99999999";
         String assetId = idOf(createAsset(tokenA, stockRequest("005930", "삼성전자", quantity, avgPrice)));
@@ -221,7 +223,7 @@ class AssetIntegrationTest extends AbstractIntegrationTest {
         assertThat(result).hasStatusOk();
         Map<String, Object> body = bodyOf(result);
         assertThat(new BigDecimal((String) body.get("quantity"))).isEqualByComparingTo(new BigDecimal(quantity));
-        assertThat(new BigDecimal((String) body.get("avgPrice"))).isEqualByComparingTo(new BigDecimal(avgPrice));
+        assertThat(body.get("avgPrice")).isEqualTo("100000000000000000000");
     }
 
     /** CreateAssetRequest.quantity의 @Digits(integer=20) 상한을 넘는 정수부 21자리는 400을 내야 한다. */
@@ -235,22 +237,21 @@ class AssetIntegrationTest extends AbstractIntegrationTest {
     }
 
     /**
-     * POST 응답은 요청 스케일 그대로("10")를 돌려주지만, GET /v1/assets는 DB NUMERIC(28,8) 왕복
-     * 스케일("10.00000000")을 그대로 노출한다. 버그는 아니지만 처리 방향(GET 스케일로 통일할지,
-     * 자산 유형별 스케일을 POST/PUT에도 적용할지)은 아직 미정이다(docs/ROADMAP.md Task 012 「남은
-     * 갭」 213·236행) — 이 테스트는 그 미결 사항을 "결정 완료"가 아닌 현재 동작의 스냅샷으로
-     * 고정해, 다음에 통일하기로 결정될 때 이 테스트부터 고치면 되도록 한다(Task 016).
+     * POST/GET 모두 AssetService.toResponse()를 공유하므로 PrecisionScale 규칙(quantity 8자리 고정,
+     * avgPrice는 자산유형·통화 기준)으로 정규화된 동일한 스케일을 반환한다(docs/ROADMAP.md Task 016).
      */
     @Test
-    void postEchoesRequestScaleWhileGetListNormalizesToDbScale() {
+    void postAndGetListShareSameNormalizedScale() {
         MvcTestResult createResult = createAsset(tokenA, stockRequest("005930", "삼성전자", "10", "60000"));
-        assertThat(bodyOf(createResult).get("quantity")).isEqualTo("10");
+        assertThat(bodyOf(createResult).get("quantity")).isEqualTo("10.00000000");
+        assertThat(bodyOf(createResult).get("avgPrice")).isEqualTo("60000");
 
         MvcTestResult listResult = authorizedGet("/v1/assets", tokenA);
         List<Map<String, Object>> items = itemsOf(bodyOf(listResult));
 
         assertThat(items).hasSize(1);
         assertThat(items.getFirst().get("quantity")).isEqualTo("10.00000000");
+        assertThat(items.getFirst().get("avgPrice")).isEqualTo("60000");
     }
 
     /**
