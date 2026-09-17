@@ -776,6 +776,71 @@ describe('AssetDetailPage 캔들 차트(F007, Task 028)', () => {
     expect(weekCall).toBeTruthy();
   });
 
+  it('캔들 조회가 실패하면 에러 안내와 "다시 시도" 버튼을 보여주고, 클릭하면 재조회한다', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    let candleCallCount = 0;
+    const dayBars: CandleSeriesResponse = {
+      bars: [bar('2026-09-01', '60000')],
+      hasMoreHistory: false,
+    };
+    mockGetRoutes(fetchMock, {
+      asset: samsungFixture,
+      portfolio: portfolioResponseFor(samsungPortfolioItem),
+      candles: () => {
+        candleCallCount += 1;
+        // 첫 조회는 실패, 재시도(2번째 호출)부터는 성공 — "다시 시도" 버튼이 실제로
+        // 재조회를 유발하는지를 성공 전환으로 확인한다.
+        return candleCallCount === 1 ? 'CLIENT_ERROR' : dayBars;
+      },
+    });
+    renderAssetDetailPage(SAMSUNG_ID);
+
+    await waitFor(() => expect(screen.getByTestId('asset-detail-chart-error')).toBeTruthy());
+    expect(screen.getByTestId('asset-detail-chart-error').textContent).toBe(
+      ERROR_MESSAGES.CLIENT_ERROR,
+    );
+    expect(candleCallCount).toBe(1);
+
+    fireEvent.click(screen.getByTestId('asset-detail-chart-retry'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('asset-detail-chart-canvas-bar-count').textContent).toBe('1'),
+    );
+    expect(candleCallCount).toBe(2);
+    expect(screen.queryByTestId('asset-detail-chart-error')).toBeNull();
+  });
+
+  it('실패 후 같은 interval을 다시 클릭해도 재조회한다(회귀: candleInterval 미변경으로 인한 재조회 누락 방지)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    let candleCallCount = 0;
+    const dayBars: CandleSeriesResponse = {
+      bars: [bar('2026-09-01', '60000')],
+      hasMoreHistory: false,
+    };
+    mockGetRoutes(fetchMock, {
+      asset: samsungFixture,
+      portfolio: portfolioResponseFor(samsungPortfolioItem),
+      candles: () => {
+        candleCallCount += 1;
+        return candleCallCount === 1 ? 'CLIENT_ERROR' : dayBars;
+      },
+    });
+    renderAssetDetailPage(SAMSUNG_ID);
+
+    await waitFor(() => expect(screen.getByTestId('asset-detail-chart-error')).toBeTruthy());
+    expect(candleCallCount).toBe(1);
+
+    // 이미 기본값(day)이 선택된 상태에서 같은 '일' 칸을 다시 누른다.
+    fireEvent.click(screen.getByTestId('asset-detail-chart-interval-day'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('asset-detail-chart-canvas-bar-count').textContent).toBe('1'),
+    );
+    expect(candleCallCount).toBe(2);
+  });
+
   it('"과거 더 보기"를 누르면 이전 구간을 병합해 보여주고, 더 없으면 버튼이 사라진다', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

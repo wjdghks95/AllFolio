@@ -220,6 +220,9 @@ export default function AssetDetailPage() {
   // 실시간 갱신은 다음 하위 태스크(8번) 범위다. 'day'는 COIN/STOCK 모두 유효한 공통 interval이라
   // 자산유형을 몰라도(로딩 중에도) 안전한 기본값으로 쓸 수 있다.
   const [candleInterval, setCandleInterval] = useState(DEFAULT_CANDLE_INTERVAL);
+  // 조회 실패 후 재시도(같은 interval 재클릭 포함)를 강제로 유발하기 위한 카운터. candleInterval이
+  // 안 바뀌어도(같은 값 재클릭·"다시 시도" 버튼) 이 값을 올려 조회 effect의 의존성을 갱신한다.
+  const [candleRetryToken, setCandleRetryToken] = useState(0);
   const [candleState, setCandleState] = useState<
     | { status: 'loading' }
     | { status: 'error'; code: string }
@@ -269,7 +272,7 @@ export default function AssetDetailPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asset?.id, asset?.assetType, candleInterval]);
+  }, [asset?.id, asset?.assetType, candleInterval, candleRetryToken]);
 
   // SSE 실시간 갱신(F007, Task 028 프론트 8번째 하위 태스크). COIN 자산에서만 연결한다 —
   // STOCK/CASH는 이 스트림을 지원하지 않아 구독하면 400을 준다. 새로 들어온 bar 1건을
@@ -537,6 +540,19 @@ export default function AssetDetailPage() {
     }
   };
 
+  // interval 토글 클릭 핸들러. 같은 값을 다시 눌러도(예: '일'이 이미 선택된 상태에서 '일' 재클릭)
+  // candleRetryToken을 매번 올려 조회 effect를 강제 재실행시킨다 — candleInterval 값만으로는
+  // 같은 값 재클릭 시 effect 의존성이 안 바뀌어 재조회가 안 되기 때문이다.
+  const handleCandleIntervalChange = (value: string) => {
+    setCandleInterval(value);
+    setCandleRetryToken((n) => n + 1);
+  };
+
+  // 캔들 조회 실패 화면의 "다시 시도" 버튼. interval은 그대로 두고 카운터만 올려 재조회를 유발한다.
+  const handleCandleRetry = () => {
+    setCandleRetryToken((n) => n + 1);
+  };
+
   const priceOpts = { currency: asset.currency, assetType: asset.assetType };
   // portfolioItem은 옵셔널이다(Minor 4) — 없으면 파생 필드는 전부 null로 두어 기존
   // NULL_DISPLAY("—") 규칙이 자연히 타게 한다.
@@ -680,7 +696,7 @@ export default function AssetDetailPage() {
               <SegmentToggle
                 value={candleInterval}
                 options={CANDLE_INTERVAL_OPTIONS[asset.assetType as 'STOCK' | 'COIN']}
-                onChange={setCandleInterval}
+                onChange={handleCandleIntervalChange}
                 ariaLabelledBy="asset-detail-chart-interval-label"
                 testId="asset-detail-chart-interval"
               />
@@ -713,9 +729,21 @@ export default function AssetDetailPage() {
                   </p>
                 </div>
               ) : candleState.status === 'error' ? (
-                <Alert tone="error" testId="asset-detail-chart-error">
-                  {messageForErrorCode(candleState.code)}
-                </Alert>
+                <>
+                  <Alert tone="error" testId="asset-detail-chart-error">
+                    {messageForErrorCode(candleState.code)}
+                  </Alert>
+                  <div className="mt-3 flex justify-center">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={handleCandleRetry}
+                      testId="asset-detail-chart-retry"
+                    >
+                      다시 시도
+                    </Button>
+                  </div>
+                </>
               ) : (
                 <>
                   <CandlestickChart
