@@ -1,6 +1,6 @@
 # AllFolio 개발 로드맵
 
-**최종 수정:** 2026-09-16
+**최종 수정:** 2026-09-17
 **본 문서의 위치:** `docs/PRD.md`가 화면·기능 명세(무엇을 만드는가)를 다루는 반면, 본 문서는 Phase/Task 진행 상황·API 규격·에러 포맷·성능 KPI·리스크의 **single source of truth**(언제·어떤 순서로·어떤 규격으로 만드는가)이다. 기존 `docs/PHASE1_PLAN.md`(Phase 1 백엔드만 다루던 문서)를 대체·흡수하며, Phase 2~5와 프론트엔드 트랙을 함께 포함한다.
 
 ## 개요
@@ -238,7 +238,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - **(문서로 해결)** `avgPrice`가 M4로 반올림되면서 `cost`(반올림 전 원본 정밀도로 계산)와 `quantity × 응답의 avgPrice`가 반올림 오차만큼 어긋나게 됨 — 코드는 그대로 두고 위 「`GET /v1/portfolio` 응답 예시」 절에 예외로 명문화(사용자 결정: 화면 표시값엔 영향 없고 코드 수정 비용 대비 실익이 낮다고 판단)
     - Minor 2건 추가 발견: (a) `quantity`/`avgPrice`가 테스트로 전혀 검증되지 않아 위 Major를 테스트가 못 잡았음 — `PortfolioIntegrationTest`에 항목별 스케일 단언과 소수 평단가 회귀 케이스 추가로 해결. (b) `items` 배열 순서가 문서에 정의돼 있지 않던 문제 — `AssetRepository.findByUser_Id`를 `findByUser_IdOrderByIdDesc`(단일 인자 오버로드)로 바꿔 `GET /v1/assets`와 동일하게 id DESC(최신 등록순) 보장으로 해결
   - ⚠️ 남은 갭:
-    - `GET /v1/assets`(Task 012)와 `GET /v1/portfolio`(Task 013)의 `quantity`/`avgPrice` 스케일 표기 기준이 서로 다르다(위 서술) — 두 엔드포인트를 통일할지는 다음 착수 시 재검토(Task 016에서 회귀 테스트로 현재 동작을 스냅샷 고정, 처리 방향 자체는 여전히 미정)
+    - ✅ (2026-09-17 해소 — 아래 「GET /v1/assets↔portfolio 스케일 통일 + CORS preflight 캐시 설정」 참고) `GET /v1/assets`(Task 012)와 `GET /v1/portfolio`(Task 013)의 `quantity`/`avgPrice` 스케일 표기 기준이 서로 다르던 문제
     - ✅ (Task 016에서 해소) KRW/USD 외 통화(예: JPY)로 자산을 등록하면 `scaleFor()`가 스케일 2로 폴백하는 문제 — 아래 「금융 정밀도 규칙」 표에 폴백 행 추가로 해소
     - ✅ (Task 016에서 해소) 정밀도 스케일 로직이 `PortfolioService.scaleFor`/`SimulateAvgPriceResponse`/프론트 `lib/big.ts` 3곳에 흩어져 있던 문제 — 백엔드 2곳은 `domain/PrecisionScale`로 통합(프론트는 언어 경계라 별개 유지, Task 007이 이미 `lib/big.ts`에 별도 상수화를 해둔 상태)
 
@@ -286,7 +286,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ code-reviewer 독립 검증(실제 `./gradlew test --rerun-tasks` 실행 + 뮤테이션 검증 포함) — Blocker 0건, Major 0건. Minor 9건 발견, 위 서술된 5건(주석 오탐·동시성 Javadoc·계산 뮤테이션 사각지대·quantity 상수화·상한 초과 케이스·문구 정정)은 전부 반영. 나머지는 이 항목과 아래 「금융 정밀도 규칙」 갱신으로 해소
   - ✅ 테스트 개수 실측: 기존 85케이스 → **108케이스**(`BigDecimalPrecisionTest` 13, `OptimisticLockingTest` 1, `SimulationServiceTest` 6, `AssetIntegrationTest` +3 신규 반영)
   - ⚠️ 남은 갭:
-    - `GET /v1/assets`와 `GET /v1/portfolio`의 `quantity`/`avgPrice` 스케일 표기 불일치(Task 012·013 이월)는 이번에 회귀 테스트로 스냅샷만 고정했을 뿐, 통일 여부는 여전히 미정 — 다음 착수 시 결정
+    - ✅ (2026-09-17 해소 — 아래 「GET /v1/assets↔portfolio 스케일 통일 + CORS preflight 캐시 설정」 참고) `GET /v1/assets`와 `GET /v1/portfolio`의 `quantity`/`avgPrice` 스케일 표기 불일치(Task 012·013 이월)
     - `OptimisticLockingTest`가 진짜 DB 트랜잭션 경합까지 구분해 증명하지는 못한다(위 서술) — 필요해지면 예외 발생 지점을 로거로 구분하는 방식 검토
 
 - **Task 017: MVP 로컬 실행 문서화** ✅ — 완료 (2026-08-27)
@@ -441,7 +441,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - 재검증: `TransactionIntegrationTest` 11/11 통과(회귀 테스트 3건 추가분 포함), 전체 스위트(`./gradlew test --rerun-tasks`) 195개 전부 통과, 회귀 없음
   - ⚠️ 남은 갭:
     - 커서 페이지네이션의 타이브레이크 조건이 인덱스 범위 조건이 아닌 Filter로 처리돼 페이지 수가 많아지면 사실상 O(N) 스캔이다(위 code-reviewer Minor). 성능 개선(행 값 비교 `(t.tradedAt, t.id) < (:t, :id)` + 복합 인덱스)은 마이그레이션을 동반해 이번 Task 범위 밖 — 다음 착수 시 `database` 에이전트 소관으로 재검토
-    - `POST` 응답(요청 스케일 그대로)과 `GET` 목록 응답(DB `NUMERIC(28,8)` 왕복 스케일)의 표기 차이는 Task 012·013이 이미 등재한 기존 갭을 이 API도 그대로 승계한다 — 신규 결함은 아니며 처리 방향은 여전히 미정
+    - ✅ (2026-09-17 해소 — 아래 「GET /v1/assets↔portfolio 스케일 통일 + CORS preflight 캐시 설정」 참고) `POST` 응답(요청 스케일 그대로)과 `GET` 목록 응답(DB `NUMERIC(28,8)` 왕복 스케일)의 표기 차이는 Task 012·013이 이미 등재한 기존 갭을 이 API도 그대로 승계했었다 — 신규 결함은 아니었음
 
 ### Phase 4: 종목 검색 기반 등록 + 미국 주식 시세
 
@@ -740,7 +740,7 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
   - ✅ 웹폰트(Instrument Sans·Gothic A1·Reddit Mono) self-host 전환은 이번엔 보류 — 기존 폴백 스택(`--font-sans` 등)으로 CDN 실패 시에도 기능은 유지되고, 제대로 하려면 실제 사용 글리프 범위를 감사한 서브셋 작업(+ui-ux-designer 검수)이 별도로 필요해 이번 프론트 범위와 결이 다르다고 판단(코드 변경 없음, 후속 과제로 남김)
   - ✅ 앱 아이콘·스플래시 화면을 Capacitor 기본 템플릿에서 AllFolio 브랜드로 교체(ui-ux-designer, ROADMAP 원문 범위 밖이었으나 사용자 추가 요청으로 이번 Task에서 함께 처리) — 기존 `favicon.svg`의 마크(잉크 타일+막대 3개+평단선 점선)를 그대로 재사용해 iOS/Android 각 해상도 30장 생성, Android 적응형 아이콘 배경색도 흰색→잉크색(`#0E1C31`)으로 변경. `docs/DESIGN.md` 1.10.0→1.11.0(§5-1 신설, 폐기안·후속 과제 기록)
   - ✅ code-reviewer 독립 검증 2회(실제 서버 기동+curl 프리플라이트 실측) — 1차 Blocker 0건·Major 3건 발견: (a) Capacitor 기본 `androidScheme`이 실제로는 `https`인데 `http://localhost`를 허용해 Android 앱의 모든 API 호출이 CORS로 막히던 결함(리포에 내려받은 Capacitor 소스로 근거 확인 후 `https://localhost`로 정정) (b) `VITE_API_BASE_URL`이 어디에도 문서화돼 있지 않아 패키징 빌드가 여전히 상대경로를 쓰던 문제(문서화로 해소) (c) SSE 재연결용 `Last-Event-ID` 헤더 미허용(허용 목록에 추가로 해소). 즉시 조치 Minor 2건(테스트 커버리지 공백, CORS 백엔드 테스트 부재)도 함께 수정. 2차 재검증에서 Blocker 0건·Major 0건 확인 — 재검증 중 `.env.example`이 빈 블롭으로 스테이징된 신규 갭을 발견해 코디네이터가 `git add`로 즉시 해소
-  - ⚠️ 남은 갭: 보류 Minor 3건(`capacitor.config.ts`가 `tsconfig` 검사 대상 밖이라 typecheck가 그 파일을 안 봄, `apiUrl()`이 베이스 URL 후행 슬래시를 정규화하지 않음, CORS `Access-Control-Max-Age` 미설정으로 모바일에서 비단순 요청마다 프리플라이트 왕복이 추가됨) — 저위험으로 판단해 보류. 실제 Xcode/Android Studio 시뮬레이터·실기기 실행은 로컬 환경 제약(둘 다 미설치)으로 검증 못 함 — 아이콘·스플래시는 파일 크기·포맷·색상까지 확인했으나 실제 홈 화면·부팅 화면 렌더링은 미확인, Android 12+ 전용 시스템 스플래시 테마 속성(`windowSplashScreenBackground`)도 같은 이유로 손대지 않음
+  - ⚠️ 남은 갭: 보류 Minor 2건(`capacitor.config.ts`가 `tsconfig` 검사 대상 밖이라 typecheck가 그 파일을 안 봄, `apiUrl()`이 베이스 URL 후행 슬래시를 정규화하지 않음) — 저위험으로 판단해 보류. ✅ (2026-09-17 해소 — 아래 「GET /v1/assets↔portfolio 스케일 통일 + CORS preflight 캐시 설정」 참고) CORS `Access-Control-Max-Age` 미설정으로 모바일에서 비단순 요청마다 프리플라이트 왕복이 추가되던 문제. 실제 Xcode/Android Studio 시뮬레이터·실기기 실행은 로컬 환경 제약(둘 다 미설치)으로 검증 못 함 — 아이콘·스플래시는 파일 크기·포맷·색상까지 확인했으나 실제 홈 화면·부팅 화면 렌더링은 미확인, Android 12+ 전용 시스템 스플래시 테마 속성(`windowSplashScreenBackground`)도 같은 이유로 손대지 않음
 
 - **Task 031: 부하 검증 및 성능 튜닝** ✅ — 완료 (2026-09-16)
   - ✅ 이 저장소에 k6(부하 테스트 도구)를 처음 도입 — `loadtest/`(`README.md`·`results.md` + k6 스크립트 4종: SSE 브로드캐스트/SSE 다중 구독 키/STOCK candles/COIN candles) 신설. 표준 k6가 SSE(`EventSource`)를 지원하지 않음을 실측 확인(`k6/experimental/sse` 등 관련 모듈 전부 미등록) — `http.get()`이 타임아웃까지 연결을 붙들고 끊길 때까지 수신한 바디를 그대로 보존한다는 특성을 이용한 근사 측정 방식을 README에 근거와 함께 기록, 별도 curl 보조 스크립트는 불필요했다
@@ -751,11 +751,30 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
   - ✅ **인프라 튜닝(HikariCP/Tomcat) — 병목 없음 실측 확인, 변경 없음**: 1,000 VUs SSE 부하를 재현하며 `hikaricp_connections_pending`을 1초 간격 90회 폴링해 전 구간 0.0을 확인(기본 풀 10개 중 최대 1개만 사용). Virtual Threads 활성 상태에서는 Tomcat 스레드 풀 관련 Prometheus 메트릭 자체가 노출되지 않음도 확인(고정 크기 워커 풀이 없어 "Tomcat 스레드 튜닝" 개념이 이 구성에는 성립하지 않는다)
   - ✅ code-reviewer 통합 검증(실제 서버 기동 + curl/k6 실측 병행) — **Blocker 0건**. Major 2건 발견, 전부 해소: 위 (a) 틱 겹침 결함(코드 수정 완료) / API 규격 표·에러 코드 절에 COIN candles의 신규 429 상태 미등재(이번 갱신으로 해소, 아래 「API 규격」·「에러 응답 포맷」 절 참고). Minor 다수(문서 오타 정정, `CandleThrottle` fail-open 분기 테스트 추가, `infra/cache/CLAUDE.md`에 `CandleThrottle` 절 추가 등)도 함께 해소
   - ✅ 담당: senior-backend(k6 스크립트·실측·모든 코드 변경) · code-reviewer(통합 검증, Major 발견) · 코디네이터(서브태스크 분할·위임·최종 문서화)
-  - ⚠️ 남은 갭(이번엔 보류, 후속 과제):
+  - ✅ 남은 갭 4건 — 2026-09-17 후속 세션에서 전부 해소(아래 「Task 031 후속: SSE 캔들 인프라 갭 해소 + 프론트 캔들 재조회 버그 수정」 참고). 당시 기록:
     - `CandleSseRegistry`가 SSE 클라이언트가 타임아웃으로 소켓을 끊을 때 구독 키를 즉시 정리하지 못하는 사례가 실측 재현됐다(`onError`/`onCompletion` 콜백이 바로 발화하지 않는 것으로 보임) — 원인 진단·수정 미착수, 재측정 시엔 앱 재시작으로만 회피했다
     - HTTP 압축(gzip) 전역 미적용(위 (b) 참고) — candles뿐 아니라 포트폴리오·자산 목록 등 다른 JSON 응답도 함께 가벼워질 수 있는 전역 설정이다. 적용 시 SSE(`text/event-stream`)가 실수로 압축 대상에 포함되지 않는지 회귀 확인이 필요하다
     - `CandlePushScheduler`의 폴링 틱 내 팬아웃(구독 키 수만큼 동시에 나가는 업비트 호출)에는 동시성 상한이 없다 — N=500 재측정에서 틱 겹침은 해소됐지만, 그 재측정 자체에서 업비트 429(97건)·CB `not_permitted_calls_total`(13,019건) 발생과 테스트 종료 시점 CB `half_open`을 재확인했다. REST 조회 경로(위 (c))는 `CandleThrottle`로 막았지만 SSE 폴링 경로는 여전히 무방비 상태다 — `Semaphore` 등으로 팬아웃 동시성 자체를 업비트 한도 이하로 제한할지는 다음 착수 시 판단이 필요하다
     - `AssetDetailPage.tsx`의 candles 조회 effect가 `[asset.id, assetType, candleInterval]`에만 의존해, 같은 `interval`을 다시 눌러도 재조회되지 않는다 — 위 429 응답을 받은 뒤 같은 interval을 다시 클릭해도 에러 상태가 풀리지 않고 다른 interval로 갔다 와야 한다(code-reviewer 발견, 프론트 미착수)
+
+- **GET /v1/assets↔portfolio 스케일 통일 + CORS preflight 캐시 설정** ✅ — 구현 완료 (2026-09-17, formal Task 번호 없이 진행, code-reviewer 통합 검증은 아직 진행 전)
+  - 대상: Task 012·013이 남기고 Task 016·024가 승계만 해온 이월 갭 — `AssetService.toResponse()`(`GET /v1/assets` 단건·목록, `POST /v1/assets` 응답까지 전부 공유)가 `quantity`/`avgPrice`를 DB `NUMERIC(28,8)` 왕복 스케일 그대로 `toPlainString()`해, `PortfolioService`가 이미 적용 중인 `PrecisionScale` 정규화와 표기가 어긋나던 문제. Task 030이 남긴 CORS `Access-Control-Max-Age` 미설정(모바일에서 비단순 요청마다 프리플라이트 왕복 추가)도 같은 세션에서 함께 처리했다(서로 무관하지만 둘 다 backend 한 줄 수정 규모라 묶어 위임)
+  - ✅ `AssetService.toResponse()`에 `PrecisionScale` 적용 — `quantity`는 `PrecisionScale.QUANTITY_SCALE`(8)로 고정, `avgPrice`는 `PrecisionScale.scaleFor(assetType, currency)`로 정규화(`PortfolioService`와 동일 규칙). `createAsset`·`getAsset`·`listAssets`·`updateHolding` 4개 메서드가 이 헬퍼를 공유하므로 `POST`/`GET` 응답 스케일이 이제 전부 일치한다
+  - ✅ `SecurityConfig.corsConfigurationSource()`에 `configuration.setMaxAge(Duration.ofHours(1))` 추가 — 프리플라이트 캐시 유효기간을 1시간으로 설정, 기존 필터 체인 구조는 무변경
+  - ✅ `AssetIntegrationTest` 갱신 — `registeringAssetWithNumericUpperBoundValuesRoundTripsWithoutLoss`를 `...WithoutOverflow`로 개명(NUMERIC 상한 근처 `avgPrice`가 이제 HALF_UP으로 반올림돼 다음 정수로 올라가는 동작을 반영), `postEchoesRequestScaleWhileGetListNormalizesToDbScale`을 `postAndGetListShareSameNormalizedScale`로 개명(POST/GET 응답이 이제 같은 정규화 스케일을 반환함을 검증)
+  - ⚠️ 남은 갭: code-reviewer 독립 검증 미착수(shrimp-task-manager 추적 중) — 이번 변경이 `GET /v1/assets`를 소비하는 기존 화면·테스트에 미치는 영향(특히 `PrecisionScale.scaleFor()`가 없던 시절 값을 가정한 프론트 코드가 있는지)은 검증에서 함께 확인해야 한다
+
+- **Task 031 후속: SSE 캔들 인프라 갭 해소 + 프론트 캔들 재조회 버그 수정** ✅ — 구현 완료 (2026-09-17, formal Task 번호 없이 진행, code-reviewer 통합 검증은 아직 진행 전)
+  - 대상: 위 Task 031 「남은 갭」 4건(업비트 폴링 팬아웃 동시성 무제한, HTTP 압축 전역 미적용, `CandleSseRegistry` 구독 키 정리 지연, 프론트 캔들 interval 재조회 불가)을 이어서 처리했다
+  - ✅ **업비트 폴링 동시성 상한** — `PriceCacheProperties`에 `upbitPollConcurrency`(신규 필드, 기본 25 — `allfolio.price-cache.upbit-poll-concurrency`) 추가. `CandlePushScheduler`가 이 값으로 `Semaphore`를 만들어 `pollAndPush()`의 구독 키 fan-out이 업비트를 동시에 호출하는 개수를 제한한다(틱 겹침 방지용 `join(coinFreshTtl)` 로직은 그대로 — 세마포어는 in-flight 상한만 추가할 뿐 폴링 구조 자체는 바꾸지 않는다). 20~30 사이 보수적인 값으로 시작했고, 실제 효과(429·CB `half_open` 재발 여부)는 k6 재측정으로 확인해야 한다(아래 「남은 갭」)
+  - ✅ **HTTP gzip 압축 전역 적용** — `application.yml`에 `server.compression.enabled=true` + `mime-types`(json/plain/css/javascript 명시)를 추가하고 `text/event-stream`(SSE)은 목록에서 제외해 캔들 스트리밍이 압축 대상에 안 걸리도록 했다. Task 031이 실측한 STOCK candles 87% 압축 효과가 다른 JSON 응답(포트폴리오·자산 목록 등)에도 적용될 것으로 기대되나, 이번 세션에서 재측정은 하지 않았다
+  - ✅ **`CandleSseRegistry` 구독 키 정리 지연 — 원인 조사 후 "이미 있는 heartbeat가 유일한 정리 수단"으로 결론**: `SseEmitter`에는 완료 여부를 외부에서 조회하는 공개 API가 없어(바이트코드 확인 — `complete` 필드는 private, getter 없음), 죽은 연결을 감지하는 유일한 방법이 실제로 `send()`를 시도해 실패를 관찰하는 것뿐임을 확인했다. 즉 기존 30초 주기 heartbeat(`sendHeartbeat()`)가 모든 구독자를 순회하며 `send()`를 시도하는 동작 자체가 곧 "정리 스윕"이라, 별도 스케줄러를 신설하면 똑같은 일을 중복 구현하게 된다. curl `--max-time`으로 클라이언트가 정상 종료(TCP FIN)하는 경우를 재현해, 다음 heartbeat 틱에서 `send()`가 `IOException`으로 실패해 구독 해제가 실제로 일어남을 확인(정리까지 최대 30초 소요). 다만 TCP FIN 없이 끊기는 경우(전원 차단·네트워크 단절)는 curl로 재현할 수 없었고, 이 경우 OS 소켓 버퍼링·TCP 재전송 타임아웃에 좌우돼 heartbeat 주기보다 훨씬 오래 걸릴 수 있다 — 이는 애플리케이션 코드가 아닌 OS/네트워크 계층의 타이밍이라 스케줄 주기 조정으로는 근본 해결이 안 된다. 코드 변경 없음(Javadoc으로 결론 문서화)
+  - ✅ **프론트 캔들 interval 재조회 버그 수정** — `AssetDetailPage.tsx`에 `candleRetryToken`(숫자 카운터) state를 신규 추가하고 candles 조회 effect의 의존성 배열에 포함시켰다. interval 토글 `onChange`(`handleCandleIntervalChange`)와 에러 화면에 새로 추가한 "다시 시도" 버튼(`handleCandleRetry`) 둘 다 이 카운터를 올려, 같은 interval을 다시 선택해도(예: 429 에러 후 재시도) effect가 강제로 재실행되게 했다
+  - 담당: `senior-backend`(세마포어·gzip·레지스트리 조사) → `senior-frontend`(재조회 버그 수정) → 코디네이터(커밋 분할·문서화)
+  - ⚠️ 남은 갭:
+    - k6로 세마포어 도입 효과 재측정 안 함 — 429·CB `not_permitted_calls_total`·`half_open` 재발 여부를 실측으로 확인해야 `upbit-poll-concurrency: 25` 값이 적절한지 판단할 수 있다
+    - gzip 압축의 다른 엔드포인트(포트폴리오·자산 목록 등) 실효과 재측정 안 함, SSE가 실제로 압축에서 제외되는지도 코드 리뷰로만 확인했을 뿐 실측(`curl -H "Accept-Encoding: gzip"`으로 `Content-Type: text/event-stream` 응답 헤더 확인)은 하지 않았다
+    - code-reviewer 독립 검증 미착수(shrimp-task-manager 추적 중)
 
 - **Task 032: 배포 파이프라인 및 운영 관측 체계**
   - CI/CD, 프론트 배포 방식 확정(JAR 통합 vs 분리 호스팅)
@@ -833,7 +852,7 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 {
   "id": "0198f2a1-...", "ticker": "005930", "name": "삼성전자",
   "assetType": "STOCK", "currency": "KRW",
-  "quantity": "10", "avgPrice": "60000",
+  "quantity": "10.00000000", "avgPrice": "60000",
   "version": 0, "updatedAt": "2026-08-17T09:00:00Z"
 }
 ```
@@ -874,7 +893,7 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 
 `evaluationKrw`/`unrealizedPnl`/`weight`가 `null`로 내려오는 경우는 **그 자산의 시세 조회가 실패했을 때뿐이다**(Task 023의 부분 실패 허용 정책 — 응답 자체는 항상 200). 성공한 자산이 하나도 없으면 `totalEvaluationKrw`/`totalUnrealizedPnl`도 `null`이 된다. `totalCostByCurrency`는 시세와 무관하게 언제나 채워진다.
 
-`quantity`는 자산유형·통화와 무관하게 항상 8자리 scale로 내려온다(시뮬레이터 `expectedQuantity`와 동일 규칙). `avgPrice`·`cost`는 자산유형/통화별 「금융 정밀도 규칙」(COIN 8자리, 그 외 통화 기준)을 따른다 — 이 스케일 결정은 `GET /v1/portfolio`에만 적용되며, `GET /v1/assets`(Task 012)는 여전히 DB `NUMERIC(28,8)` 왕복 스케일을 그대로 노출한다(위 Task 013 항목의 「남은 갭」 참고).
+`quantity`는 자산유형·통화와 무관하게 항상 8자리 scale로 내려온다(시뮬레이터 `expectedQuantity`와 동일 규칙). `avgPrice`·`cost`는 자산유형/통화별 「금융 정밀도 규칙」(COIN 8자리, 그 외 통화 기준)을 따른다. 이 스케일 규칙은 2026-09-17부터 `GET /v1/assets`(단건·목록·`POST` 응답 포함, Task 012)에도 동일하게 적용된다 — 두 엔드포인트 표기가 서로 다르던 문제는 해소됐다(아래 「GET /v1/assets↔portfolio 스케일 통일 + CORS preflight 캐시 설정」 참고).
 
 **주의**: `cost`는 반올림 전 원본 정밀도(`quantity × avgPrice` 원본값)로 계산한 뒤 스케일을 적용하고, `avgPrice`는 응답에 나가기 직전 별도로 반올림된다 — 즉 `cost`와 `quantity × 응답의 avgPrice`를 클라이언트가 직접 재계산하면 반올림 오차만큼(보통 통화 최소단위 이하) 다를 수 있다. 예: KRW 자산 평단가 원본이 `60000.75`면 응답은 `avgPrice: "60001"`(반올림)이지만 `cost`는 원본 `60000.75`로 계산해 반올림한 값이라 `quantity × 60001`과 정확히 일치하지 않는다. 화면 표시값(프론트가 별도로 반올림)에는 영향 없다.
 
@@ -956,8 +975,8 @@ STOCK/COIN은 자산 통화 기준 스케일, CASH(USD)는 응답 통화(항상 
 - **시뮬레이터 응답시간 P99**: ≤ 5ms (1,000회 반복 호출, holding 단건 조회 포함한 수치, JVM 워밍업 후 검증)
 - **메트릭**: `allfolio_simulation_duration_seconds` (Prometheus 히스토그램)
 - **SSE 동시 커넥션(Task 031, k6 로컬 실측)**: 단일 구독 키(브로드캐스트) 1,000개 동시 연결 100% 유지 확인 — 같은 물리 머신에서 측정해 네트워크 지연은 0에 가깝다. 절대치보다 "이 규모에서 Tomcat/Virtual Thread 계층이 병목이 아니다"라는 사실이 핵심
-- **CandlePushScheduler 폴링 틱(Task 031)**: 목표 10초(`allfolio.price-cache.coin-fresh-ttl`) 이내, 구독 키 500개까지 실측 확인(병렬화 + `join(coinFreshTtl)`로 세대 중첩 방지 적용 후). 틱 내 업비트 팬아웃 자체의 동시성 상한은 아직 미도입(위 Task 031 「남은 갭」 참고)
-- **STOCK candles(캐시 히트) 응답시간(Task 031)**: P99 ≤ 25ms 실측(10 VUs, 로컬) — 응답 크기(최대 약 232KB/10년치)는 HTTP 압축 미적용 상태의 수치
+- **CandlePushScheduler 폴링 틱(Task 031)**: 목표 10초(`allfolio.price-cache.coin-fresh-ttl`) 이내, 구독 키 500개까지 실측 확인(병렬화 + `join(coinFreshTtl)`로 세대 중첩 방지 적용 후). 틱 내 업비트 팬아웃 동시성 상한은 2026-09-17 후속에서 `Semaphore`(기본 25)로 도입 완료 — 「Task 031 후속」 참고
+- **STOCK candles(캐시 히트) 응답시간(Task 031)**: P99 ≤ 25ms 실측(10 VUs, 로컬) — 응답 크기(최대 약 232KB/10년치)는 HTTP 압축 미적용 상태의 수치. 압축(gzip)은 2026-09-17 후속에서 전역 적용됨(SSE 제외) — 「Task 031 후속」 참고, 재측정치는 없음
 - **측정 도구**: `loadtest/`(k6, Task 031에서 이 저장소에 최초 도입) — 로컬 Docker 수동 실행까지만 지원, CI 통합은 아직 없음(Task 032 범위)
 
 ---
