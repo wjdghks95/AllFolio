@@ -74,7 +74,7 @@ class PriceServiceTest {
 
     private final PriceCacheProperties priceCacheProperties = new PriceCacheProperties(
             Duration.ofSeconds(10), Duration.ofHours(12), Duration.ofMinutes(1), Duration.ofHours(12),
-            Duration.ofHours(24), Duration.ofSeconds(30));
+            Duration.ofHours(24), Duration.ofSeconds(30), 25);
 
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 

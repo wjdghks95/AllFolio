@@ -1,3 +1,8 @@
+server:
+  compression:
+    enabled: true
+    mime-types: application/json,text/plain,text/css,application/javascript
+
 spring:
   application:
     name: allfolio
@@ -62,6 +67,10 @@ allfolio:
     # Task 023 Major 2: 시세 조회 실패(존재하지 않는 티커 등) 부정 캐싱 TTL. 30초 — 너무 짧으면 남용
     # 방지 효과가 없고, 너무 길면 티커가 나중에 정상 등록돼도 한동안 계속 실패로 응답한다.
     negative-ttl: 30s
+    # CandlePushScheduler.pollAndPush()의 구독 키 fan-out 병렬 폴링 동시성 상한(Task 031 k6 부하테스트
+    # 후속 — 구독 키 500개 무제한 fan-out으로 업비트 429·CB half_open 재발 실측). 20~30 사이 보수적인
+    # 값으로 시작, k6 재측정으로 조정 가능.
+    upbit-poll-concurrency: 25
   price-throttle:
     limit: 1
     window: 1s

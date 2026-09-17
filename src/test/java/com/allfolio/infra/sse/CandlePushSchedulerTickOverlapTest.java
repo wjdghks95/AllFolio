@@ -71,7 +71,7 @@ class CandlePushSchedulerTickOverlapTest {
 
         PriceCacheProperties priceCacheProperties = new PriceCacheProperties(
                 Duration.ofSeconds(5), Duration.ofHours(12), Duration.ofMinutes(1),
-                Duration.ofHours(12), Duration.ofHours(24), Duration.ofSeconds(30));
+                Duration.ofHours(12), Duration.ofHours(24), Duration.ofSeconds(30), 10);
         CandlePushScheduler scheduler = new CandlePushScheduler(registry, candleService, priceCacheProperties);
 
         // 실제 스케줄러가 fixedDelay로 순차 호출하는 것을 흉내 낸다 — join이 없다면 두 번째 호출이

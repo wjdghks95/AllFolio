@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 
 /**
  * COIN 캔들 SSE push 스케줄러(Task 028). {@link CandleSseRegistry}가 들고 있는 구독 키를 주기적으로
@@ -46,11 +47,21 @@ public class CandlePushScheduler {
     private final CandleService candleService;
     private final Duration pollTickJoinTimeout;
 
+    /**
+     * 구독 키 fan-out 병렬 폴링(위 클래스 Javadoc의 "구독 키 단위 병렬화" 참고)이 업비트로 보내는
+     * 동시 요청 수의 상한(Task 031 k6 부하테스트, 구독 키 500개에서 무제한 fan-out으로 업비트 429·
+     * Resilience4j {@code upbit} CB half_open 전환 재발 실측). 틱 경계 보존을 위한 join 리스트에는
+     * permit 대기로 블로킹된 스레드도 그대로 포함된다 — 이 세마포어는 in-flight 상한만 걸 뿐 폴링 구조
+     * 자체는 바꾸지 않는다.
+     */
+    private final Semaphore upbitPollSemaphore;
+
     public CandlePushScheduler(CandleSseRegistry registry, CandleService candleService,
             PriceCacheProperties priceCacheProperties) {
         this.registry = registry;
         this.candleService = candleService;
         this.pollTickJoinTimeout = priceCacheProperties.coinFreshTtl();
+        this.upbitPollSemaphore = new Semaphore(priceCacheProperties.upbitPollConcurrency());
     }
 
     /**
@@ -130,10 +141,18 @@ public class CandlePushScheduler {
         }
         Candle latest;
         try {
+            upbitPollSemaphore.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        try {
             latest = candleService.fetchLatestCoinCandle(key.ticker(), key.currency(), key.interval());
         } catch (RuntimeException e) {
             log.warn("SSE 캔들 폴링 실패: key={}", key, e);
             return;
+        } finally {
+            upbitPollSemaphore.release();
         }
         if (latest.valueEquals(registry.lastPushed(key).orElse(null))) {
             return;
@@ -148,6 +167,23 @@ public class CandlePushScheduler {
     /**
      * heartbeat는 fixedDelay=30000(고정값)으로 둔다 — 프록시 타임아웃 방지가 목적인 관례값이라
      * 이 값 자체를 튜닝할 이유가 아직 없다.
+     *
+     * <p><b>이 메서드는 프록시 타임아웃 방지뿐 아니라 죽은 연결을 정리하는 유일한 방어적 스윕이기도
+     * 하다</b>(SSE 인프라 갭 조사, 2026-09-17). {@link SseEmitter}/{@code ResponseBodyEmitter}에는
+     * "완료 여부"를 외부에서 조회하는 공개 API가 없어(바이트코드 확인 — {@code complete} 필드는
+     * private, getter 없음) 죽은 연결을 감지하는 유일한 방법은 실제로 {@code send()}를 시도해 실패를
+     * 관찰하는 것뿐이다. 그래서 {@link CandleSseRegistry}의 모든 구독자를 30초마다 순회하며 실제로
+     * 전송을 시도하는 이 메서드가 곧 "구독 키 정리 스윕"이다 — 별도의 정리 전용 {@code @Scheduled}를
+     * 새로 추가하면 정확히 같은 일(전 구독자 순회 + send() 시도 + 실패 시 completeWithError)을
+     * 중복 구현하게 된다.
+     *
+     * <p>실측(2026-09-17, curl {@code --max-time}으로 클라이언트가 FIN을 보내는 정상 종료 재현):
+     * 구독 후 클라이언트가 연결을 끊으면 다음 heartbeat 틱에서 {@code send()}가 IOException으로
+     * 실패해 {@link CandleSseRegistry#unsubscribe}가 호출됐다 — 정리까지 걸린 시간은 heartbeat 주기
+     * (최대 30초)에 바운드된다. 다만 TCP FIN 없이 연결이 끊기는 경우(전원 차단·네트워크 단절)는
+     * curl로 재현할 수 없었고, 이 경우 OS 소켓 버퍼링·TCP 재전송 타임아웃 때문에 {@code send()}
+     * 자체가 실패로 판정되기까지 heartbeat 주기보다 훨씬 오래 걸릴 수 있다 — 이는 애플리케이션
+     * 코드가 아닌 OS/네트워크 계층의 타이밍이라 스케줄 주기를 조정해도 근본적으로 해결되지 않는다.
      */
     @Scheduled(fixedDelay = 30_000, scheduler = SseSchedulerConfig.SSE_TASK_SCHEDULER)
     void sendHeartbeat() {
