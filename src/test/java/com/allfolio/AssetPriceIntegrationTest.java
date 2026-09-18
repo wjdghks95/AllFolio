@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -48,6 +49,9 @@ class AssetPriceIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private RedisConnectionFactory redisConnectionFactory;
+
     private String tokenA;
     private String tokenB;
 
@@ -80,6 +84,11 @@ class AssetPriceIntegrationTest extends AbstractIntegrationTest {
         upbitWireMock.resetAll();
         exchangeRateWireMock.resetAll();
         stockWireMock.resetAll();
+        // "005930"/CASH(USD) 등 이 클래스와 PortfolioIntegrationTest가 공유하는 캐시 키(price:*)가
+        // 테스트 순서에 따라 누수되지 않도록 매 테스트 시작 전 Redis 전체를 비운다(shrimp-task-manager
+        // a608127f 격리 보강) — 전체 스위트가 순차 실행(AbstractIntegrationTest 기준)이라 다른
+        // 클래스가 동시에 이 컨테이너를 쓰는 중에 flush하는 문제는 없다.
+        redisConnectionFactory.getConnection().serverCommands().flushDb();
         userRepository.deleteAll();
         tokenA = accessTokenOf(signup("trader-a@example.com", "correct-horse-battery"));
         tokenB = accessTokenOf(signup("trader-b@example.com", "correct-horse-battery"));
