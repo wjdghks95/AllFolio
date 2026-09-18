@@ -84,9 +84,11 @@ allfolio:
     # 캔들 차트가 다루는 최대 조회 범위 상한(연 단위) — 무한정 과거로 캐시가 확장되는 것을 막는다.
     max-history-years: 10
     # cache stampede 방지용 티커 단위 락(CandleRangeLock) 만료 시간. 국내주식 10년 콜드 페치 실측
-    # 4.60초(connect-timeout 2s + read-timeout 3s 대비 재시도·오버헤드 포함)에 여유를 두어 15초로
-    # 잡는다 — 5초로는 벤더가 조금만 느려져도 fetch 도중 락이 만료돼 cache stampede 방지 목적이
-    # 무력화된다(Task 028 code-reviewer m3 실측).
+    # 3.7~3.9초(자산 상세 국내주식 차트 조회 실패 조사, 2026-09-18) — StockPriceClient는 이 실측치를
+    # 반영해 read-timeout을 전역값(3s)보다 넉넉한 6s로 별도 설정했다(connect-timeout 2s 포함 worst
+    # case 8s, StockPriceClient의 READ_TIMEOUT 주석 참고). 그 위에 여유를 두어 15초로 잡는다 —
+    # 5초로는 벤더가 조금만 느려져도 fetch 도중 락이 만료돼 cache stampede 방지 목적이 무력화된다
+    # (Task 028 code-reviewer m3 실측).
     range-lock-ttl: 15s
   # COIN 캔들 조회(GET /v1/assets/{id}/candles, COIN 자산) 사용자당 Throttle(Task 031 서브태스크 4).
   # 이 경로는 캐시가 전혀 없는 순수 패스스루라(candle-cache는 STOCK 전용) 30 VUs·30초 부하만으로도

@@ -167,8 +167,10 @@ class StockPriceClientTest extends AbstractIntegrationTest {
 
     @Test
     void getPriceThrowsExternalPriceApiExceptionOnTimeout() {
+        // read-timeout이 6s로 늘어난 이유(StockPriceClient 클래스 상단 READ_TIMEOUT 주석 참고)에 맞춰
+        // 지연값도 그보다 크게 잡는다 — 5000ms로는 더 이상 타임아웃이 재현되지 않는다.
         wireMockServer.stubFor(get(urlEqualTo(REQUEST_PATH))
-                .willReturn(aResponse().withStatus(200).withFixedDelay(5000)));
+                .willReturn(aResponse().withStatus(200).withFixedDelay(8000)));
 
         assertThatThrownBy(() -> stockPriceClient.getPrice(TICKER))
                 .isInstanceOf(ExternalPriceApiException.class);

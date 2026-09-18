@@ -7,12 +7,16 @@ import com.allfolio.domain.SearchResult;
 import com.allfolio.domain.exception.ExternalPriceApiException;
 import com.allfolio.domain.exception.TickerNotFoundException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
+import org.springframework.boot.http.client.HttpClientSettings;
+import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -74,11 +78,26 @@ public class StockPriceClient {
     private static final int MAX_DAILY_SERIES_ROWS = 3660;
     private static final Pattern PERCENT_ENCODED = Pattern.compile("%[0-9A-Fa-f]{2}");
 
+    // spring.http.clients.read-timeout(전역 3s)은 다른 3개 벤더(Upbit/환율/TwelveData)의 빠른 응답
+    // 기준으로 잡혀 있어, 이 클라이언트의 getDailySeries(10년 일봉 콜드 페치)에는 짧다 — 같은 파라미터로
+    // 공공데이터포털을 직접 호출해 실측한 결과 응답에 3.7~3.9초가 걸려 3초 read-timeout에 매번 걸리고
+    // 캔들 조회가 100% 실패했다(자산 상세 페이지 국내주식 차트 조회 실패 신고로 재현·확인). getPrice/
+    // search는 응답이 작아 이 여유 있는 타임아웃에서도 체감 지연이 늘지 않는다 — 다른 3개 클라이언트의
+    // 빠른 실패 판정(3s)에는 영향 주지 않기 위해 이 클라이언트에만 전용 RestClient를 구성한다.
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(6);
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(2);
+
     private final RestClient restClient;
     private final String serviceKey;
 
     public StockPriceClient(RestClient.Builder restClientBuilder, StockProperties properties) {
-        this.restClient = restClientBuilder.baseUrl(properties.baseUrl()).build();
+        ClientHttpRequestFactory requestFactory = ClientHttpRequestFactoryBuilder.detect()
+                .build(HttpClientSettings.defaults()
+                        .withConnectTimeout(CONNECT_TIMEOUT)
+                        .withReadTimeout(READ_TIMEOUT));
+        this.restClient = restClientBuilder.baseUrl(properties.baseUrl())
+                .requestFactory(requestFactory)
+                .build();
         this.serviceKey = decodeIfAlreadyEncoded(properties.serviceKey());
     }
 
