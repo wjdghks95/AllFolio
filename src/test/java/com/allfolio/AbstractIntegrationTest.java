@@ -2,6 +2,7 @@ package com.allfolio;
 
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -20,6 +21,7 @@ import org.testcontainers.utility.DockerImageName;
  * 시 Testcontainers의 Ryuk 리소스 정리 데몬이 컨테이너를 정리한다.
  */
 @SpringBootTest
+@ActiveProfiles("test")
 public abstract class AbstractIntegrationTest {
 
     /** 테스트 전용 HS256 시크릿 (32바이트 이상). 운영은 ALLFOLIO_JWT_SECRET 환경변수를 쓴다. */
@@ -29,8 +31,8 @@ public abstract class AbstractIntegrationTest {
     // @DynamicPropertySource(base-url)를 등록해 서로 다른 ApplicationContext로 캐싱된다 — 클라이언트
     // 테스트 클래스가 늘어날수록 HikariCP 커넥션 풀(컨텍스트당 최대 10개)이 그만큼 늘어 기본
     // max_connections=100인 Postgres를 전체 스위트 실행 중 소진시킨다("FATAL: sorry, too many
-    // clients already", TwelveDataClientTest 추가 시 실측 재현). 커넥션 풀 개수 자체를 줄이는 대신
-    // Postgres 쪽 한도를 넉넉히 올려 대응한다.
+    // clients already", TwelveDataClientTest 추가 시 실측 재현). Postgres 쪽 한도를 넉넉히 올리는 것과
+    // 별개로, application-test.yml(@ActiveProfiles("test"))에서 컨텍스트당 풀 크기 자체도 줄여 대응한다.
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18")
             .withCommand("postgres", "-c", "max_connections=300");
