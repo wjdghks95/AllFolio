@@ -36,13 +36,18 @@ public class SecurityConfig {
      * API를 호출한다 — iOS는 capacitor://localhost, Android는 https://localhost(포트 없음)가 WebView
      * 기본 스킴이다(capacitor.config.ts가 androidScheme을 커스터마이즈하지 않았으므로 Capacitor
      * 기본값 그대로 androidScheme=https 적용 — secure context가 필요한 Web API 때문에 Capacitor가
-     * http 대신 https를 기본값으로 권장). 두 origin만 명시 나열한다 — 이 API는 Authorization 헤더로
-     * 인증하는 신뢰된 클라이언트만 호출하므로 origin을 넓히지 않는다.
+     * http 대신 https를 기본값으로 권장). 이 API는 Authorization 헤더로 인증하는 신뢰된 클라이언트만
+     * 호출하므로 origin을 넓히지 않는다 — 단, 로컬 개발용 http://localhost:5173(Vite dev 서버)은
+     * 반드시 포함해야 한다. Vite 프록시를 거쳐 같은 출처로 보이더라도 브라우저는 POST 등에서 Origin
+     * 헤더를 여전히 실어 보내고, Spring Security의 CorsFilter는 Origin 헤더가 있으면 무조건 화이트
+     * 리스트 검사를 하므로(브라우저가 same-origin으로 보든 말든 서버는 알 수 없음) 목록에 없으면
+     * "Invalid CORS request" 403으로 거부한다(실측 재현 — 로컬 로그인 시도 시 CORS 에러 발생).
      */
     @Bean
     CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("capacitor://localhost", "https://localhost"));
+        configuration.setAllowedOrigins(
+                List.of("capacitor://localhost", "https://localhost", "http://localhost:5173"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Last-Event-ID"));
         configuration.setAllowCredentials(true);
