@@ -108,6 +108,54 @@ class StockPriceClientTest extends AbstractIntegrationTest {
                         .toInstant());
     }
 
+    /**
+     * shrimp Task(4dc07a98) — "005380(현대차) 실종목 조회 실패" 재현 조사용 회귀 테스트.
+     * 실제 서비스키로 curl 검증한 결과(2026-09-18), KRX 단축코드(srtnCd)는 전부 고정 6자리라
+     * 6자리 전체를 {@code likeSrtnCd}로 넘기면 포함검색이어도 사실상 정확히 일치하는 항목만
+     * 매칭된다 — "005380"과 길이가 같으면서 그 6자리를 부분 문자열로 포함하는 다른 코드는
+     * 존재할 수 없기 때문이다({@code likeSrtnCd=005380} 실제 호출 결과 {@code totalCount=1648}건
+     * 전부 {@code srtnCd=="005380"}, 날짜만 다름을 확인). 즉 "numOfRows=1이라 다른 종목이 먼저
+     * 와서 놓친다"는 구조적 가설은 6자리 전체 티커에 대해서는 반증됐다 — 실제 원인은 이전 세션에서
+     * 이미 수정된 서비스키 이중 인코딩 결함(commit 02d924a, decodeIfAlreadyEncoded)이었을 가능성이
+     * 높다(현재 코드로 실제 서버 기동 후 GET /v1/assets/{id}/price 왕복까지 200 정상 확인). 이
+     * 테스트는 그 결론을 실제 curl 응답 전체 필드로 고정해 회귀를 방지한다.
+     */
+    @Test
+    void getPriceMapsRealTickerHyundaiMotorWithFullFieldSet() {
+        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+                + "&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd=005380";
+        wireMockServer.stubFor(get(urlEqualTo(requestPath))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                {
+                                  "response": {
+                                    "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+                                    "body": {
+                                      "numOfRows": 1, "pageNo": 1, "totalCount": 1648,
+                                      "items": {"item": [{
+                                        "basDt": "20260917", "srtnCd": "005380", "isinCd": "KR7005380001",
+                                        "itmsNm": "현대차", "mrktCtg": "KOSPI", "clpr": "363000", "vs": "1000",
+                                        "fltRt": ".28", "mkp": "364500", "hipr": "365000", "lopr": "358000",
+                                        "trqu": "374225", "trPrc": "135282389750", "lstgStCnt": "204757766",
+                                        "mrktTotAmt": "74327069058000"
+                                      }]}
+                                    }
+                                  }
+                                }
+                                """)));
+
+        Price price = stockPriceClient.getPrice("005380");
+
+        assertThat(price.amount()).isEqualByComparingTo(new BigDecimal("363000"));
+        assertThat(price.currency()).isEqualTo("KRW");
+        assertThat(price.asOf()).isEqualTo(
+                LocalDate.parse("20260917", DateTimeFormatter.BASIC_ISO_DATE)
+                        .atStartOfDay(ZoneId.of("Asia/Seoul"))
+                        .toInstant());
+    }
+
     @Test
     void getPriceThrowsExternalPriceApiExceptionOnServerError() {
         wireMockServer.stubFor(get(urlEqualTo(REQUEST_PATH))

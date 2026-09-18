@@ -152,6 +152,35 @@ GET https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getSto
 
 `StockPriceClientTest`에 `getDailySeriesMapsOhlcAndSortsAscendingByDate`·`getDailySeriesReturnsEmptyListWhenNoItemsMatch`·`getDailySeriesThrowsExternalPriceApiExceptionOnAuthError` 3건으로 위 내용을 WireMock에 재현해 검증됨.
 
+## "005380(현대차) 실종목 조회 실패" 조사 결과 (2026-09-18 실측) — `getPrice()`의 `numOfRows=1` 구조적 위험 가설은 반증됨
+
+Task 023에서 프론트 검증 중 관측된 "005380 시세 조회 실패"(ROADMAP.md 「남은 갭」 항목)의 원인으로,
+`getPrice()`가 `numOfRows=1`만 요청해 `likeSrtnCd`(포함검색) 응답의 첫 항목이 요청한 티커와 다른
+종목일 수 있다는 구조적 가설이 있었다. **실제 서비스키로 curl 재검증한 결과 이 가설은 반증됐다**:
+
+- `likeSrtnCd=005380`(6자리 전체)으로 `numOfRows=20` 요청 시 `totalCount=1648`, 반환된 20건 전부
+  `srtnCd=="005380"`(날짜만 다름)이었다 — 다른 종목코드가 섞이지 않았다.
+- 이유는 구조적이다: 이 API의 `srtnCd`는 **전부 고정 6자리**다. 질의어가 6자리 전체(정상적인 KRX
+  단축코드 포맷)면, 그 6자리를 부분 문자열로 포함하면서 자기 자신과 다른 6자리 코드는 존재할 수
+  없다 — 즉 6자리 전체로 `likeSrtnCd` 검색을 하면 **포함검색이어도 사실상 정확히 일치하는 종목만
+  매칭된다.** (반대로 `5380`처럼 짧은 질의어로 검색하면 `053800`·`215380`·`415380` 등 여러 종목이
+  실제로 매칭된다 — 실측 확인. 다만 `getPrice()`의 `ticker` 인자는 항상 자산 등록 시 저장된 6자리
+  코드이지, 사용자가 임의로 줄인 질의어가 아니다.)
+- 따라서 `numOfRows=1`은 6자리 전체 티커에 대해 위험하지 않다 — 응답이 `basDt` 내림차순으로만
+  정렬되고, 매칭 항목이 전부 동일 종목이라 1건만 받아도 항상 최신 거래일의 정확한 종목 데이터를
+  받는다. `extractMatchingItem()`의 `ticker.equals(item.srtnCd())` 필터는 이미 있던 방어 로직이라
+  그대로 유지했다.
+- 실제 서버 기동(`ALLFOLIO_STOCK_SERVICE_KEY` 정상 로드) 후 자산 등록 → `GET /v1/assets/{id}/price`
+  전체 왕복까지 확인했고, 005380은 `200 {"amount":"363000","currency":"KRW",...}`로 정상 응답했다.
+- 원래 관측 시점(Task 023, 2026-09-04)의 실제 원인은 이 조사로 재현되지 않았지만, 정황상 이미 다른
+  세션에서 고친 서비스키 이중 인코딩/디코딩 결함(commit `02d924a`, `decodeIfAlreadyEncoded` 도입 —
+  "디코딩 키"에 리터럴 `+`가 있으면 무조건 `URLDecoder`를 돌려 공백으로 깨지던 결함)이 유력한 후보다
+  — 이 수정이 이미 Task 023 완료 이후, 이번 조사 이전에 병합되어 있었다.
+- **결론: 프로덕션 코드 변경 없음**(`getPrice()`의 `numOfRows=1`은 그대로 유지) — CLAUDE.md
+  Surgical Changes 원칙에 따라 재현되지 않는 가설로 방어적 변경을 추가하지 않았다. 회귀 테스트
+  `StockPriceClientTest.getPriceMapsRealTickerHyundaiMotorWithFullFieldSet()`만 추가해 실제 curl
+  전체 필드 응답으로 이 결론을 고정했다.
+
 ## 구현 시 반드시 지킬 규칙
 
 | 규칙 | 근거 |
