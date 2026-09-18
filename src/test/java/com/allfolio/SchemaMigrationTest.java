@@ -174,7 +174,23 @@ class SchemaMigrationTest extends AbstractIntegrationTest {
                 "SELECT indexname FROM pg_indexes WHERE tablename IN ('assets', 'transactions')",
                 String.class);
 
-        assertThat(indexNames).contains("idx_assets_user_id", "idx_transactions_asset_traded");
+        assertThat(indexNames).contains("idx_assets_user_id", "idx_transactions_asset_traded_id");
+        // V5에서 (asset_id, traded_at DESC) 인덱스는 신규 복합 인덱스의 선행 컬럼 부분집합이라 제거됨
+        assertThat(indexNames).doesNotContain("idx_transactions_asset_traded");
+    }
+
+    /**
+     * 거래 이력 커서 페이지네이션은 row-value 비교 {@code (traded_at, id) < (:t, :id)}가 통째로
+     * Index Cond로 내려가야 한다(V5). 정렬 방향까지 (asset_id, traded_at DESC, id DESC)로 맞지
+     * 않으면 PostgreSQL이 타이브레이크를 Filter로 떨어뜨리므로 인덱스 정의를 그대로 단언한다.
+     */
+    @Test
+    void transactionCursorIndexOrdersTradedAtAndIdDescending() {
+        String indexDef = jdbcTemplate.queryForObject(
+                "SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_transactions_asset_traded_id'",
+                String.class);
+
+        assertThat(indexDef).endsWith("(asset_id, traded_at DESC, id DESC)");
     }
 
     @Test
