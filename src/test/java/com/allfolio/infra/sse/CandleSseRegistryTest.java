@@ -2,6 +2,7 @@ package com.allfolio.infra.sse;
 
 import com.allfolio.domain.Candle;
 import com.allfolio.domain.CandleInterval;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -33,7 +34,7 @@ class CandleSseRegistryTest {
 
     @Test
     void subscribeRegistersEmitterUnderKey() {
-        CandleSseRegistry registry = new CandleSseRegistry();
+        CandleSseRegistry registry = new CandleSseRegistry(new SimpleMeterRegistry());
         SseEmitter emitter = new SseEmitter();
 
         registry.subscribe(KEY, emitter, "user-1");
@@ -44,7 +45,7 @@ class CandleSseRegistryTest {
 
     @Test
     void subscribeRecordsUserIdAndUnsubscribeClearsIt() {
-        CandleSseRegistry registry = new CandleSseRegistry();
+        CandleSseRegistry registry = new CandleSseRegistry(new SimpleMeterRegistry());
         SseEmitter emitter = new SseEmitter();
 
         registry.subscribe(KEY, emitter, "user-1");
@@ -56,7 +57,7 @@ class CandleSseRegistryTest {
 
     @Test
     void unknownKeyReturnsEmptySubscriberSet() {
-        CandleSseRegistry registry = new CandleSseRegistry();
+        CandleSseRegistry registry = new CandleSseRegistry(new SimpleMeterRegistry());
 
         assertThat(registry.subscribersOf(KEY)).isEmpty();
         assertThat(registry.activeKeys()).isEmpty();
@@ -64,7 +65,7 @@ class CandleSseRegistryTest {
 
     @Test
     void secondSubscriberJoinsSameKey() {
-        CandleSseRegistry registry = new CandleSseRegistry();
+        CandleSseRegistry registry = new CandleSseRegistry(new SimpleMeterRegistry());
         SseEmitter first = new SseEmitter();
         SseEmitter second = new SseEmitter();
 
@@ -76,7 +77,7 @@ class CandleSseRegistryTest {
 
     @Test
     void explicitUnsubscribeRemovesOnlyThatEmitter() {
-        CandleSseRegistry registry = new CandleSseRegistry();
+        CandleSseRegistry registry = new CandleSseRegistry(new SimpleMeterRegistry());
         SseEmitter first = new SseEmitter();
         SseEmitter second = new SseEmitter();
         registry.subscribe(KEY, first, "user-1");
@@ -90,7 +91,7 @@ class CandleSseRegistryTest {
 
     @Test
     void unsubscribingLastEmitterAlsoClearsLastPushedForThatKey() {
-        CandleSseRegistry registry = new CandleSseRegistry();
+        CandleSseRegistry registry = new CandleSseRegistry(new SimpleMeterRegistry());
         SseEmitter emitter = new SseEmitter();
         registry.subscribe(KEY, emitter, "user-1");
         registry.updateLastPushed(KEY, CANDLE_A);
@@ -105,7 +106,7 @@ class CandleSseRegistryTest {
 
     @Test
     void unsubscribingOneOfManyKeepsLastPushedForRemainingSubscribers() {
-        CandleSseRegistry registry = new CandleSseRegistry();
+        CandleSseRegistry registry = new CandleSseRegistry(new SimpleMeterRegistry());
         SseEmitter first = new SseEmitter();
         SseEmitter second = new SseEmitter();
         registry.subscribe(KEY, first, "user-1");
@@ -119,7 +120,7 @@ class CandleSseRegistryTest {
 
     @Test
     void lastPushedUpdateAndReadRoundTrip() {
-        CandleSseRegistry registry = new CandleSseRegistry();
+        CandleSseRegistry registry = new CandleSseRegistry(new SimpleMeterRegistry());
 
         assertThat(registry.lastPushed(KEY)).isEmpty();
 
@@ -130,7 +131,7 @@ class CandleSseRegistryTest {
 
     @Test
     void differentIntervalsForSameTickerAreIndependentKeys() {
-        CandleSseRegistry registry = new CandleSseRegistry();
+        CandleSseRegistry registry = new CandleSseRegistry(new SimpleMeterRegistry());
         CandleSubscriptionKey dayKey = new CandleSubscriptionKey("KRW-BTC", "KRW", CandleInterval.DAY);
         CandleSubscriptionKey weekKey = new CandleSubscriptionKey("KRW-BTC", "KRW", CandleInterval.WEEK);
         SseEmitter dayEmitter = new SseEmitter();

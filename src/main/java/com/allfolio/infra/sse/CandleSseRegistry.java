@@ -1,6 +1,9 @@
 package com.allfolio.infra.sse;
 
 import com.allfolio.domain.Candle;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -23,6 +26,12 @@ public class CandleSseRegistry {
     private final Map<CandleSubscriptionKey, Set<SseEmitter>> subscribers = new ConcurrentHashMap<>();
     private final Map<CandleSubscriptionKey, Candle> lastPushed = new ConcurrentHashMap<>();
     private final Map<SseEmitter, String> subscriberUserIds = new ConcurrentHashMap<>();
+
+    /** 구독 키 수가 아니라 전체 emitter(구독자) 개수의 총합을 노출한다(ROADMAP 성능 KPI: SSE 동시 커넥션 1,000). */
+    public CandleSseRegistry(MeterRegistry meterRegistry) {
+        meterRegistry.gauge("allfolio.sse.active.emitters", this,
+                registry -> registry.subscribers.values().stream().mapToInt(Set::size).sum());
+    }
 
     /**
      * emitter의 완료·타임아웃·에러 콜백에서 자동으로 {@link #unsubscribe}가 호출되도록 등록한다 —
@@ -77,5 +86,33 @@ public class CandleSseRegistry {
 
     public void updateLastPushed(CandleSubscriptionKey key, Candle candle) {
         lastPushed.put(key, candle);
+    }
+
+    /**
+     * 컨텍스트 종료 시 열려 있는 모든 SSE 연결을 정상 종료한다. {@code AssetController}가 여는
+     * emitter는 타임아웃이 {@code Long.MAX_VALUE}라 서버가 스스로 정리하지 않으면 graceful shutdown이
+     * 활성 요청을 기다리다 타임아웃된다(Task 032 code-reviewer 지적, 실측: `Shutdown phase ... still
+     * running`/`Graceful shutdown aborted`).
+     *
+     * <p>{@code @PreDestroy} 대신 {@link ContextClosedEvent}를 듣는 이유: {@code AbstractApplicationContext
+     * .doClose()}는 {@code ContextClosedEvent} 발행 → {@code LifecycleProcessor.onClose()}(Tomcat의
+     * graceful shutdown 포함, 최대 30초 대기) → {@code destroyBeans()}({@code @PreDestroy} 호출) 순으로
+     * 진행된다(바이트코드로 실측 확인). {@code @PreDestroy}로 등록하면 graceful shutdown이 이미 30초를
+     * 다 기다린 뒤에야 emitter가 정리돼 타임아웃을 막지 못한다 — 실제로 재현되어 이 방식으로 교체했다.
+     * {@code ContextClosedEvent}는 graceful shutdown이 대기를 시작하기 전에 동기 발행되므로 그 전에
+     * emitter를 모두 완료시킬 수 있다.
+     *
+     * <p>{@code complete()} 호출만으로 충분하다 — {@link #subscribe}가 등록해둔 {@code onCompletion}
+     * 콜백이 발화해 {@link #unsubscribe}가 자동으로 실행되므로 여기서 {@code subscribers} 등을 직접
+     * 비우지 않는다. 콜백 안에서 {@code subscribers}를 수정하므로 원본 맵을 순회하면
+     * {@link java.util.ConcurrentModificationException} 위험이 있어 스냅샷을 떠서 순회한다.
+     */
+    @EventListener(ContextClosedEvent.class)
+    public void shutdown() {
+        for (Set<SseEmitter> emitters : subscribers.values()) {
+            for (SseEmitter emitter : Set.copyOf(emitters)) {
+                emitter.complete();
+            }
+        }
     }
 }
