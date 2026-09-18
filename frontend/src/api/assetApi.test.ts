@@ -22,6 +22,17 @@ function jsonResponse(status: number, body: unknown): Response {
   } as Response;
 }
 
+// WAS 500 에러 페이지, 인프라 502 등 본문이 JSON이 아닌 응답을 흉내낸다.
+function nonJsonResponse(status: number): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async (): Promise<unknown> => {
+      throw new SyntaxError('Unexpected token < in JSON at position 0');
+    },
+  } as Response;
+}
+
 const unauthorizedBody = { code: 'UNAUTHORIZED', message: '만료', timestamp: 't' };
 const newTokens = {
   accessToken: 'new-access',
@@ -168,5 +179,17 @@ describe('assetApi 401 자동 재시도', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/v1/portfolio');
     expect(fetchMock.mock.calls[1][0]).toBe('/v1/auth/refresh');
     expect(fetchMock.mock.calls[2][0]).toBe('/v1/portfolio');
+  });
+});
+
+describe('non-JSON 에러 응답 방어', () => {
+  it('에러 응답 본문이 JSON이 아니면 상태 코드 기반 ApiError(UNKNOWN_ERROR)로 변환한다', async () => {
+    setToken('old-access');
+
+    const fetchMock = vi.fn(async () => nonJsonResponse(502));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getPortfolio()).rejects.toMatchObject({ code: 'UNKNOWN_ERROR' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

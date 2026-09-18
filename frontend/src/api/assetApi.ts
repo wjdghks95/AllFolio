@@ -44,7 +44,13 @@ async function doFetch<T>(path: string, options: RequestInit): Promise<T> {
     throw new ApiError('NETWORK_ERROR');
   }
   if (!res.ok) {
-    const err: ErrorResponse = await res.json();
+    let err: ErrorResponse;
+    try {
+      err = await res.json();
+    } catch {
+      // WAS 500 에러 페이지, 인프라 502 등 non-JSON 본문은 상태 코드 기반으로 폴백한다.
+      throw new ApiError('UNKNOWN_ERROR', `서버 응답을 처리할 수 없습니다 (status ${res.status})`);
+    }
     throw new ApiError(err.code, err.message);
   }
   // DELETE 성공(204)은 응답 본문이 없다.
