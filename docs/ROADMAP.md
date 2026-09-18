@@ -273,7 +273,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ✅ 1차 실제 기동 검증(curl) + code-reviewer 독립 검증(Blocker 0건, Major 0건). Minor 7건 중 4건 반영: 검증 실패(`additionalQuantity=0`) 테스트 추가, 401 응답의 `code` 단언 보강, 메트릭 카운트 자동 증가 단언 추가, USD scale 4 골든 케이스 추가(153.7448) — 전부 `SimulateIntegrationTest`에 반영, 7→10케이스로 증가
   - ⚠️ 남은 갭:
     - ✅ (Task 016에서 해소) `scaleFor`/`scaleForCurrency`가 `PortfolioService`/`SimulationService` 2곳에 완전 동일하게 복제돼 있던 문제 — `domain/PrecisionScale` 공유 유틸로 통합, 두 서비스 모두 이 유틸을 호출하도록 리팩터링(기존 응답 문자열 무변경, 회귀 테스트로 확인)
-    - 프론트(`frontend/src/lib/simulate.ts`)의 `simulateAvgPrice`는 `currentAvgPrice`를 입력값 그대로 통과시킨다 — 서버 응답의 scale 정규화와 표기가 갈릴 가능성이 있음, Task 018(프론트-백엔드 실연동) 착수 시 확인 필요
+    - ✅ (해소 확인, 2026-09-18) 프론트-서버 scale 불일치 우려 — 우려 대상이던 `frontend/src/lib/simulate.ts` 자체가 Task 018에서 도달 불가능해진 코드로 이미 삭제됐다(`frontend/src/lib/` 디렉터리에 해당 파일 없음). 현재 `AssetDetailPage.tsx`는 `assetApi.ts`의 `simulateAvgPrice()`로 `POST /v1/simulate/avg-price`를 직접 호출해 서버가 이미 scale 정규화를 마친 값을 그대로 표시만 하므로, 우려했던 불일치는 구조적으로 발생할 수 없다
 
 - **Task 016: 금융 정밀도 및 도메인 통합 테스트** ✅ — 완료 (2026-08-27)
   - 원안 체크리스트(`BigDecimalPrecisionTest`/`SimulationServiceTest`/`AssetCrudIntegrationTest`/`OptimisticLockingTest`)는 Phase 1 Step 6 시절 작성돼, 그 사이 Task 012·013·015가 이미 만든 자체 통합 테스트(`AssetIntegrationTest` 15케이스·`PortfolioIntegrationTest`·`SimulateIntegrationTest`)와 상당 부분 겹쳤다. 실제 코드베이스 조사로 남은 갭만 추려 아래처럼 조정해 구현했다
@@ -316,7 +316,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ⚠️ 남은 갭:
     - `GET /v1/assets`(커서 페이지네이션 목록) API를 소비하는 화면이 아직 없다 — `assetApi.ts`에 `listAssets()`를 만들지 않았으므로, 이 목록이 필요한 화면(예: Task 010 후속 과제인 티커 검색 자동완성)이 생기면 그때 추가한다
     - ✅ (해소) Task 019에서 401 발생 시 자동 갱신(refresh-and-retry)이 추가돼 재로그인 없이 세션이 유지된다
-    - 비-JSON 에러 응답 처리(위 Minor 보류 항목)는 발생 가능성이 낮아 미루되, 프록시/게이트웨이 계층이 생기는 Task 030(Capacitor) 이후 재검토
+    - ✅ (해소, 2026-09-18) 비-JSON 에러 응답 처리 — Task 030(Capacitor) 완료 확인 결과 우려했던 프록시/게이트웨이 계층은 실제로 생기지 않았지만(WebView가 백엔드에 직접 fetch), 결함 자체는 프록시 유무와 무관하게 독립적으로 재현 가능해 해소했다. `assetApi.ts`·`authApi.ts`의 에러 분기에서 `res.json()`을 try/catch로 감싸 non-JSON 응답을 상태 코드 기반 `ApiError('UNKNOWN_ERROR', ...)`로 폴백하도록 수정(`senior-frontend`)
 
 - **Task 019: 인증 강화 — Refresh Token 및 로그아웃 (F010)** ✅ — 완료 (2026-08-30)
   - Task 003의 남은 갭 해소. 실시간 차트(F007)를 띄워두는 사용 패턴과 Access Token 15분 만료가 충돌하는 문제를, 재로그인 없이 자동 갱신하는 흐름으로 해결한다.
@@ -336,7 +336,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - **(보류)** 갱신 시 React `AuthContext`의 `token` state가 silent refresh와 동기화되지 않음 — 현재는 `RequireAuth`/`AppLayout` 모두 truthiness로만 소비해 무해하지만, 향후 `auth.token` 값 자체를 Authorization 헤더 등에 쓰는 화면이 생기면 만료된 값이 나갈 수 있음. 지금 고칠 필요는 없어 남은 갭으로만 기록
     - **(보류)** 갱신 실패로 확정된 Refresh Token이 `localStorage`에서 지워지지 않음 — 현재는 호출 화면들이 `UNAUTHORIZED` 분기에서 `auth.logout()`으로 결과적으로 정리되어 실질 영향 없음
   - ⚠️ 남은 갭:
-    - 만료된 `refresh_tokens` 행을 지우는 정리 배치 없음 — `token_hash` UNIQUE 인덱스 조회라 성능 영향은 없으나 저장 공간은 계속 누적됨
+    - ✅ (해소, 2026-09-18) 만료된 `refresh_tokens` 행을 지우는 정리 배치 신설 — `RefreshTokenRepository.deleteExpiredOrRevokedBefore(cutoff)`(만료 또는 폐기 후 7일 유예)를 신규 `RefreshTokenCleanupScheduler`(`@Scheduled(cron="0 0 3 * * *")`, 매일 새벽 3시)가 호출. Rotation 정책상 토큰은 자연 만료보다 갱신 시 즉시 폐기되는 경우가 훨씬 흔해 `revoked_at`도 함께 삭제 조건에 포함. 전용 스케줄러 대신 Virtual Thread 기반 기본 `taskScheduler`에 위임(`senior-backend`)
     - Rotation된(이미 폐기된) 토큰이 재사용될 때 해당 유저의 다른 세션 전체를 강제 로그아웃(cascade revoke)하는 기능 없음 — 다중 기기 동시 로그인 요구사항이 없어 의도적으로 축소
     - **다중 탭 환경에서 한쪽 탭만 예기치 않게 로그아웃될 수 있음(신규 발견)**: 401 자동 재시도의 동시성 가드는 같은 탭(같은 JS 모듈 인스턴스) 안에서만 유효하다. 두 탭이 거의 동시에 Access Token 만료를 맞으면 각자 독립적으로 갱신을 시도하는데, rotation 특성상 먼저 도착한 탭만 성공하고 늦게 도착한 탭은 이미 폐기된 토큰으로 시도한 셈이 되어 강제 로그아웃된다. 다중 탭 동시 사용은 PRD·ROADMAP 어디에도 요구사항으로 명시된 적이 없고, 고치려면 `BroadcastChannel`/`storage` 이벤트로 탭 간 토큰 상태를 동기화하는 별도 구현이 필요해 이번 범위를 크게 벗어난다
     - 위 code-reviewer 보류 항목 2건(React state 미동기화, 실패한 Refresh Token 미정리)
@@ -376,7 +376,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - `basDt` 생략 시 "최신 거래일" 반환은 1회 호출로만 확인됨 — 주말·공휴일이 여러 날 겹치는 경우 등 전체 케이스가 보장되는지는 추가 관찰 필요
     - 업비트·환율·STOCK 전부 WireMock 검증만 마쳤고 실서버 연결(WireMock→실제 API) 전환 시점은 미정
     - Resilience4j CB 파라미터(`failureRateThreshold` 등)는 실측 트래픽 없이 보수적 기본값으로 설정됨 — 운영 관측 후 조정 필요
-    - `allfolio.price.fetch.duration` 메트릭에 대한 Prometheus 히스토그램 설정(`management.metrics.distribution.percentiles-histogram`)이 아직 없음(시뮬레이터의 `allfolio.simulation.duration`만 설정돼 있음) — 필요해지면 추가
+    - ✅ (해소 확인, 2026-09-18) `allfolio.price.fetch.duration` 메트릭에 대한 Prometheus 히스토그램 설정 — `application.yml`의 `management.metrics.distribution.percentiles-histogram`에 `allfolio.simulation.duration`과 함께 이미 등록돼 있음을 코드 조사로 재확인. 이 항목이 "없음"으로 남아있던 건 문서만 갱신되지 않은 stale 서술이었다
 
 - **Task 022: Redis 캐시 및 요청 Throttling** ✅ — 완료 (2026-09-02)
   - ✅ `infra/cache/PriceCacheStore`(Redis read-through 캐시)와 `infra/cache/PriceThrottle`(Lua 스크립트 기반 원자적 카운터)를 신설했다. `PriceService`가 둘을 오케스트레이션한다: 소유권 조회(캐시 키가 자산의 ticker/currency에 의존해 선행 필요 — 계획 단계의 "캐시 먼저" 가정을 실제 구현 시 정정) → 캐시 조회(fresh면 Throttle 없이 즉시 반환) → Throttle 확인 → 외부 클라이언트 호출 → 성공 시 캐시 저장/실패 시 stale 값 폴백, 폴백할 캐시조차 없으면 기존과 동일하게 503. 캐시 키는 사용자 정보 없는 시장 데이터 식별자(`price:{assetType}:{ticker}`, CASH는 `price:CASH:{currency}`)라 여러 사용자가 같은 종목을 조회해도 캐시를 공유한다.
@@ -395,7 +395,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ⚠️ 남은 갭:
     - freshTtl·staleCeiling·Throttle 한도는 실측 트래픽 없이 합리적 추정치로 설정됨 — 운영 관측 후 조정 필요
     - 캐시 워밍업(콜드 스타트) 전략 없음 — 배포 직후에는 모든 요청이 캐시 미스로 시작
-    - "설정이 다른 Spring 테스트 컨텍스트가 늘어날수록 공유 PostgreSQL 연결이 누적되는" 구조적 취약점 자체는 여전히 남아있다(`PriceThrottleTest`가 만들던 회피 가능한 컨텍스트 1개는 제거했지만, `AssetPriceIntegrationTest` 등 WireMock 포트가 서로 달라 불가피하게 갈라지는 컨텍스트들은 그대로다) — 테스트용 Hikari 풀 크기 축소 등 근본적인 인프라 개선은 별도 검토 필요
+    - ✅ (해소, 2026-09-18) "설정이 다른 Spring 테스트 컨텍스트가 늘어날수록 공유 PostgreSQL 연결이 누적되는" 구조적 취약점 — 신규 `application-test.yml`(`spring.datasource.hikari.maximum-pool-size: 2`) + `AbstractIntegrationTest`의 `@ActiveProfiles("test")`로 컨텍스트당 HikariCP 풀 크기를 기본 10에서 2로 축소. 실측: 전체 스위트 실행 중 Postgres peak 커넥션 149(구 `max_connections=100` 시절 장애 재현 수준에 근접) → 37로 약 75% 감소, 실행 시간 변화 없음(`senior-backend`)
     - ✅ **(Task 023에서 해소)** 사용자당 초당 1건 Throttle 한도가 Task 023(포트폴리오 평가 시 보유 자산 수만큼 시세를 한 번에 조회)과 충돌할 가능성 — Throttle을 `GET /v1/assets/{id}/price` 단건 엔드포인트 전용 제약으로 범위를 좁히는 것으로 확정(사용자 확정 정책, Task 023 항목 참고)
 
 - **Task 023: 포트폴리오 평가금액·비중·손익 (F005b)** ✅ — 완료 (2026-09-04)
@@ -416,8 +416,8 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
   - ⚠️ 남은 갭:
     - **시뮬레이터 `currentWeight`/`expectedWeight`는 이번 범위에서 제외**(사용자 확정, 후속 과제). 이 두 값을 채우려면 분모인 전체 포트폴리오 평가금액이 필요하고, 그러려면 `POST /v1/simulate/avg-price` 한 번에 보유 자산 수만큼 외부 시세를 조회해야 해 기존 "물타기 시뮬레이터 P99 ≤ 5ms(Holding 단건 DB 조회 + In-Memory 계산, 외부 API 없음)" 성능 목표(`domain/CLAUDE.md`·아래 「성능 KPI」)와 구조적으로 충돌한다. 착수 시 (a) KPI를 완화할지 (b) 비중만 별도 엔드포인트/캐시로 뺄지부터 정해야 한다
     - 자산이 많은 사용자는 시세를 **순차(순회) 조회**하므로 캐시가 비어 있는 콜드 스타트에서 응답이 느려질 수 있다 — 병렬화(Virtual Threads 기반 fan-out)는 이번 범위 밖으로 두었다. 캐시가 더워진 뒤에는 대부분 Redis 히트로 끝난다
-    - 프론트 검증 중, 실 종목(예: `005380` 현대차)이 `ALLFOLIO_STOCK_SERVICE_KEY`를 정상 로드한 상태에서도 시세 조회에 실패하는 현상을 관측했다 — 부분 실패 정책 덕에 화면은 정상 동작(해당 항목만 `null`)했다. 원인은 STOCK 시세 클라이언트(Task 021, 공공데이터포털) 소관이라 이번엔 손대지 않았고 **후속 확인이 필요하다**(`stock-price-api` 에이전트 소관)
-    - `quoteForPortfolio()`에는 `getPrice()`가 갖고 있는 계측(`allfolio.price.fetch.duration` Timer)을 붙이지 않았다 — 포트폴리오 경로의 시세 조회 지연은 현재 메트릭에 잡히지 않는다
+    - ✅ (조사 완료, 2026-09-18) 실 종목(예: `005380` 현대차) 시세 조회 실패 — `stock-price-api` 에이전트가 실제 서비스키로 재검증한 결과, 우려했던 "`numOfRows=1`이 다른 종목을 먼저 받아올 위험" 가설은 반증됐다(이 API의 `srtnCd`가 전부 고정 6자리라 6자리 전체로 `likeSrtnCd` 검색하면 포함검색이어도 자기 자신 외 매칭될 수 없음, 1648건 전수 확인). 프로덕션 코드 변경 없음(재현되지 않는 가설에 방어적 수정 없음, `StockPriceClientTest`에 회귀 테스트만 추가) — 원 관측(Task 023 시점)의 실제 원인은 이미 별도로 병합된 서비스키 이중 인코딩 수정(`decodeIfAlreadyEncoded`)일 가능성이 높다는 추정만 남김. 상세는 `.claude/agents/stock-price-api.md` 참고
+    - ✅ (해소, 2026-09-18) `quoteForPortfolio()`에 계측 추가 — `getPrice()`와 동일한 `Timer.Sample` 패턴을 적용하되, 호출 빈도·지연 분포가 근본적으로 달라(포트폴리오는 자산 수만큼 반복 호출) 메트릭 이름을 `allfolio.portfolio.price.fetch.duration`으로 분리(`getPrice()`를 건드리지 않는 한 태그 분기는 Prometheus가 거부해 불가능했음). `application.yml` histogram 설정에도 등록(`senior-backend`)
   - ✅ **[후속] 코인 시세·USD 스케일 정정** (2026-09-07, Task 024 완료 이후 사용자 요청으로 진행된 세션, formal Task 번호 없이 진행)
     - 사용자가 코인 자산에 "BTC" 같은 심볼만 등록했더니 시세가 계속 비어 보이는 버그 신고 — 원인은 `UpbitPriceClient`가 "KRW-BTC" 형태의 완전한 마켓 코드를 그대로 요구하고 있었던 것. `getPrice(ticker, currency)`로 시그니처를 바꿔 자산의 `currency`로 마켓 코드를 자동 조립하도록 수정(KRW→`KRW-`, USD→업비트에 실존하는 `USDT-`로 매핑 — 업비트는 `USD-BTC` 마켓 자체를 지원하지 않는다)
     - 위 변경으로 USD 코인이 실제 USDT 마켓을 조회하게 되면서, 달러 시세를 원화 환산 없이 그대로 `evaluationKrw`에 넣는 버그를 Playwright E2E 실측으로 발견(0.02 BTC가 "평가금액 1,587원"으로 찍힘 — 실제 원화 평가액의 1/1300). `PriceService.coinPrice()`를 신설해 CASH(USD)와 동일하게 `ExchangeRateClient`로 환산하도록 수정 — 단, cost(취득원가)는 미환산이라 unrealizedPnl은 기존 STOCK(비KRW)과 동일하게 계속 `null`
@@ -440,7 +440,7 @@ AllFolio는 증권사·거래소·은행 앱을 3개 이상 따로 쓰며 전체
     - Minor 4건은 보류: 커서 조건이 인덱스 범위가 아닌 Filter로 처리돼 페이지 조회가 사실상 O(N)인 성능 이슈(마이그레이션 필요, `database` 에이전트 소관), POST/GET 응답 스케일 불일치(Task 012·013이 이미 「남은 갭」으로 등재한 기존 문제를 그대로 승계 — 신규 결함 아님), 동시성 회귀 테스트 부재(수동 curl 실측으로 대체), 요청 범위와 무관한 `.gitignore`/`CLAUDE.md` 변경(diff에 혼입됐으나 의도된 별개 변경으로 확인)
     - 재검증: `TransactionIntegrationTest` 11/11 통과(회귀 테스트 3건 추가분 포함), 전체 스위트(`./gradlew test --rerun-tasks`) 195개 전부 통과, 회귀 없음
   - ⚠️ 남은 갭:
-    - 커서 페이지네이션의 타이브레이크 조건이 인덱스 범위 조건이 아닌 Filter로 처리돼 페이지 수가 많아지면 사실상 O(N) 스캔이다(위 code-reviewer Minor). 성능 개선(행 값 비교 `(t.tradedAt, t.id) < (:t, :id)` + 복합 인덱스)은 마이그레이션을 동반해 이번 Task 범위 밖 — 다음 착수 시 `database` 에이전트 소관으로 재검토
+    - ✅ (해소, 2026-09-18) 커서 페이지네이션 타이브레이크 조건이 Filter로 처리되던 O(N) 문제 — `database` 에이전트가 `V5__transactions_cursor_index.sql`로 `(asset_id, traded_at DESC, id DESC)` 복합 인덱스를 추가하고, `findByAsset_IdBeforeCursor`를 row-value 비교(`(t.tradedAt, t.id) < (:tradedAt, :id)`)로 재작성. Hibernate 7+PostgreSQLDialect가 이 튜플 비교를 네이티브 `ROW(...)` 비교로 그대로 발행함을 생성 SQL로 직접 확인해 네이티브 쿼리 전환은 불필요했다. EXPLAIN ANALYZE 실측(2만 건, offset 19,000, LIMIT 21): Filter 완전 소거, `Rows Removed by Filter` 19,001→0, buffers 566→4(약 140배), 실행시간 1.24ms→0.038ms. 완전히 중복되는 기존 `idx_transactions_asset_traded`는 같은 마이그레이션에서 제거
     - ✅ (2026-09-17 해소 — 아래 「GET /v1/assets↔portfolio 스케일 통일 + CORS preflight 캐시 설정」 참고) `POST` 응답(요청 스케일 그대로)과 `GET` 목록 응답(DB `NUMERIC(28,8)` 왕복 스케일)의 표기 차이는 Task 012·013이 이미 등재한 기존 갭을 이 API도 그대로 승계했었다 — 신규 결함은 아니었음
 
 ### Phase 4: 종목 검색 기반 등록 + 미국 주식 시세
@@ -498,11 +498,17 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
     `twelvedata-api`·`stock-price-api`·`senior-backend` 3개 에이전트에 병렬 위임해 수정. 재검증 결과
     **Blocker 0건·Major 0건 "병합 가능"** 판정, 전체 스위트(28클래스·216테스트) 회귀 없음, `double`/`float`
     0건, Task 026(검색 API) 범위 침범 없음 확인
-  - ⚠️ 남은 갭(Minor, code-reviewer가 "이번 Task를 막지 않는 이월 항목"으로 판단): 공유 Redis
+  - ✅ (해소, 2026-09-18) 남은 갭(Minor, code-reviewer가 "이번 Task를 막지 않는 이월 항목"으로 판단): 공유 Redis
     Testcontainer에 `rate:USD:KRW` 캐시를 flush하는 테스트가 없어 테스트 클래스 간 값이 남을 잠재
-    리스크가 있다(현재는 전 테스트가 동일 환율값을 써서 실제로 재현되지는 않음). `AbstractIntegrationTest`의
+    리스크가 있었다 — `senior-backend`가 실제로 고정 키를 공유하는 두 클래스(`PortfolioIntegrationTest`,
+    `AssetPriceIntegrationTest`, 파일 내 실측 충돌 이력·워크어라운드 주석으로 확인)의 `@BeforeEach`에
+    `redisConnectionFactory.getConnection().serverCommands().flushDb()`를 추가해 해소. UUID 기반 키를 쓰는
+    `*StoreTest`류는 구조적으로 충돌 불가능해 제외. `AbstractIntegrationTest`의
     `max_connections=300`(TwelveDataClientTest 추가로 Postgres 커넥션 풀이 소진되던 문제의 임시 대응)도
-    근본 해결(Hikari 풀 크기 축소, Task 022가 이미 등재한 이월 항목)이 아닌 우회다
+    ✅ (해소, 2026-09-18) 근본 해결됨 — 신규 `application-test.yml`(`spring.datasource.hikari.maximum-pool-size: 2`)
+    + `@ActiveProfiles("test")`로 테스트 컨텍스트당 풀 크기를 축소, 실측으로 Postgres peak 커넥션
+    149→37(약 75% 감소)을 확인했고 전체 스위트 실행 시간 변화는 없었다(Task 022가 등재한 이월 항목,
+    아래 Task 022 절 참고)
   - 담당: `twelvedata-api`(클라이언트 구현·실측) → `senior-backend`(라우팅·캐시 통합) →
     `stock-price-api`(부수 결함 수정) → `code-reviewer`(독립 검증)
 
@@ -757,24 +763,45 @@ Phase 5(고급 기능·최적화) 착수 전, 사용자가 확정한 변경 2건
     - `CandlePushScheduler`의 폴링 틱 내 팬아웃(구독 키 수만큼 동시에 나가는 업비트 호출)에는 동시성 상한이 없다 — N=500 재측정에서 틱 겹침은 해소됐지만, 그 재측정 자체에서 업비트 429(97건)·CB `not_permitted_calls_total`(13,019건) 발생과 테스트 종료 시점 CB `half_open`을 재확인했다. REST 조회 경로(위 (c))는 `CandleThrottle`로 막았지만 SSE 폴링 경로는 여전히 무방비 상태다 — `Semaphore` 등으로 팬아웃 동시성 자체를 업비트 한도 이하로 제한할지는 다음 착수 시 판단이 필요하다
     - `AssetDetailPage.tsx`의 candles 조회 effect가 `[asset.id, assetType, candleInterval]`에만 의존해, 같은 `interval`을 다시 눌러도 재조회되지 않는다 — 위 429 응답을 받은 뒤 같은 interval을 다시 클릭해도 에러 상태가 풀리지 않고 다른 interval로 갔다 와야 한다(code-reviewer 발견, 프론트 미착수)
 
-- **GET /v1/assets↔portfolio 스케일 통일 + CORS preflight 캐시 설정** ✅ — 구현 완료 (2026-09-17, formal Task 번호 없이 진행, code-reviewer 통합 검증은 아직 진행 전)
+- **GET /v1/assets↔portfolio 스케일 통일 + CORS preflight 캐시 설정** ✅ — 완료 (2026-09-17, formal Task 번호 없이 진행, code-reviewer 통합 검증 완료 — 아래 「Task 031 후속 2건 code-reviewer 통합 검증」 참고)
   - 대상: Task 012·013이 남기고 Task 016·024가 승계만 해온 이월 갭 — `AssetService.toResponse()`(`GET /v1/assets` 단건·목록, `POST /v1/assets` 응답까지 전부 공유)가 `quantity`/`avgPrice`를 DB `NUMERIC(28,8)` 왕복 스케일 그대로 `toPlainString()`해, `PortfolioService`가 이미 적용 중인 `PrecisionScale` 정규화와 표기가 어긋나던 문제. Task 030이 남긴 CORS `Access-Control-Max-Age` 미설정(모바일에서 비단순 요청마다 프리플라이트 왕복 추가)도 같은 세션에서 함께 처리했다(서로 무관하지만 둘 다 backend 한 줄 수정 규모라 묶어 위임)
   - ✅ `AssetService.toResponse()`에 `PrecisionScale` 적용 — `quantity`는 `PrecisionScale.QUANTITY_SCALE`(8)로 고정, `avgPrice`는 `PrecisionScale.scaleFor(assetType, currency)`로 정규화(`PortfolioService`와 동일 규칙). `createAsset`·`getAsset`·`listAssets`·`updateHolding` 4개 메서드가 이 헬퍼를 공유하므로 `POST`/`GET` 응답 스케일이 이제 전부 일치한다
   - ✅ `SecurityConfig.corsConfigurationSource()`에 `configuration.setMaxAge(Duration.ofHours(1))` 추가 — 프리플라이트 캐시 유효기간을 1시간으로 설정, 기존 필터 체인 구조는 무변경
   - ✅ `AssetIntegrationTest` 갱신 — `registeringAssetWithNumericUpperBoundValuesRoundTripsWithoutLoss`를 `...WithoutOverflow`로 개명(NUMERIC 상한 근처 `avgPrice`가 이제 HALF_UP으로 반올림돼 다음 정수로 올라가는 동작을 반영), `postEchoesRequestScaleWhileGetListNormalizesToDbScale`을 `postAndGetListShareSameNormalizedScale`로 개명(POST/GET 응답이 이제 같은 정규화 스케일을 반환함을 검증)
-  - ⚠️ 남은 갭: code-reviewer 독립 검증 미착수(shrimp-task-manager 추적 중) — 이번 변경이 `GET /v1/assets`를 소비하는 기존 화면·테스트에 미치는 영향(특히 `PrecisionScale.scaleFor()`가 없던 시절 값을 가정한 프론트 코드가 있는지)은 검증에서 함께 확인해야 한다
+  - ✅ (2026-09-17 해소) code-reviewer 독립 검증 완료, Major 3건 발견 후 아래 「Task 031 후속 2건 code-reviewer 통합 검증」에서 처리
 
-- **Task 031 후속: SSE 캔들 인프라 갭 해소 + 프론트 캔들 재조회 버그 수정** ✅ — 구현 완료 (2026-09-17, formal Task 번호 없이 진행, code-reviewer 통합 검증은 아직 진행 전)
+- **Task 031 후속: SSE 캔들 인프라 갭 해소 + 프론트 캔들 재조회 버그 수정** ✅ — 완료 (2026-09-17, formal Task 번호 없이 진행, code-reviewer 통합 검증 완료)
   - 대상: 위 Task 031 「남은 갭」 4건(업비트 폴링 팬아웃 동시성 무제한, HTTP 압축 전역 미적용, `CandleSseRegistry` 구독 키 정리 지연, 프론트 캔들 interval 재조회 불가)을 이어서 처리했다
   - ✅ **업비트 폴링 동시성 상한** — `PriceCacheProperties`에 `upbitPollConcurrency`(신규 필드, 기본 25 — `allfolio.price-cache.upbit-poll-concurrency`) 추가. `CandlePushScheduler`가 이 값으로 `Semaphore`를 만들어 `pollAndPush()`의 구독 키 fan-out이 업비트를 동시에 호출하는 개수를 제한한다(틱 겹침 방지용 `join(coinFreshTtl)` 로직은 그대로 — 세마포어는 in-flight 상한만 추가할 뿐 폴링 구조 자체는 바꾸지 않는다). 20~30 사이 보수적인 값으로 시작했고, 실제 효과(429·CB `half_open` 재발 여부)는 k6 재측정으로 확인해야 한다(아래 「남은 갭」)
   - ✅ **HTTP gzip 압축 전역 적용** — `application.yml`에 `server.compression.enabled=true` + `mime-types`(json/plain/css/javascript 명시)를 추가하고 `text/event-stream`(SSE)은 목록에서 제외해 캔들 스트리밍이 압축 대상에 안 걸리도록 했다. Task 031이 실측한 STOCK candles 87% 압축 효과가 다른 JSON 응답(포트폴리오·자산 목록 등)에도 적용될 것으로 기대되나, 이번 세션에서 재측정은 하지 않았다
   - ✅ **`CandleSseRegistry` 구독 키 정리 지연 — 원인 조사 후 "이미 있는 heartbeat가 유일한 정리 수단"으로 결론**: `SseEmitter`에는 완료 여부를 외부에서 조회하는 공개 API가 없어(바이트코드 확인 — `complete` 필드는 private, getter 없음), 죽은 연결을 감지하는 유일한 방법이 실제로 `send()`를 시도해 실패를 관찰하는 것뿐임을 확인했다. 즉 기존 30초 주기 heartbeat(`sendHeartbeat()`)가 모든 구독자를 순회하며 `send()`를 시도하는 동작 자체가 곧 "정리 스윕"이라, 별도 스케줄러를 신설하면 똑같은 일을 중복 구현하게 된다. curl `--max-time`으로 클라이언트가 정상 종료(TCP FIN)하는 경우를 재현해, 다음 heartbeat 틱에서 `send()`가 `IOException`으로 실패해 구독 해제가 실제로 일어남을 확인(정리까지 최대 30초 소요). 다만 TCP FIN 없이 끊기는 경우(전원 차단·네트워크 단절)는 curl로 재현할 수 없었고, 이 경우 OS 소켓 버퍼링·TCP 재전송 타임아웃에 좌우돼 heartbeat 주기보다 훨씬 오래 걸릴 수 있다 — 이는 애플리케이션 코드가 아닌 OS/네트워크 계층의 타이밍이라 스케줄 주기 조정으로는 근본 해결이 안 된다. 코드 변경 없음(Javadoc으로 결론 문서화)
   - ✅ **프론트 캔들 interval 재조회 버그 수정** — `AssetDetailPage.tsx`에 `candleRetryToken`(숫자 카운터) state를 신규 추가하고 candles 조회 effect의 의존성 배열에 포함시켰다. interval 토글 `onChange`(`handleCandleIntervalChange`)와 에러 화면에 새로 추가한 "다시 시도" 버튼(`handleCandleRetry`) 둘 다 이 카운터를 올려, 같은 interval을 다시 선택해도(예: 429 에러 후 재시도) effect가 강제로 재실행되게 했다
   - 담당: `senior-backend`(세마포어·gzip·레지스트리 조사) → `senior-frontend`(재조회 버그 수정) → 코디네이터(커밋 분할·문서화)
+  - ✅ (2026-09-17 해소) code-reviewer 독립 검증 완료 — 아래 「Task 031 후속 2건 code-reviewer 통합 검증」 참고
   - ⚠️ 남은 갭:
-    - k6로 세마포어 도입 효과 재측정 안 함 — 429·CB `not_permitted_calls_total`·`half_open` 재발 여부를 실측으로 확인해야 `upbit-poll-concurrency: 25` 값이 적절한지 판단할 수 있다
-    - gzip 압축의 다른 엔드포인트(포트폴리오·자산 목록 등) 실효과 재측정 안 함, SSE가 실제로 압축에서 제외되는지도 코드 리뷰로만 확인했을 뿐 실측(`curl -H "Accept-Encoding: gzip"`으로 `Content-Type: text/event-stream` 응답 헤더 확인)은 하지 않았다
-    - code-reviewer 독립 검증 미착수(shrimp-task-manager 추적 중)
+    - k6로 세마포어 도입 효과 재측정 안 함 — 429·CB `not_permitted_calls_total`·`half_open` 재발 여부를 실측으로 확인해야 `upbit-poll-concurrency: 25` 값이 적절한지 판단할 수 있다(아래 검증에서 permit 타임아웃(10초)이 합리적인 근거는 확인했으나, k6 부하 재현은 이번에도 하지 않았다)
+    - gzip 압축의 다른 엔드포인트(포트폴리오·자산 목록 등) 실효과 재측정 안 함(SSE가 압축에서 제외되는 것 자체는 아래 검증에서 curl로 실측 확인 완료)
+
+- **Task 031 후속 2건 code-reviewer 통합 검증 및 후속 수정** ✅ — 완료 (2026-09-17, formal Task 번호 없이 진행)
+  - 대상: 위 두 항목(「GET /v1/assets↔portfolio 스케일 통일 + CORS preflight 캐시 설정」, 「Task 031 후속」)이 각자 "구현 완료, code-reviewer 통합 검증 진행 전" 상태로 남겨뒀던 걸 한 세션에서 검증·후속 수정까지 마무리했다. 대상 커밋: `8373716`(스케일 통일+CORS)·`cba41c5`(세마포어+gzip)·`2ee7d5b`(프론트 재조회 버그)
+  - ✅ `code-reviewer` 1차 독립 검증(실제 서버 기동+curl+psql 실측, 프론트 `npm run test`/뮤테이션 검증 병행) — **Blocker 0건, Major 3건**:
+    - **Major 1(현상 유지로 확정, 사용자 결정 2026-09-17)** — `AssetService`가 응답 표시 시점에만 `avgPrice`를 반올림해, 자산 상세 수정 폼이 그 반올림된 값(예: `70000.5원`→`70001원`)을 그대로 다시 `PUT`에 실어 보내면 사용자가 수량만 고쳐도 원본 소수점이 영구 소실되는 결함(실측 재현됨). `senior-backend`가 "저장 시점 정규화"로 수정을 시도했으나, **Task 013이 이미 사용자 확정으로 문서화해둔 설계**(위 Task 013 「남은 갭」 — 취득원가 `cost`는 `avgPrice` 반올림 전 원본 정밀도로 계산해야 하는데, 저장 시점에 반올림하면 이 원본 정밀도가 영구히 사라져 `cost` 계산이 부정확해짐, `PortfolioIntegrationTest`로 실측 확인)와 정면 충돌함을 발견해 되돌렸다. "PUT 왕복 시 avgPrice 불변" vs "cost는 원본 정밀도" 두 요구사항은 저장값을 반올림하는 순간 동시에 만족할 수 없다 — 사용자가 **현상 유지(문서화만, 코드 변경 없음)**를 선택(AskUserQuestion). 이 평단가 수정 폼 왕복 손실은 알려진 트레이드오프로 남는다(발생 조건: 소수점 있는 `avgPrice`로 등록한 자산을 수정 폼에서 평단가를 안 건드리고 저장 — KRW는 스케일 0이라 영향이 가장 크고, COIN/USD는 스케일이 커서 영향이 작다)
+    - **(수정 완료) Major 2** — 같은 `AssetResponse` DTO를 `AssetService`(정규화 적용)와 `TransactionService`(정규화 없이 `toPlainString()`)가 서로 다르게 직렬화하던 신규 불일치(이번 스케일 통일 커밋이 한쪽만 고쳐 발생). `AssetResponse.of(Asset, Holding)` 정적 팩토리로 통합해 두 서비스가 같은 매핑을 공유하도록 수정
+    - **(수정 완료) Major 3** — `CandlePushScheduler`의 `Semaphore.acquire()`가 무기한 대기하고 `upbitPollConcurrency` 설정값에 검증이 없어, `0`/음수로 잘못 설정하면 서버는 정상 기동하면서 실시간 시세만 조용히 무음 처리되는 결함(실측 재현: `upbit-poll-concurrency=0`으로 기동 후 40초간 캔들 이벤트 0건). `acquire()`→`tryAcquire(coinFreshTtl, ...)`(permit 못 얻으면 그 구독 키만 건너뛰고 경고 로그, 스케줄러 전체는 안 멈춤)로 교체, `PriceCacheProperties.upbitPollConcurrency`에 `@Positive`+`@DefaultValue("25")` 추가(잘못된 값이면 무음 장애 대신 부팅 자체가 실패하도록)
+  - ✅ `code-reviewer` 2차 재검증(Major 2·3 수정분 대상, 실서버 curl+`./gradlew test --rerun --no-build-cache` 전체 스위트) — **Blocker 0건, Major 0건, merge-ready 판정**. 실측: 소수 평단가 자산의 `POST`/`GET`/거래 응답 3경로가 바이트 단위 동일함을 STOCK·COIN·USD 조합으로 확인, `upbit-poll-concurrency=0` 재현 시 여전히 부팅 실패, 정상값(25)에서 SSE 캔들 스트림 정상 수신(`tryAcquire` 타임아웃 10초가 `coinFreshTtl`과 동일값이라 기존 "세대 중첩 최대 2세대" 보장이 그대로 유지됨을 근거와 함께 확인). Minor 3건(Major 2 수정에 회귀 테스트 부재/`@Positive` 네이밍이 같은 패키지 관례인 `@Min(1)`과 다름/`pollTickJoinTimeout` 필드가 두 가지 의미로 겸용됨) 중 회귀 테스트 부재만 반영 권장, 나머지 2건은 순수 스타일이라 백로그
+  - ✅ (수정 완료) Minor(회귀 테스트 부재) — `TransactionIntegrationTest`에 문자열 정확 비교 2건 추가(BUY 후 `quantity` 정확 스케일, SELL 후 원본 정밀도 저장값이 통화 스케일로 정확히 반올림되는지). 뮤테이션 검증으로 `TransactionService.toAssetResponse()`를 임시로 구버전(`toPlainString()`)으로 되돌려 신규 테스트가 실패하는지 확인 후 원복 — 이 과정에서 애초 요청했던 "BUY로 반올림 검증" 시나리오는 BUY가 가중평균 계산 시점에 이미 반올림해 저장하는 구조라 뮤테이션을 못 잡는다는 점도 함께 발견해 SELL 시나리오로 교체(SELL은 `currentAvgPrice`를 원본 정밀도 그대로 통과시켜 `AssetResponse.of()`의 반올림 여부가 응답에 직접 드러남)
+  - ✅ 테스트 개수: 백엔드 371개(cba41c5/8373716/2ee7d5b 반영 시점 기준) → **373개**(+2, `TransactionIntegrationTest` 신규 2건). `./gradlew test --rerun --no-build-cache` 전체 스위트 통과 확인(이 세션은 한글 경로+MS949 Gradle 문제 없이 정상 실행됨 — 환경이 스스로 복구된 것인지는 불명, 다음에 또 막히면 재진단 필요)
+  - 담당: `code-reviewer`(1차 검증) → `senior-backend`(Major 2·3 수정, Major 1 시도 후 원복) → 코디네이터(Major 1 방향 사용자 확인) → `code-reviewer`(2차 재검증) → `senior-backend`(Minor 회귀 테스트 보강) → 코디네이터(문서화)
+
+- **Task 032 착수 전 갭 해소** ✅ — 완료 (2026-09-18, formal Task 번호 없이 진행)
+  - 대상: (1) `code-reviewer` 전체 코드리뷰(2026-09-18)에서 발견된 Major 2건·Minor 2건, (2) ROADMAP.md 전수 조사로 발견된 실제 미해소 갭 7건(위 Task 018·019·022·023·024·025 각 절에 개별 반영) — 총 11건을 `/plan-task`로 계획해 순차 처리했다
+  - ✅ **iOS 배포 타겟/서명 설정 원복(Major)** — `frontend/ios/App/App.xcodeproj/project.pbxproj`에 uncommitted로 들어와 있던 `IPHONEOS_DEPLOYMENT_TARGET` 15.0→27.0 무단 상향(Xcode 자동 설정 산출물로 추정, 존재하지 않는 iOS 버전대)과 `DEVELOPMENT_TEAM` 하드코딩을 `git checkout HEAD`로 원본 상태에 정확히 복구. Capacitor CLI가 관리하는 `Package.swift`(`.iOS(.v15)`)와의 정합성 확보(`senior-frontend`)
+  - ✅ **SSE emitter graceful shutdown 정리 로직 추가(Major)** — `AssetController`가 여는 `SseEmitter(Long.MAX_VALUE)`가 서버 종료 시 정리되지 않아 graceful shutdown이 30초 타임아웃으로 강제 중단되던 문제(`Shutdown phase ... still running`/`AsyncRequestTimeoutException` 실측). `CandleSseRegistry`에 종료 훅을 추가했는데, 최초 지시였던 `@PreDestroy` 대신 `@EventListener(ContextClosedEvent.class)`를 채택 — `AbstractApplicationContext.doClose()`가 `ContextClosedEvent` 발행 → graceful shutdown 대기(최대 30초) → `@PreDestroy` 호출 순서로 진행됨을 바이트코드로 실측 확인, `@PreDestroy`는 이미 타임아웃이 지난 뒤에야 실행돼 근본적으로 문제를 못 막는다는 걸 1차 구현 후 재현 실패로 발견해 교체했다(`senior-backend`)
+  - ✅ **세마포어 permit 타임아웃 skip 경로 회귀 테스트 추가(Minor)** — `CandlePushSchedulerSemaphoreSkipTest` 신규, `upbitPollConcurrency=1`로 두 구독 키가 permit을 경합하게 만들어 진 쪽이 skip됨을 검증. 뮤테이션 검증(`tryAcquire`→`acquire()`로 되돌리면 실패) 통과(`senior-backend`)
+  - ✅ **SSE 폴링/구독 관측 지표 추가(Minor)** — `allfolio.sse.poll.skipped`(Counter)·`allfolio.sse.poll.duration`(Timer)·`allfolio.sse.active.emitters`(Gauge) 3종을 `PriceService`의 기존 `Timer.Sample` 패턴으로 추가. 1차 구현에서 Counter가 idle 상태에 노출되지 않는 Micrometer 특성(최초 `increment()` 시점에만 레지스트리 등록)을 실측으로 발견해, 생성자에서 미리 조회해 필드로 보관하는 방식으로 보강(`senior-backend`)
+  - 나머지 7건(Task 018 비-JSON 에러 응답, Task 019 refresh_tokens 정리 배치, Task 022 HikariCP 풀 축소, Task 023 005380 조사 + `quoteForPortfolio` 계측, Task 024 커서 인덱스, Task 025 Redis flush)은 해당 Task 절에 개별 반영(위 참고)
+  - ✅ 각 태스크 `/execute-task`→`/verify-task` 사이클로 진행, 매 단계 실제 코드 대조·전체 스위트 재실행으로 독립 재검증(코디네이터). 백엔드 전체 스위트 371개→**378개**(+7), 실패 0건
+  - 담당: `senior-frontend`(iOS·비-JSON 에러)·`senior-backend`(SSE·계측·테스트 인프라·refresh_tokens)·`database`(커서 인덱스)·`stock-price-api`(005380 조사) → 코디네이터(계획 수립·개별 검증·문서화)
 
 - **Task 032: 배포 파이프라인 및 운영 관측 체계**
   - CI/CD, 프론트 배포 방식 확정(JAR 통합 vs 분리 호스팅)
