@@ -3,7 +3,6 @@ package com.allfolio.domain.service;
 import com.allfolio.domain.Asset;
 import com.allfolio.domain.AssetType;
 import com.allfolio.domain.Holding;
-import com.allfolio.domain.PrecisionScale;
 import com.allfolio.domain.Transaction;
 import com.allfolio.domain.TransactionType;
 import com.allfolio.domain.User;
@@ -24,7 +23,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +33,13 @@ import java.util.stream.Collectors;
 /**
  * 자산 CRUD (docs/ROADMAP.md Task 012). ASSET_NOT_FOUND는 자산이 없을 때와 남의 자산일 때
  * 모두 던진다 — 403이면 "그 ID는 존재한다"는 사실이 새어 나간다.
+ *
+ * <p>quantity/avgPrice는 요청받은 원본 정밀도 그대로 저장한다 — holdings.avg_price는 의도적으로
+ * NUMERIC(28,8)로 반올림 없이 보관되고, {@link PortfolioService#toDraft}의 {@code cost}가 이 원본
+ * 정밀도로 계산한 뒤에야 반올림한다(docs/ROADMAP.md 「GET /v1/portfolio 응답 예시」 절 「주의」,
+ * 사용자 확정 결정, {@code PortfolioIntegrationTest#portfolioItemCostUsesRawPrecisionWhileAvgPriceIsRoundedSeparately}
+ * 로 고정됨). 응답(GET/POST 등)에 나가는 표시값만 {@link AssetResponse#of}가 통화·자산유형별 스케일로
+ * 반올림한다 — 저장 시점에 반올림하면 이 raw-precision cost 계산이 깨진다.
  */
 @Service
 public class AssetService {
@@ -152,17 +157,8 @@ public class AssetService {
                 .orElseThrow(() -> new IllegalStateException("자산 " + assetId + "에 대한 보유 정보가 없습니다."));
     }
 
+    /** AssetService·TransactionService가 공유하는 엔티티→DTO 매핑(code-reviewer Major 2). */
     private AssetResponse toResponse(Asset asset, Holding holding) {
-        int avgPriceScale = PrecisionScale.scaleFor(asset.getAssetType(), asset.getCurrency());
-        return new AssetResponse(
-                asset.getId(),
-                asset.getTicker(),
-                asset.getName(),
-                asset.getAssetType(),
-                asset.getCurrency(),
-                holding.getQuantity().setScale(PrecisionScale.QUANTITY_SCALE, RoundingMode.HALF_UP).toPlainString(),
-                holding.getAvgPrice().setScale(avgPriceScale, RoundingMode.HALF_UP).toPlainString(),
-                holding.getVersion(),
-                holding.getUpdatedAt());
+        return AssetResponse.of(asset, holding);
     }
 }

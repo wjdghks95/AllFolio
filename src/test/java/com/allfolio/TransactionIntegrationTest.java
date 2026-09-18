@@ -65,6 +65,42 @@ class TransactionIntegrationTest extends AbstractIntegrationTest {
         assertThat(new BigDecimal((String) holding.get("quantity"))).isEqualByComparingTo(new BigDecimal("15"));
     }
 
+    /**
+     * code-reviewer Minor 회귀 테스트: quantity도 avgPrice와 동일하게 정규화된 스케일(항상 8자리,
+     * PrecisionScale.QUANTITY_SCALE)로 정확한 문자열이어야 한다. isEqualByComparingTo만 쓰면
+     * toPlainString()(정규화 없음)으로 되돌려도 값이 같아 못 잡는 스케일 버그를 놓친다
+     * (.claude/rules/testing.md).
+     */
+    @Test
+    void buyReturnsQuantityAsExactlyScaledString() {
+        String assetId = idOf(createAsset(tokenA, stockRequest("005930", "삼성전자", "10", "60000")));
+
+        MvcTestResult result = authorizedPost(tokenA, "/v1/assets/" + assetId + "/transactions",
+                transactionRequest("BUY", "55000", "5", "2024-01-01T00:00:00Z"));
+
+        assertThat(result).hasStatus(HttpStatus.CREATED);
+        assertThat(holdingOf(result).get("quantity")).isEqualTo("15.00000000");
+    }
+
+    /**
+     * code-reviewer Minor 회귀 테스트: USD 자산은 avgPrice가 scale 2(HALF_UP)로 정규화돼야 한다
+     * (PrecisionScale.scaleFor). SELL은 avgPrice를 그대로 통과시키므로(HoldingUpdate 참고),
+     * holdings.avg_price 컬럼(NUMERIC(28,8))에서 그대로 재조회한 8자리 원본 정밀도 값이 응답 시점에
+     * 정확히 반올림되는지를 순수하게 검증한다 — BUY는 가중평균 계산(divide(..., scale, HALF_UP))
+     * 자체가 이미 표시 스케일로 반올림하므로 AssetResponse.of()의 반올림 로직을 우회해 이 회귀를
+     * 못 잡는다(뮤테이션 검증 실측).
+     */
+    @Test
+    void sellReturnsAvgPriceRoundedToCurrencyScaleFromFullPrecisionStorage() {
+        String assetId = idOf(createAsset(tokenA, usdStockRequest("AAPL", "애플", "10", "189.4567")));
+
+        MvcTestResult result = authorizedPost(tokenA, "/v1/assets/" + assetId + "/transactions",
+                transactionRequest("SELL", "200", "1", "2024-01-01T00:00:00Z"));
+
+        assertThat(result).hasStatus(HttpStatus.CREATED);
+        assertThat(holdingOf(result).get("avgPrice")).isEqualTo("189.46");
+    }
+
     @Test
     void sellDeductsQuantityAndKeepsAvgPriceUnchanged() {
         String assetId = idOf(createAsset(tokenA, stockRequest("005930", "삼성전자", "10", "60000")));
@@ -322,6 +358,12 @@ class TransactionIntegrationTest extends AbstractIntegrationTest {
     private static String stockRequest(String ticker, String name, String quantity, String avgPrice) {
         return """
                 {"ticker":"%s","name":"%s","assetType":"STOCK","currency":"KRW","quantity":"%s","avgPrice":"%s"}
+                """.formatted(ticker, name, quantity, avgPrice);
+    }
+
+    private static String usdStockRequest(String ticker, String name, String quantity, String avgPrice) {
+        return """
+                {"ticker":"%s","name":"%s","assetType":"STOCK","currency":"USD","quantity":"%s","avgPrice":"%s"}
                 """.formatted(ticker, name, quantity, avgPrice);
     }
 

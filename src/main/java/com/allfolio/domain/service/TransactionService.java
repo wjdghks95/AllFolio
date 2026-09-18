@@ -185,18 +185,12 @@ public class TransactionService {
                 transaction.getTradedAt());
     }
 
-    /** AssetService.toResponse와 동일한 필드 매핑(엔티티→DTO 변환은 서비스 트랜잭션 안에서 수행). */
+    /**
+     * AssetService와 동일한 엔티티→DTO 매핑을 AssetResponse.of로 공유한다(code-reviewer Major 2,
+     * 중복 매핑 로직 제거).
+     */
     private AssetResponse toAssetResponse(Asset asset, Holding holding) {
-        return new AssetResponse(
-                asset.getId(),
-                asset.getTicker(),
-                asset.getName(),
-                asset.getAssetType(),
-                asset.getCurrency(),
-                holding.getQuantity().toPlainString(),
-                holding.getAvgPrice().toPlainString(),
-                holding.getVersion(),
-                holding.getUpdatedAt());
+        return AssetResponse.of(asset, holding);
     }
 
     private record CursorPosition(Instant tradedAt, UUID id) {

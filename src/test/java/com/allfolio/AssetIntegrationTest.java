@@ -210,7 +210,9 @@ class AssetIntegrationTest extends AbstractIntegrationTest {
      * NUMERIC(28,8)(정수부 20자리+소수부 8자리)의 CreateAssetRequest.quantity/avgPrice 상한 근처 값이
      * DB 저장·조회 과정에서 오버플로 없이 처리되는지 확인한다. quantity는 PrecisionScale.QUANTITY_SCALE(8자리)과
      * 스케일이 일치해 손실 없이 유지되지만, avgPrice는 응답 시 PrecisionScale.scaleFor(STOCK, "KRW")=0로
-     * HALF_UP 반올림되므로 상한값(...99999999)이 다음 정수로 올림된다(docs/ROADMAP.md Task 016).
+     * HALF_UP 반올림되므로 상한값(...99999999)이 다음 정수로 올림된다(docs/ROADMAP.md Task 016). 저장
+     * 자체는 반올림 없이 원본 정밀도 그대로 이뤄지므로(AssetService 클래스 Javadoc의 raw-precision cost
+     * 설계 참고) NUMERIC(28,8) 컬럼 상한을 넘을 걱정 없이 이 표시용 반올림만 검증하면 된다.
      */
     @Test
     void registeringAssetWithNumericUpperBoundValuesRoundTripsWithoutOverflow() {
