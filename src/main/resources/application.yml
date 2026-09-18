@@ -168,6 +168,7 @@ management:
       percentiles-histogram:
         allfolio.simulation.duration: true
         allfolio.price.fetch.duration: true
+        allfolio.portfolio.price.fetch.duration: true
 
 logging:
   level:

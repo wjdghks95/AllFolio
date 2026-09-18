@@ -120,29 +120,45 @@ public class PriceService {
      * <p>Throttle이 없는 대신, 실패한 조회는 짧은 TTL로 부정 캐싱한다(Task 023 Major 2) — 존재하지
      * 않는 티커로 등록된 자산이 있으면 GET /v1/portfolio를 반복 호출할 때마다 외부 API가 상한 없이
      * 불리는 문제를 막는다. 단건 조회 API({@link #getPrice})는 이미 Throttle이 있어 대상이 아니다.
+     *
+     * <p>계측은 {@link #getPrice}와 같은 {@code Timer.Sample} 패턴을 쓰되, 메트릭 이름은
+     * {@code allfolio.portfolio.price.fetch.duration}으로 별도로 뺀다 — 이 경로는 보유 자산 수만큼
+     * 반복 호출되는 고빈도 경로라 단건 조회(1회성)와 호출 빈도·지연 분포가 근본적으로 달라, 같은
+     * 이름을 공유하면 P99가 어느 쪽 트래픽에 좌우된 값인지 알 수 없다. 또한 {@link #getPrice}가 이미
+     * 내보내는 {@code allfolio.price.fetch.duration}은 {@code source} 태그만 갖는데, 여기서만 추가
+     * 태그(예: endpoint)를 얹으면 같은 메트릭 이름에 서로 다른 태그 키 집합이 섞여 Prometheus
+     * 레지스트리가 이를 거부한다("Different set of tags at readings") — {@link #getPrice}를 함께
+     * 고치지 않는 한 태그 분기는 불가능하다.
      */
     public Optional<PricedQuote> quoteForPortfolio(Asset asset) {
-        if (asset.getAssetType() == AssetType.CASH && !"USD".equals(asset.getCurrency())) {
-            return Optional.empty();
-        }
-
-        String cacheKey = cacheKeyFor(asset);
-        if (priceCacheStore.hasRecentFailure(cacheKey)) {
-            return Optional.empty();
-        }
-
+        Timer.Sample sample = Timer.start(meterRegistry);
+        String source = "external";
         try {
-            Duration freshTtl = freshTtlFor(asset.getAssetType(), asset.getCurrency());
-            Optional<PricedQuote> cached = priceCacheStore.find(cacheKey, freshTtl);
-            if (cached.isPresent() && !cached.get().stale()) {
-                return cached;
+            if (asset.getAssetType() == AssetType.CASH && !"USD".equals(asset.getCurrency())) {
+                return Optional.empty();
             }
 
-            return Optional.of(resolve(null, asset, cacheKey, cached, false));
-        } catch (RuntimeException e) {
-            log.warn("포트폴리오 시세 조회 실패: assetId={}, ticker={}", asset.getId(), asset.getTicker(), e);
-            priceCacheStore.markFailed(cacheKey);
-            return Optional.empty();
+            String cacheKey = cacheKeyFor(asset);
+            if (priceCacheStore.hasRecentFailure(cacheKey)) {
+                return Optional.empty();
+            }
+
+            try {
+                Duration freshTtl = freshTtlFor(asset.getAssetType(), asset.getCurrency());
+                Optional<PricedQuote> cached = priceCacheStore.find(cacheKey, freshTtl);
+                if (cached.isPresent() && !cached.get().stale()) {
+                    source = "cache";
+                    return cached;
+                }
+
+                return Optional.of(resolve(null, asset, cacheKey, cached, false));
+            } catch (RuntimeException e) {
+                log.warn("포트폴리오 시세 조회 실패: assetId={}, ticker={}", asset.getId(), asset.getTicker(), e);
+                priceCacheStore.markFailed(cacheKey);
+                return Optional.empty();
+            }
+        } finally {
+            sample.stop(meterRegistry.timer("allfolio.portfolio.price.fetch.duration", "source", source));
         }
     }
 
