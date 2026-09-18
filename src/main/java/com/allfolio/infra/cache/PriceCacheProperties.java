@@ -1,7 +1,9 @@
 package com.allfolio.infra.cache;
 
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
 import java.time.Duration;
@@ -51,7 +53,16 @@ public record PriceCacheProperties(
          * {@code CandlePushScheduler.pollAndPush()}가 구독 키를 fan-out 병렬 폴링할 때 동시에 업비트를
          * 호출할 수 있는 최대 개수(Task 031 k6 부하테스트에서 무제한 fan-out으로 업비트 429·CB
          * half_open 재발 실측). 20~30 사이 보수적인 값으로 시작하고 k6 재측정으로 조정한다.
+         *
+         * <p>{@code @Positive}로 0/음수 설정을 부팅 시점에 거부한다(code-reviewer Major 3 실측) — 0으로
+         * 기동하면 서버는 정상 뜨지만(헬스체크 UP) {@code CandlePushScheduler}의 permit 획득이 전부
+         * 막혀 SSE 캔들 이벤트가 로그·메트릭 어디에도 안 남고 조용히 0건이 되는 무음 장애가 재현됐다.
+         * {@code @DefaultValue("25")}는 yml에 이 키 자체가 통째로 빠졌을 때(바인딩 대상이 아예 없으면
+         * int 기본값 0으로 바인딩돼 같은 무음 장애가 재현됨, 실측) 25로 폴백하기 위함이다 — application.yml의
+         * "기본 25" 주석이 코드가 아닌 yml 값 하나에만 의존하지 않도록 한다.
          */
+        @Positive
+        @DefaultValue("25")
         int upbitPollConcurrency
 ) {
 }

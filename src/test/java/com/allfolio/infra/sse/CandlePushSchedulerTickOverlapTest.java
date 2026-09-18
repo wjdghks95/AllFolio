@@ -4,6 +4,7 @@ import com.allfolio.domain.Candle;
 import com.allfolio.domain.CandleInterval;
 import com.allfolio.domain.service.CandleService;
 import com.allfolio.infra.cache.PriceCacheProperties;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -72,7 +73,8 @@ class CandlePushSchedulerTickOverlapTest {
         PriceCacheProperties priceCacheProperties = new PriceCacheProperties(
                 Duration.ofSeconds(5), Duration.ofHours(12), Duration.ofMinutes(1),
                 Duration.ofHours(12), Duration.ofHours(24), Duration.ofSeconds(30), 10);
-        CandlePushScheduler scheduler = new CandlePushScheduler(registry, candleService, priceCacheProperties);
+        CandlePushScheduler scheduler = new CandlePushScheduler(registry, candleService, priceCacheProperties,
+                new SimpleMeterRegistry());
 
         // 실제 스케줄러가 fixedDelay로 순차 호출하는 것을 흉내 낸다 — join이 없다면 두 번째 호출이
         // 시작될 때 첫 번째 호출의 300ms 지연이 아직 안 끝나 inFlight가 2가 됐을 것이다.

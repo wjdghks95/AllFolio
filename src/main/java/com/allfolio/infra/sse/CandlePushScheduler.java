@@ -9,6 +9,9 @@ import com.allfolio.infra.cache.PriceCacheProperties;
 import com.allfolio.infra.logging.MdcKeys;
 import com.allfolio.infra.logging.MdcPropagation;
 import com.allfolio.web.dto.CandleBarResponse;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -27,6 +30,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 /**
  * COIN 캔들 SSE push 스케줄러(Task 028). {@link CandleSseRegistry}가 들고 있는 구독 키를 주기적으로
@@ -46,6 +50,7 @@ public class CandlePushScheduler {
     private final CandleSseRegistry registry;
     private final CandleService candleService;
     private final Duration pollTickJoinTimeout;
+    private final MeterRegistry meterRegistry;
 
     /**
      * 구독 키 fan-out 병렬 폴링(위 클래스 Javadoc의 "구독 키 단위 병렬화" 참고)이 업비트로 보내는
@@ -56,12 +61,24 @@ public class CandlePushScheduler {
      */
     private final Semaphore upbitPollSemaphore;
 
+    /**
+     * Micrometer의 {@code Counter}는 {@code Gauge}와 달리 최초로 값이 기록되는 시점에야
+     * 레지스트리에 등록된다 — idle 서버(활성 구독 키 0개)에서는 {@link #pushIfChanged}의 skip
+     * 분기가 한 번도 호출되지 않아 {@code meterRegistry.counter(...)}를 그때그때 조회하면
+     * {@code allfolio_sse_poll_skipped_total}이 부팅 직후 프로메테우스 응답에 아예 노출되지
+     * 않는다(SSE 폴링/구독 관측 지표 추가 검증 중 실측). 생성자에서 한 번 조회해 필드로 보관해
+     * 값 0으로 즉시 등록해둔다.
+     */
+    private final Counter pollSkippedCounter;
+
     public CandlePushScheduler(CandleSseRegistry registry, CandleService candleService,
-            PriceCacheProperties priceCacheProperties) {
+            PriceCacheProperties priceCacheProperties, MeterRegistry meterRegistry) {
         this.registry = registry;
         this.candleService = candleService;
         this.pollTickJoinTimeout = priceCacheProperties.coinFreshTtl();
         this.upbitPollSemaphore = new Semaphore(priceCacheProperties.upbitPollConcurrency());
+        this.meterRegistry = meterRegistry;
+        this.pollSkippedCounter = meterRegistry.counter("allfolio.sse.poll.skipped");
     }
 
     /**
@@ -116,6 +133,7 @@ public class CandlePushScheduler {
             scheduler = SseSchedulerConfig.SSE_TASK_SCHEDULER)
     void pollAndPush() {
         MDC.put(MdcKeys.TRACE_ID, UUID.randomUUID().toString());
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             List<Thread> tickThreads = new ArrayList<>();
             for (CandleSubscriptionKey key : registry.activeKeys()) {
@@ -131,21 +149,36 @@ public class CandlePushScheduler {
             }
         } finally {
             MDC.clear();
+            sample.stop(meterRegistry.timer("allfolio.sse.poll.duration"));
         }
     }
 
+    /**
+     * permit 획득은 무기한 블로킹(acquire())이 아니라 {@code pollTickJoinTimeout}(coinFreshTtl)로
+     * 타임아웃을 둔다(code-reviewer Major 3 실측) — {@code upbit-poll-concurrency}가 설정 실수로
+     * 0이 되면 acquire()는 영원히 반환하지 않아, 서버는 정상 기동(헬스체크 UP)한 채로 SSE 캔들
+     * 이벤트가 로그·메트릭 어디에도 안 남고 조용히 0건이 되는 무음 장애가 재현됐다. 타임아웃 내
+     * permit을 못 얻으면 이번 틱에서 그 구독 키만 건너뛰고 경고 로그를 남긴다 — 스케줄러 전체가
+     * 멈추지 않는다.
+     */
     private void pushIfChanged(CandleSubscriptionKey key) {
         Set<SseEmitter> subscribers = registry.subscribersOf(key);
         if (subscribers.isEmpty()) {
             return;
         }
-        Candle latest;
+        boolean acquired;
         try {
-            upbitPollSemaphore.acquire();
+            acquired = upbitPollSemaphore.tryAcquire(pollTickJoinTimeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return;
         }
+        if (!acquired) {
+            pollSkippedCounter.increment();
+            log.warn("SSE 캔들 폴링 permit 획득 타임아웃: key={}", key);
+            return;
+        }
+        Candle latest;
         try {
             latest = candleService.fetchLatestCoinCandle(key.ticker(), key.currency(), key.interval());
         } catch (RuntimeException e) {
