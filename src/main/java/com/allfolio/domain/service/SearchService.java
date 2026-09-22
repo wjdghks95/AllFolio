@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -45,9 +46,14 @@ public class SearchService {
     /**
      * 종목 검색. Throttle 초과 시 SearchRateLimitExceededException, 지원하지 않는 assetType/currency
      * 조합은 SearchValidationException(400 VALIDATION_ERROR로 매핑)을 던진다.
+     * 통화 유효성 검증은 캐시 조회보다 먼저 실행한다 — COIN은 통화와 무관하게 단일 캐시 키
+     * (search:COIN:ALL)를 쓰므로, 검증을 route() 안에만 두면 캐시 히트 시 검증이 우회되어
+     * 동일 요청의 응답 코드가 캐시 상태에 따라 400/200으로 비결정적으로 바뀌는 문제가 있었다.
      */
     public List<SearchResult> search(UUID userId, AssetType assetType, String currency, String q) {
-        String cacheKey = buildCacheKey(assetType, currency, q);  // 1. 검증+키 생성 (CASH → 즉시 예외)
+        validateCurrency(assetType, currency);  // 1. 캐시 히트/미스와 무관하게 항상 먼저 검증
+
+        String cacheKey = buildCacheKey(assetType, currency, q);
 
         Optional<List<SearchResult>> cached = searchCacheStore.find(cacheKey);
         if (cached.isPresent()) {                                  // 2. 캐시 히트 → Throttle 소모 없이 반환
@@ -85,29 +91,47 @@ public class SearchService {
     }
 
     /**
-     * assetType·currency 조합을 외부 클라이언트로 라우팅한다.
+     * assetType·currency 조합을 외부 클라이언트로 라우팅한다. validateCurrency()가 search()
+     * 진입 시 이미 조합을 검증했으므로 여기서는 통화 유효성을 다시 검사하지 않는다.
      * - STOCK+KRW: 공공데이터포털(StockPriceClient)
      * - STOCK+USD: Twelve Data(TwelveDataClient)
      * - COIN(통화 무관): 업비트 전체 마켓 목록(UpbitPriceClient.listMarkets)
-     * 그 외 조합은 SearchValidationException(→ 400 VALIDATION_ERROR).
      */
     private List<SearchResult> route(AssetType assetType, String currency, String q) {
         return switch (assetType) {
             case STOCK -> switch (currency) {
                 case "KRW" -> stockPriceClient.search(q);
                 case "USD" -> twelveDataClient.search(q);
-                default -> throw new SearchValidationException(
-                        "STOCK 자산에 지원하지 않는 통화입니다: " + currency);
+                default -> throw new IllegalStateException(
+                        "validateCurrency()에서 걸러진 통화만 도달해야 함: " + currency);
             };
+            case COIN -> upbitPriceClient.listMarkets();
+            case CASH -> throw new SearchValidationException(
+                    "CASH 자산 유형은 종목 검색 대상이 아닙니다.");
+        };
+    }
+
+    /**
+     * assetType·currency 조합의 유효성을 검증한다. search() 진입 직후, 캐시 키 생성/조회보다
+     * 먼저 호출되어야 한다 — 그래야 캐시 히트 시에도 검증이 우회되지 않는다.
+     * - CASH: 종목 검색 대상이 아님
+     * - STOCK/COIN: KRW·USD만 지원
+     */
+    private void validateCurrency(AssetType assetType, String currency) {
+        switch (assetType) {
+            case CASH -> throw new SearchValidationException(
+                    "CASH 자산 유형은 종목 검색 대상이 아닙니다.");
+            case STOCK -> {
+                if (!"KRW".equals(currency) && !"USD".equals(currency)) {
+                    throw new SearchValidationException("STOCK 자산에 지원하지 않는 통화입니다: " + currency);
+                }
+            }
             case COIN -> {
                 if (!"KRW".equals(currency) && !"USD".equals(currency)) {
                     throw new SearchValidationException("COIN 자산에 지원하지 않는 통화입니다: " + currency);
                 }
-                yield upbitPriceClient.listMarkets();
             }
-            case CASH -> throw new SearchValidationException(
-                    "CASH 자산 유형은 종목 검색 대상이 아닙니다.");
-        };
+        }
     }
 
     /**
@@ -115,11 +139,11 @@ public class SearchService {
      * 업비트 listMarkets()는 KRW·USD 마켓을 혼합해 반환하므로 currency 일치 여부를 먼저 확인한다.
      */
     private List<SearchResult> filterByQuery(List<SearchResult> results, String currency, String q) {
-        String lowerQ = q.toLowerCase();
+        String lowerQ = q.toLowerCase(Locale.ROOT);
         return results.stream()
                 .filter(r -> r.currency().equalsIgnoreCase(currency))
-                .filter(r -> r.ticker().toLowerCase().contains(lowerQ)
-                        || r.name().toLowerCase().contains(lowerQ))
+                .filter(r -> r.ticker().toLowerCase(Locale.ROOT).contains(lowerQ)
+                        || r.name().toLowerCase(Locale.ROOT).contains(lowerQ))
                 .toList();
     }
 }

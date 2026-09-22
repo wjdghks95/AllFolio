@@ -202,6 +202,38 @@ class SearchIntegrationTest extends AbstractIntegrationTest {
                 .bodyJson().extractingPath("$.code").asString().isEqualTo("VALIDATION_ERROR");
     }
 
+    /**
+     * 회귀 테스트(code-reviewer Major 지적): buildCacheKey()는 COIN에 대해 통화를 무시하고
+     * 단일 캐시 키(search:COIN:ALL)를 쓰는데, 통화 검증이 route() 안에서만 이뤄지면 캐시가 한번
+     * 채워진 뒤에는 검증이 우회돼 같은 요청이 400 대신 200+빈 배열을 반환했다(캐시 상태에 따라
+     * 응답 코드가 비결정적으로 바뀜). 정상 COIN+KRW 검색으로 캐시를 먼저 채운 뒤에도 COIN+JPY
+     * 요청이 여전히 400을 반환하는지 확인한다.
+     */
+    @Test
+    void searchCoinWithUnsupportedCurrencyReturnsBadRequestEvenAfterCacheWarm() {
+        upbitWireMock.stubFor(get(urlPathMatching("/v1/market/all"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("""
+                                [
+                                  {"market":"KRW-BTC","korean_name":"비트코인","english_name":"Bitcoin"}
+                                ]
+                                """)));
+
+        // 1. 정상 COIN+KRW 검색으로 search:COIN:ALL 캐시를 채운다.
+        MvcTestResult warmUp = authorizedGet(
+                "/v1/assets/search?assetType=COIN&currency=KRW&q=btc", token);
+        assertThat(warmUp).hasStatusOk();
+
+        // 2. 캐시가 채워진 뒤에도 지원하지 않는 통화 요청은 여전히 400이어야 한다.
+        MvcTestResult result = authorizedGet(
+                "/v1/assets/search?assetType=COIN&currency=JPY&q=btc", token);
+
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST)
+                .bodyJson().extractingPath("$.code").asString().isEqualTo("VALIDATION_ERROR");
+    }
+
     @Test
     void searchWithCashAssetTypeReturnsBadRequest() {
         MvcTestResult result = authorizedGet("/v1/assets/search?assetType=CASH&currency=KRW&q=원화", token);

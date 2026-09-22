@@ -28,6 +28,15 @@ import org.springframework.scheduling.concurrent.SimpleAsyncTaskScheduler;
  *       (scheduler = SSE_TASK_SCHEDULER)}) — 다른 기능이 나중에 기본 taskScheduler에 다른
  *       {@code TaskDecorator}를 추가하거나 용도를 바꿔도 SSE push 스케줄이 영향받지 않게 하기
  *       위함이다.</li>
+ *   <li><b>격리가 한 방향으로만 성립함(code-reviewer Minor 지적, 실측 정정)</b>: 위 격리는 "SSE push가
+ *       다른 스케줄러 변경에 영향받지 않는다"는 방향으로만 유효하다. 반대 방향은 깨져 있다 —
+ *       {@code TaskSchedulingAutoConfiguration}의 기본 {@code taskScheduler}는
+ *       {@code @ConditionalOnMissingBean({TaskScheduler.class, ScheduledExecutorService.class})}이라,
+ *       이 {@code sseTaskScheduler} 빈이 등록되는 순간 자동 구성이 백오프해 컨텍스트에 기본
+ *       {@code taskScheduler} 빈이 아예 생기지 않는다. 그래서 {@code scheduler} 속성 없이
+ *       {@code @Scheduled}를 쓰는 다른 배치(예: {@code RefreshTokenCleanupScheduler})는 자기도 모르게
+ *       이 SSE 전용 빈 위에서 실행된다 — "SSE 전용으로 분리해 다른 기능이 영향받지 않게 한다"는 의도가
+ *       그 배치들에는 적용되지 않는다.</li>
  * </ul>
  */
 @Configuration

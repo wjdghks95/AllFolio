@@ -181,13 +181,10 @@ SearchServiceTest {
 
     @Test
     void coinWithUnsupportedCurrencyThrowsSearchValidationException() {
-        // cache miss 후 throttle 통과, route에서 예외
-        when(searchCacheStore.find("search:COIN:ALL")).thenReturn(Optional.empty());
-        when(searchThrottle.tryAcquire(userId)).thenReturn(true);
-
+        // 통화 검증은 캐시 조회보다 먼저 실행되므로 캐시·Throttle과 상호작용 없이 즉시 예외가 나야 한다.
         assertThatThrownBy(() -> searchService.search(userId, AssetType.COIN, "JPY", "btc"))
                 .isInstanceOf(SearchValidationException.class);
-        verifyNoInteractions(upbitPriceClient);
+        verifyNoInteractions(upbitPriceClient, searchCacheStore, searchThrottle);
     }
 
     /**

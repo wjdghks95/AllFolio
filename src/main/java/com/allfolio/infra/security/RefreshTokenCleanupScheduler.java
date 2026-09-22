@@ -25,12 +25,18 @@ import java.time.Instant;
  * 목적에 필요한 최소한의 유예"와 "저장 공간 누적 방지"의 균형점으로 잡은 관례값이며, 특정 KPI에서
  * 역산된 값은 아니다.
  *
- * <p>Virtual Threads가 활성화된 이 프로젝트에서 하루 1회 실행되는 단순 배치에 별도 전용
- * {@code TaskScheduler}(예: {@code SseSchedulerConfig}처럼 풀 설정을 튜닝한 빈)를 두는 것은 과한
- * 인프라다 — Spring Boot 4.1의 기본 {@code taskScheduler} 빈이 이미 {@code spring.threads.virtual
- * .enabled=true} 설정을 반영해 {@code SimpleAsyncTaskScheduler}(Virtual Thread)로 자동 구성되므로
- * (config/SseSchedulerConfig 클래스 Javadoc의 실측 근거 참고), {@code scheduler} 속성을 지정하지
- * 않고 그 기본값에 위임한다.
+ * <p><b>{@code scheduler} 속성을 지정하지 않는 이유와 실제 실행 스케줄러(code-reviewer Minor 지적,
+ * 실측 정정)</b>: 하루 1회 실행되는 단순 배치라 별도 전용 {@code TaskScheduler}를 새로 두는 것은 과한
+ * 인프라라 판단해 {@code scheduler} 속성을 비워뒀다. 다만 이 프로젝트에는 Spring Boot 4.1의 기본
+ * {@code taskScheduler} 자동 구성 빈이 실제로 뜨지 않는다 — {@code TaskSchedulingAutoConfiguration}은
+ * {@code @ConditionalOnMissingBean({TaskScheduler.class, ScheduledExecutorService.class})}라서,
+ * {@code SseSchedulerConfig}가 {@code sseTaskScheduler} 빈을 등록하는 순간 자동 구성이 백오프한다.
+ * 그 결과 컨텍스트에 남는 {@code TaskScheduler} 빈은 {@code sseTaskScheduler} 하나뿐이라
+ * {@code ScheduledAnnotationBeanPostProcessor}가 이 유일한 빈을 이 배치에도 그대로 사용한다 — 즉
+ * 이 cleanup()은 SSE 전용으로 설계된 {@code sseTaskScheduler}(가상 스레드 기반
+ * {@code SimpleAsyncTaskScheduler}, 동시성 상한 없음) 위에서 실행된다. 기능적으로는 문제없지만,
+ * {@code SseSchedulerConfig} Javadoc이 의도한 "SSE 전용 격리"가 이 배치에는 적용되지 않는다는 점만
+ * 유의할 것.
  */
 @Component
 public class RefreshTokenCleanupScheduler {

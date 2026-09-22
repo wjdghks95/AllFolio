@@ -224,20 +224,6 @@ public class PriceService {
     }
 
     /**
-     * USD 코인·미국 주식의 환율 조회를 전용 캐시("rate:USD:KRW", CASH(USD) freshTtl과 동일한
-     * 12시간 재사용)에 태운다 — 그냥 exchangeRateClient를 직접 부르면 환율은 하루 단위로
-     * 갱신되는데도 COIN/STOCK(USD)의 짧은 freshTtl 주기로 매번 실호출이 나간다(code-reviewer
-     * M2 지적).
-     *
-     * <p>과거에는 CASH(USD) 자산의 캐시 키("price:CASH:USD")를 그대로 재사용했으나, CASH(USD)
-     * 자체 조회 경로는 {@link #scale}에서 KRW 스케일(0자리)로 반올림한 값을 그 키에 저장한다 —
-     * 두 경로가 같은 키를 공유하면 CASH(USD) 조회가 먼저 캐시를 채웠을 때 여기서 반올림된 값을
-     * 원본 환율인 것처럼 재사용해버려, 캐시 population 순서에 따라 COIN/STOCK(USD) 환산 결과가
-     * 달라지는 비결정적 결함이 있었다(실측: 51.85달러를 반올림값 1350원으로 계산하면 69,998원,
-     * 원본 1350.05원으로 계산하면 70,000원). 그래서 CASH(USD) 자산 캐시와 겹치지 않는 전용 키를
-     * 쓴다.
-     */
-    /**
      * {@code GET /v1/portfolio}(Task 023, Task 025 STOCK+USD 손익 버그 수정)에서 STOCK(USD)/COIN(USD)
      * 자산의 cost(USD)를 KRW로 환산해 손익을 계산할 때 쓰는 원본(반올림 전) 환율을 외부에 노출한다.
      * {@link #quoteForPortfolio(Asset)}과 동일하게 실패를 흡수해(RuntimeException → log.warn →
@@ -252,6 +238,20 @@ public class PriceService {
         }
     }
 
+    /**
+     * USD 코인·미국 주식의 환율 조회를 전용 캐시("rate:USD:KRW", CASH(USD) freshTtl과 동일한
+     * 12시간 재사용)에 태운다 — 그냥 exchangeRateClient를 직접 부르면 환율은 하루 단위로
+     * 갱신되는데도 COIN/STOCK(USD)의 짧은 freshTtl 주기로 매번 실호출이 나간다(code-reviewer
+     * M2 지적).
+     *
+     * <p>과거에는 CASH(USD) 자산의 캐시 키("price:CASH:USD")를 그대로 재사용했으나, CASH(USD)
+     * 자체 조회 경로는 {@link #scale}에서 KRW 스케일(0자리)로 반올림한 값을 그 키에 저장한다 —
+     * 두 경로가 같은 키를 공유하면 CASH(USD) 조회가 먼저 캐시를 채웠을 때 여기서 반올림된 값을
+     * 원본 환율인 것처럼 재사용해버려, 캐시 population 순서에 따라 COIN/STOCK(USD) 환산 결과가
+     * 달라지는 비결정적 결함이 있었다(실측: 51.85달러를 반올림값 1350원으로 계산하면 69,998원,
+     * 원본 1350.05원으로 계산하면 70,000원). 그래서 CASH(USD) 자산 캐시와 겹치지 않는 전용 키를
+     * 쓴다.
+     */
     private Price cachedUsdKrwRate() {
         String cacheKey = "rate:USD:KRW";
         Optional<PricedQuote> cached = priceCacheStore.find(cacheKey, priceCacheProperties.cashUsdFreshTtl());
