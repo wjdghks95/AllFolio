@@ -25,22 +25,69 @@ AllFolio의 STOCK(국내 주식) 자산 시세를 조회하는 유일한 데이�
 이 특성 때문에 `Price.asOf`는 조회 시각(`Instant.now()`)이 아니라 응답의 `basDt`(기준일자)를
 반영해야 한다 — 실시간인 것처럼 사용자를 오도하면 안 된다.
 
-## API 서비스 개요 (문서 실측)
+데이터 갱신 시각(공식 활용가이드 「0.2 데이터 갱신 주기 안내」 실측, 2026-09-22 확인): 연계받은
+영업일 하루 뒤 **오후 1시 이후**에 개방된다 — 예를 들어 금요일 거래 데이터는 (공휴일이 없다면)
+차주 월요일 오후 1시 이후에야 조회 가능해진다. `basDt`가 그날 날짜와 다르게 하루 이상 뒤처져 보이는
+현상은 버그가 아니라 이 지연이 원인일 수 있다.
+
+⚠️ **이용허락범위 문구 상충 — 위험 요소로 기록, 재검토 필요**: 위 문단의 "이용허락범위 제한
+없음(재배포 가능)"이라는 판단은 Task 021 당시 근거였으나, 2026-09-22에 사용자로부터 받아 검토 후
+삭제한 공식 활용가이드(금융위원회_주식시세정보, data.go.kr dataset 15094808) 1.2절 「이용허락범위
+안내」에는 이와 상충하는 문구가 있었다: *"본 데이터는 상업적 목적 여부와 상관 없이 제3자 무단 제공 및 재배포가 엄격히
+금지됩니다. 만약 상업적 목적으로 이용할 경우 원천 소유자인 한국거래소의 KRX Data
+Marketplace(data.krx.co.kr)에서 유료로 구매하여야 합니다."* AllFolio는 이 시세를 여러 사용자에게
+서비스로 재제공하는 구조라, 이 문구가 실제로 이 API(dataset 15094808)에 적용되는 것이라면 Task
+021의 API 선택 근거 자체가 무효화될 수 있다. **다만 이 문구가 data.go.kr의 여러 금융위원회 API에
+공통으로 붙는 보일러플레이트 공지인지, 이 API 고유의 제약인지는 이 세션에서 확인하지 못했다** —
+프로덕션 코드는 변경하지 않았고(사용자 확정 2026-09-22), 별도로 라이선스 조건을 재검토(필요시
+data.go.kr 문의)하기 전까지는 상업적 재배포 범위를 확대하지 말 것.
+
+## API 서비스 개요 (문서 실측, 2026-09-22 V2로 갱신)
 
 | 항목 | 내용 |
 |---|---|
-| API명 | getStockSecuritiesInfoService (금융위원회_주식시세정보) |
-| 서비스 URL | `https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService` |
+| API명 | getStockSecuritiesInfoService_V2 (금융위원회_주식시세정보 V2) |
+| 서비스 URL | `https://apis.data.go.kr/1160100/GetStockSecuritiesInfoService_V2`(`/service/` 경로 세그먼트 없음 — V1과의 차이) |
 | 인증 | `serviceKey` 쿼리 파라미터 (공공데이터포털 활용신청 후 발급) — 인증서/Basic 인증 아님 |
 | 프로토콜 | REST (GET), 전송 레벨 SSL, 메시지 레벨 암호화 없음 |
 | 응답 포맷 | XML **기본값** + JSON 지원 — 반드시 `resultType=json` 쿼리 파라미터를 명시할 것(생략 시 XML로 응답) |
 | Rate Limit | 초당 최대 30 tps, 평균 응답시간 500ms, 최대 메시지 4000 byte |
 | 데이터 갱신주기 | **일 1회** — 이 API가 EOD(전일 종가) 데이터임을 문서가 직접 명시하는 근거 |
-| 오퍼레이션 4종 | ①`getStockPriceInfo`(주식시세, **AllFolio가 쓰는 것**) ②`getPreemptiveRightCertificatePriceInfo`(신주인수권증서) ③`getSecuritiesPriceInfo`(수익증권) ④`getPreemptiveRightSecuritiesPriceInfo`(신주인수권증권) — AllFolio의 STOCK 자산 타입은 ①만 필요, 나머지 3개는 이번 범위 밖 |
+| 오퍼레이션 4종 | ①`getStockPriceInfo_V2`(주식시세, **AllFolio가 쓰는 것**) ②`getPreemptiveRightCertificatePriceInfo_V2`(신주인수권증서) ③`getSecuritiesPriceInfo_V2`(수익증권) ④`getPreemptiveRightSecuritiesPriceInfo_V2`(신주인수권증권) — AllFolio의 STOCK 자산 타입은 ①만 필요, 나머지 3개는 이번 범위 밖 |
 
-## getStockPriceInfo 요청 파라미터 (문서 실측, 필수 여부 그대로)
+### V1 → V2 전환 결론 (2026-09-22 실제 서비스키 curl 재검증 완료)
 
-Call Back URL: `https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo`
+2026-09-22에 사용자로부터 받아 검토 후 삭제한 공식 활용가이드가 API명·서비스 URL·오퍼레이션명에
+전부 `_V2` 접미사가 붙은 신버전만 문서화하고 있어, 실제 서비스키로 V1·V2 양쪽을 직접 curl 호출해
+재검증했다:
+
+- **V1(`.../1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo`)은 이 시점에도 여전히
+  정상 응답**(`resultCode: "00"`)했다 — 아직 폐기되지 않았다.
+- **V2(`.../1160100/GetStockSecuritiesInfoService_V2/getStockPriceInfo_V2`)도 정상 응답**했고,
+  다음을 동일 파라미터·동일 종목(005930)으로 나란히 확인한 결과 **응답 스키마가 V1과 완전히
+  동일**했다:
+  - 정상 응답 루트 구조(`response.header.resultCode`/`resultMsg`, `response.body.items.item[]`),
+    숫자 필드가 따옴표 붙은 문자열로 오는 것(`"clpr":"274000"`) 모두 동일.
+  - `beginBasDt`/`endBasDt` 날짜 범위 필터, `likeItmsNm` 종목명 포함검색 모두 V1과 동일하게 동작
+    (동일 파라미터로 동일 건수·동일 데이터 반환).
+  - 매칭 0건("999999" 같은 존재하지 않는 티커)은 V1과 동일하게 `{"totalCount":0,"items":{"item":[]}}`.
+  - 인증 실패(등록되지 않은 서비스키)는 V1과 완전히 동일한 `{"OpenAPI_ServiceResponse":{"cmmMsgHeader":
+    {"errMsg":"SERVICE_KEY_IS_NOT_REGISTERED_ERROR","returnAuthMsg":"등록되지 않은 서비스키",
+    "returnReasonCode":"30"}}}`(HTTP 403) 스키마로 왔다.
+- **결론: V2로 전환했다.** V1이 이 시점 아직 살아있어 당장 전환이 강제되는 상황은 아니었지만,
+  응답 스키마가 완전히 동일해 전환 리스크가 없고, 공식 문서가 V2만 다루고 있어 V1이 예고 없이
+  폐기될 가능성을 배제할 수 없었다(**V1이 언제까지 유지되는지는 문서·이번 실측 어느 쪽으로도 알 수
+  없다** — 이 리스크 자체는 해소되지 않았고, 단지 V2 선제 전환으로 회피했을 뿐이다). 변경 파일:
+  `application.yml`(`allfolio.stock.base-url`), `StockPriceClient.java`(`getPrice`/`search`/
+  `getDailySeries` 3곳의 오퍼레이션 경로), 그리고 이 파일을 참조하는 테스트
+  (`StockPriceClientTest`·`CandleIntegrationTest`·`SearchIntegrationTest`·`AssetPriceIntegrationTest`·
+  `PortfolioIntegrationTest`·`PriceClientCircuitBreakerTest`·`PricePropertiesTest`)의 WireMock
+  요청 경로·기대값. 아래 「구현 시 반드시 지킬 규칙」·「검증 절차」·요청/응답 예제의 URL·오퍼레이션명은
+  이제 V2 기준으로 갱신됐다.
+
+## getStockPriceInfo_V2 요청 파라미터 (문서 실측, 필수 여부 그대로)
+
+Call Back URL: `https://apis.data.go.kr/1160100/GetStockSecuritiesInfoService_V2/getStockPriceInfo_V2`
 
 | 파라미터명 | 필수 | 설명 | 예시 |
 |---|---|---|---|
@@ -57,7 +104,7 @@ Call Back URL: `https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoSe
 | `mrktCls`(문서 표기, 응답필드는 `mrktCtg`) | 옵션 | 시장구분 일치(`KOSPI`/`KOSDAQ`/`KONEX`) | `KOSPI` |
 | `beginVs`/`endVs`, `beginFltRt`/`endFltRt`, `beginTrqu`/`endTrqu`, `beginTrPrc`/`endTrPrc`, `beginLstgStCnt`/`endLstgStCnt`, `beginMrktTotAmt`/`endMrktTotAmt` | 옵션 | 대비/등락률/거래량/거래대금/상장주식수/시가총액 범위 필터 — AllFolio 단건 조회에는 불필요 |
 
-## getStockPriceInfo 응답 필드 (문서 실측)
+## getStockPriceInfo_V2 응답 필드 (문서 실측)
 
 header: `resultCode`(2자리, "00"=정상)·`resultMsg`("NORMAL SERVICE." 등)
 body: `numOfRows`·`pageNo`·`totalCount` + `items.item[]`
@@ -72,10 +119,10 @@ body: `numOfRows`·`pageNo`·`totalCount` + `items.item[]`
 | `clpr` | **종가** | **`Price.amount`로 매핑 — AllFolio가 실제로 쓰는 유일한 가격 필드** |
 | `vs`/`fltRt`/`mkp`/`hipr`/`lopr`/`trqu`/`trPrc`/`lstgStCnt`/`mrktTotAmt` | 대비/등락률/시가/고가/저가/거래량/거래대금/상장주식수/시가총액 | 미사용 |
 
-## 요청/응답 예제 (문서 원문 그대로)
+## 요청/응답 예제 (문서 원문 그대로, URL만 V2로 갱신 — 나머지 원문 동일)
 
 ```
-GET https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo?serviceKey=인증키&numOfRows=1&pageNo=1
+GET https://apis.data.go.kr/1160100/GetStockSecuritiesInfoService_V2/getStockPriceInfo_V2?serviceKey=인증키&numOfRows=1&pageNo=1
 ```
 ```json
 {
@@ -109,7 +156,7 @@ GET https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getSto
 | 32 | UNREGISTERED_IP_ERROR | 등록되지 않은 IP |
 | 99 | UNKNOWN_ERROR | 기타 |
 
-**실측 완료(2026-09-01)**: 잘못된 서비스키로 실제 호출한 결과, 인증 실패류 에러는 정상 응답과 전혀 다른 루트 구조로 온다 — `resultCode`가 아니라:
+**실측 완료(2026-09-01, HTTP 상태 코드는 2026-09-22 V2 재검증으로 정정)**: 잘못된 서비스키로 실제 호출한 결과, 인증 실패류 에러는 정상 응답과 전혀 다른 루트 구조로 온다 — `resultCode`가 아니라, 그리고 **HTTP 상태 코드 자체가 200이 아니라 403**이다:
 ```json
 {"OpenAPI_ServiceResponse":{"cmmMsgHeader":{
   "errMsg":"SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
@@ -117,13 +164,36 @@ GET https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getSto
   "returnReasonCode":"30"
 }}}
 ```
-`StockPriceClient`는 이 경우 `response` 필드가 채워지지 않아 null이 되고, 기존 방어 로직(`extractMatchingItem`의 null 체크)이 그대로 `ExternalPriceApiException`으로 전환한다 — 별도 파싱 분기를 추가할 필요가 없었다. `StockPriceClientTest.getPriceThrowsExternalPriceApiExceptionOnAuthError()`로 이 정확한 응답을 WireMock에 재현해 검증됨.
+(HTTP 403)
+
+`StockPriceClient`는 `RestClient`에 별도 `onStatus` 핸들러를 두지 않으므로, 이 4xx 응답은 `.retrieve().body(...)` 시점에 Spring `RestClient`의 기본 에러 핸들링이 감지해 `HttpClientErrorException`(403)을 던진다 — 위 `OpenAPI_ServiceResponse` 바디는 실제로는 파싱조차 되지 않는다. 이 예외가 `@CircuitBreaker`의 fallback 메서드(`fallback`/`searchFallback`/`dailySeriesFallback`)로 전달돼 그대로 `ExternalPriceApiException`으로 전환된다. `extractMatchingItem` 등의 `response` null 체크는 이 경로와 무관한 별개의 방어 로직이다(200 + 스키마가 깨진 응답을 대비한 것) — 과거(2026-09-01) 이 문서와 `StockPriceClientTest`는 인증 실패 스텁을 실수로 상태 코드 200으로 재현해, 우연히 null 체크 경로로도 같은 예외 타입에 도달해 이 차이가 드러나지 않았었다(code-reviewer 지적으로 2026-09-22 정정, WireMock 스텁을 403으로 수정). `StockPriceClientTest.getPriceThrowsExternalPriceApiExceptionOnAuthError()`/`searchThrowsExternalPriceApiExceptionOnAuthError()`/`getDailySeriesThrowsExternalPriceApiExceptionOnAuthError()`로 이 정확한 응답(403 + 위 바디)을 WireMock에 재현해 검증됨.
+
+### 게이트웨이 레벨 에러(공식 활용가이드 「2. OpenAPI 에러 코드정리」, 2026-09-22 확인 — 위 표와 다른 레이어)
+
+위 표(`resultCode`/`returnReasonCode`)는 **서비스 자체가 정상 응답한 뒤** 그 안에 담기는 에러다.
+반면 공식 활용가이드가 별도로 제공하는 아래 표는 data.go.kr 공통 게이트웨이가 **서비스에 도달하기
+전에** 던지는 HTTP 레벨 에러 메시지로 보인다(문서에 상태 코드는 명시돼 있지 않다) — 아직 실제
+호출로 재현하지 못했다.
+
+| 에러메시지 | 오류원인 |
+|---|---|
+| `Unauthorized` | API 인증키가 존재하지 않거나 유효하지 않음 |
+| `Forbidden` | 해당 API 활용 신청 내역이 확인되지 않음 |
+| `API not found` | 호출 URL의 API 서비스가 존재하지 않음(오타·폐기 포함) |
+| `Error forwarding request to backend server` | 기관 API 서버와의 연결 실패 |
+| `Error receiving response from backend server` | 기관 API 서버로부터 응답을 받지 못함 |
+| `API rate limit exceeded` | 서버의 최대 동시 요청 수 초과 |
+| `API token quota exceeded` | 일일 호출 허용량 초과 |
+| `Unexpected error` | 일시적인 시스템 오류 |
+
+이 레이어의 에러가 실제로 어떤 HTTP 상태 코드·응답 바디로 오는지는 미검증 항목이다 — 재현되면 이
+문서와 `StockPriceClient`의 에러 처리 분기를 함께 갱신할 것.
 
 ## Task 026 실측 — StockPriceClient.search() (통합 종목 검색, GET /v1/assets/search의 STOCK+KRW 분기)
 
 `GET /v1/assets/search`는 3개 외부 소스(STOCK+KRW/STOCK+USD/COIN)로 라우팅하는 검색 엔드포인트이며, 검색 결과에는 가격을 포함하지 않는다(여러 결과 각각 시세 조회 시 무료 API 한도를 검색 한 번에 소진하기 때문). 3개 클라이언트가 공유하는 결과 타입은 `domain/SearchResult.java`(`record SearchResult(String ticker, String name, AssetType assetType, String currency)`)이며, STOCK+KRW는 `ticker=srtnCd`·`name=itmsNm`·`assetType=STOCK`·`currency="KRW"`로 채운다.
 
-`StockPriceClient.search(String query)`는 기존 `getStockPriceInfo` 오퍼레이션을 그대로 재사용한다 — 검색 전용 별도 오퍼레이션은 없다. 질의어가 숫자로만 구성되면 `likeSrtnCd`(종목코드 포함검색), 아니면 `likeItmsNm`(종목명 포함검색)으로 분기하고 `numOfRows=20&pageNo=1`로 호출한다.
+`StockPriceClient.search(String query)`는 기존 `getStockPriceInfo_V2` 오퍼레이션을 그대로 재사용한다 — 검색 전용 별도 오퍼레이션은 없다. 질의어가 숫자로만 구성되면 `likeSrtnCd`(종목코드 포함검색), 아니면 `likeItmsNm`(종목명 포함검색)으로 분기하고 `numOfRows=20&pageNo=1`로 호출한다.
 
 **실제 서비스키로 curl 실측 완료(2026-09-09)** — 문서에 없던 중요한 함정을 발견했다: **`basDt`를 지정하지 않으면 응답이 최근 거래일부터 과거 순으로 정렬된 여러 날짜의 데이터가 함께 온다.** `getPrice()`는 `numOfRows=1`이라 항상 최신 1건만 오므로 이 문제를 겪지 않았지만, `search()`는 `numOfRows=20`이라 직접 영향을 받는다.
 
@@ -132,7 +202,7 @@ GET https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getSto
 - 응답 정렬은 `basDt` 내림차순이 1순위, 동일 `basDt` 내에서는 `srtnCd` 오름차순으로 보인다(실측: `likeItmsNm=삼성` 첫 페이지가 `000810`→`028260` 순으로 전부 `20260908`).
 - 이 정렬 덕분에, **`srtnCd` 기준으로 첫 번째로 나온 항목만 남기는 클라이언트 측 중복 제거**(`LinkedHashMap.putIfAbsent`)만으로 정확히 해결된다 — 첫 번째 항목이 항상 그 종목의 최신 거래일 데이터이기 때문이다. `basDt`를 별도로 지정하는 방식(주말/공휴일에 그 날짜로 데이터가 없어 0건이 되는 리스크)보다 안전해 이 방식을 택했다. `StockPriceClient.extractSearchResults()`에 구현됨.
 - 매칭 0건 시 응답은 `{"response":{"header":{"resultCode":"00",...},"body":{"totalCount":0,"items":{"item":[]}}}}` — `items.item`이 `null`이 아니라 **빈 배열**로 온다(실측 확인). `getPrice()`의 "정상 200 + 매칭 실패는 `TickerNotFoundException`"과 달리, `search()`는 빈 배열이면 그대로 빈 `List<SearchResult>`를 반환한다(예외 아님 — "결과 없음"이 검색의 정상 케이스).
-- 인증 실패 응답 스키마는 `getPrice()`와 동일(`OpenAPI_ServiceResponse`/`cmmMsgHeader`) — 동일한 null 체크 방어 로직이 `ExternalPriceApiException`으로 전환한다.
+- 인증 실패 응답 스키마·HTTP 상태 코드(403)는 `getPrice()`와 동일(`OpenAPI_ServiceResponse`/`cmmMsgHeader`) — RestClient 기본 에러 핸들링이 던지는 예외를 `@CircuitBreaker`의 fallback이 그대로 `ExternalPriceApiException`으로 전환한다(2026-09-22 정정, 위 "OpenAPI 공통 에러 코드" 절 참고).
 
 `StockPriceClientTest`에 `searchUsesLikeItmsNmForNonNumericQuery`·`searchUsesLikeSrtnCdForNumericQueryAndDedupesDuplicateTickerAcrossDates`·`searchReturnsEmptyListWhenNoItemsMatch`·`searchThrowsExternalPriceApiExceptionOnAuthError` 4건으로 위 내용을 WireMock에 재현해 검증됨.
 
@@ -145,10 +215,11 @@ GET https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getSto
 - **`beginBasDt`/`endBasDt`는 문서 그대로 날짜 범위(이상/이하) 필터로 정상 동작한다.** `likeSrtnCd=005930&beginBasDt=20260901&endBasDt=20260910` 요청에 `totalCount=7`(그 구간 실제 거래일수, 09/05·09/06 주말 제외)이 정확히 왔다. `beginBasDt=20250101&endBasDt=20260910`(약 1.75년) 범위는 `totalCount=411`, `beginBasDt=20150101&endBasDt=20260910`(약 10년) 범위는 `totalCount=1642` — 둘 다 그 기간 실제 거래일수와 맞아떨어졌다.
 - **`numOfRows` 상한을 찾지 못했다.** `numOfRows=1000`(411건 요청)·`numOfRows=5000`(1642건 요청) 모두 한 번에 전량이 단일 페이지로 왔다(`items.item.length == totalCount`, 잘림 없음). 이 프로젝트가 다루는 최대 수년 단위 차트 범위에서는 **페이지네이션이 필요하지 않다** — `getDailySeries()`는 요청 범위의 달력일수(+1)를 `numOfRows`로 계산해 단일 호출만 한다(상한은 실측 확인된 5000 안쪽인 `MAX_DAILY_SERIES_ROWS = 3660`(약 10년)으로 방어적으로 설정).
   - 참고: API 서비스 개요 표의 "최대 메시지 4000 byte"는 이 실측 결과(1642건 응답이 수십 KB)와 명백히 맞지 않는다 — 문서 수치를 신뢰하지 않고, rate limit 성격(초당 tps)의 오기이거나 무관한 값으로 추정한다. 실제 캡핑은 관측되지 않았다.
+  - **공식 상한 확인됨(공식 활용가이드 「0.1 데이터 조회 관련 유의사항」, 2026-09-22 확인)**: *"numOfRows 파라미터 요청값이 10,000건을 초과할 경우, 시스템 성능 안정화를 위해 최대 10,000건까지만 조회됩니다."* 5000까지만 실측했던 이유가 여기서 설명된다 — 공식 상한은 10,000건이고, `MAX_DAILY_SERIES_ROWS = 3660`은 이 상한보다 훨씬 안쪽이라 안전하다. 코드 변경 불필요.
 - **OHLC 필드가 모두 존재한다.** 응답 item에는 `clpr`(종가) 외에 `mkp`(시가)·`hipr`(고가)·`lopr`(저가)가 이미 함께 온다(사실 이 문서의 "요청/응답 예제" 섹션 원문 JSON에도 이미 있었다 — 과거 `Item` record가 `clpr`만 파싱했을 뿐, API 자체는 처음부터 OHLC 전체를 제공했다). 신규 `DailyBar(LocalDate date, BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close)` record가 이 4개 값을 전부 담는다. 거래량(`trqu`) 등은 이번 범위 밖이라 파싱하지 않았다.
 - **정렬은 `basDt` 내림차순(최신 우선)** — `search()`와 동일하다. `getDailySeries()`는 캔들 차트 소비자를 배려해 클라이언트 측에서 `basDt` 오름차순(과거→최신)으로 뒤집어 반환한다.
 - **매칭 0건은 "해당 티커 없음"과 "그 범위에 거래일 데이터 없음"을 API 응답만으로 구분할 수 없다.** 존재하지 않는 티커(`likeSrtnCd=999999`)와, 존재하는 티커의 미래 날짜 범위(아직 거래일 데이터가 없는 구간) 둘 다 `{"totalCount":0,"items":{"item":[]}}`로 동일하게 응답했다(실측 확인). 그래서 `getPrice()`(`TickerNotFoundException`)와 달리 `getDailySeries()`는 `search()`처럼 빈 결과를 예외가 아닌 빈 `List<DailyBar>`로 반환한다.
-- 인증 실패 응답 스키마는 `getPrice()`/`search()`와 동일(`OpenAPI_ServiceResponse`/`cmmMsgHeader`) — 동일한 null 체크 방어 로직이 `ExternalPriceApiException`으로 전환한다.
+- 인증 실패 응답 스키마·HTTP 상태 코드(403)는 `getPrice()`/`search()`와 동일(`OpenAPI_ServiceResponse`/`cmmMsgHeader`) — RestClient 기본 에러 핸들링이 던지는 예외를 `@CircuitBreaker`의 fallback이 그대로 `ExternalPriceApiException`으로 전환한다(2026-09-22 정정, 위 "OpenAPI 공통 에러 코드" 절 참고).
 
 `StockPriceClientTest`에 `getDailySeriesMapsOhlcAndSortsAscendingByDate`·`getDailySeriesReturnsEmptyListWhenNoItemsMatch`·`getDailySeriesThrowsExternalPriceApiExceptionOnAuthError` 3건으로 위 내용을 WireMock에 재현해 검증됨.
 
@@ -193,7 +264,10 @@ Task 023에서 프론트 검증 중 관측된 "005380 시세 조회 실패"(ROAD
 | `clpr` 등 숫자 필드는 JSON에서 따옴표 붙은 문자열로 온다 — `BigDecimal` 필드로 그대로 받아도 Jackson이 자동 변환하므로 별도 처리 불필요(단, WireMock 테스트 스텁도 실제와 같이 따옴표를 붙여야 함) | 2026-09-01 실측 확인 완료 |
 | serviceKey는 `StockProperties`(환경변수 `ALLFOLIO_STOCK_SERVICE_KEY`)로만 주입, 코드·설정 파일에 하드코딩 금지 | `src/main/java/com/allfolio/infra/price/CLAUDE.md`, JwtProperties와 동일 패턴 |
 | Circuit Breaker(`@CircuitBreaker(name = "stock")`)는 `application.yml`의 `resilience4j.circuitbreaker.instances.stock`(업비트/환율과 동일 튜닝) 그대로 재사용 | Task 021에서 이미 확정된 값, 새로 튜닝하지 않음 |
-| 이 API는 4개 오퍼레이션을 제공하지만 AllFolio는 `getStockPriceInfo`(주식시세) **하나만** 쓴다 — 나머지 3개(신주인수권증서/수익증권/신주인수권증권)를 구현하지 않는다 | CLAUDE.md Simplicity First — 요청받지 않은 기능 금지 |
+| 이 API는 4개 오퍼레이션을 제공하지만 AllFolio는 `getStockPriceInfo_V2`(주식시세) **하나만** 쓴다 — 나머지 3개(신주인수권증서/수익증권/신주인수권증권)를 구현하지 않는다 | CLAUDE.md Simplicity First — 요청받지 않은 기능 금지 |
+| 서비스 URL·오퍼레이션명은 V2(`GetStockSecuritiesInfoService_V2`/`getStockPriceInfo_V2`) 기준이다 — V1(`/service/GetStockSecuritiesInfoService`/`getStockPriceInfo`)은 2026-09-22 시점 아직 살아있지만 공식 문서가 V2만 다뤄 선제 전환했다 | 위 "V1 → V2 전환 결론" 절, 실제 서비스키 curl 재검증 |
+| 인증 실패(등록되지 않은 서비스키 등)의 WireMock 스텁은 HTTP **403**으로 재현할 것 — 200으로 스텁하면 실제로 예외가 발생하는 경로(RestClient 기본 4xx 에러 핸들링 → `HttpClientErrorException` → `@CircuitBreaker` fallback)가 아니라 우연히 같은 결과에 도달하는 다른 경로(`response` null 체크)를 검증하게 된다 | code-reviewer 지적(2026-09-22 V2 전환 리뷰), `StockPriceClientTest`의 3개 인증 실패 테스트를 403으로 정정 |
+| `StockProperties.baseUrl`(경로 세그먼트 포함, 예: `/1160100/GetStockSecuritiesInfoService_V2`)과 각 메서드의 상대 경로(`/getStockPriceInfo_V2`)가 실제로 올바르게 합쳐지는지는 `StockPriceClientBaseUrlIntegrationTest`(WireMock을 그 경로 세그먼트까지 포함해 띄움)로 검증한다 — 다른 모든 테스트는 base-url을 경로 세그먼트 없이 덮어써서 이 조합 자체는 검증하지 못했다 | code-reviewer 지적(2026-09-22 V2 전환 리뷰) |
 
 ## 검증 절차 (작업 종료 전 실행)
 
@@ -208,7 +282,7 @@ grep -rn "double \|float " src/main/java --include="*.java"
 
 | 영역 | 담당 |
 |---|---|
-| `getStockPriceInfo` 스펙·파싱·에러 처리, `StockPriceClient` 구현 | **stock-price-api**(이 에이전트) |
+| `getStockPriceInfo_V2` 스펙·파싱·에러 처리, `StockPriceClient` 구현 | **stock-price-api**(이 에이전트) |
 | `infra/price`의 다른 클라이언트(Upbit/ExchangeRate), `PriceService` 라우팅, `PriceConfig`, 엔드포인트·예외 핸들러 | senior-backend |
 | Flyway 마이그레이션·엔티티 스키마 | database |
 

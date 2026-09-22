@@ -57,7 +57,7 @@ class PricePropertiesTest extends AbstractIntegrationTest {
     @Test
     void stockPropertiesAreBound() {
         assertThat(stockProperties.baseUrl())
-                .isEqualTo("https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService");
+                .isEqualTo("https://apis.data.go.kr/1160100/GetStockSecuritiesInfoService_V2");
         assertThat(stockProperties.serviceKey()).isEqualTo("test-service-key");
     }
 

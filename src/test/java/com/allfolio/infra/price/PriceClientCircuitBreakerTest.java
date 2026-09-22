@@ -122,7 +122,7 @@ class PriceClientCircuitBreakerTest extends AbstractIntegrationTest {
      */
     @Test
     void repeatedStockTickerMismatchDoesNotOpenCircuit() {
-        String requestPath = "/getStockPriceInfo?serviceKey=test-service-key&numOfRows=1&pageNo=1"
+        String requestPath = "/getStockPriceInfo_V2?serviceKey=test-service-key&numOfRows=1&pageNo=1"
                 + "&resultType=json&likeSrtnCd=999999";
         stockWireMockServer.stubFor(get(urlEqualTo(requestPath))
                 .willReturn(aResponse()

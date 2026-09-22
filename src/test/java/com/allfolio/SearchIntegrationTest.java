@@ -101,7 +101,7 @@ class SearchIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void searchStockKrwReturnsResultList() {
-        stockWireMock.stubFor(get(urlPathMatching("/getStockPriceInfo"))
+        stockWireMock.stubFor(get(urlPathMatching("/getStockPriceInfo_V2"))
                 .withQueryParam("likeItmsNm", equalTo("삼성"))
                 .willReturn(aResponse()
                         .withStatus(200)
@@ -148,7 +148,7 @@ class SearchIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void searchWithNoResultsReturnsEmptyList() {
-        stockWireMock.stubFor(get(urlPathMatching("/getStockPriceInfo"))
+        stockWireMock.stubFor(get(urlPathMatching("/getStockPriceInfo_V2"))
                 .willReturn(aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
@@ -252,7 +252,7 @@ class SearchIntegrationTest extends AbstractIntegrationTest {
      */
     @Test
     void searchExceedingThrottleReturns429() {
-        stockWireMock.stubFor(get(urlPathMatching("/getStockPriceInfo"))
+        stockWireMock.stubFor(get(urlPathMatching("/getStockPriceInfo_V2"))
                 .willReturn(aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")

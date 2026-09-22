@@ -217,7 +217,7 @@ class AssetPriceIntegrationTest extends AbstractIntegrationTest {
     @Test
     void getPriceForStockAssetReturnsPublicDataPortalPrice() {
         stockWireMock.stubFor(get(urlEqualTo(
-                "/getStockPriceInfo?serviceKey=test-service-key&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd=005930"))
+                "/getStockPriceInfo_V2?serviceKey=test-service-key&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd=005930"))
                 .willReturn(aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")

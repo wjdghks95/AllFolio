@@ -43,9 +43,14 @@ import java.util.regex.Pattern;
  *       Jackson이 {@code BigDecimal} 필드로 문자열 토큰을 그대로 강제 변환해줘서 별도 처리 없이
  *       정상 매핑됨을 확인했다.</li>
  *   <li>인증 실패(예: 등록되지 않은 서비스키)는 정상 응답과 전혀 다른 루트 구조
- *       ({@code {"OpenAPI_ServiceResponse":{"cmmMsgHeader":{...}}}})로 온다 — {@code response}
- *       필드가 채워지지 않아 null이 되므로 아래 방어 로직이 그대로 {@link ExternalPriceApiException}으로
- *       전환한다(별도 파싱 분기 불필요).</li>
+ *       ({@code {"OpenAPI_ServiceResponse":{"cmmMsgHeader":{...}}}})로 오고, 실제 HTTP 상태 코드는
+ *       200이 아니라 <b>403</b>이다(2026-09-22 V2 재검증, code-reviewer 지적으로 스텁 상태 코드 정정).
+ *       RestClient 기본 에러 핸들링이 {@code .retrieve().body(...)} 시점에 4xx 응답을 감지해
+ *       {@code HttpClientErrorException}을 던지므로, 위 {@code OpenAPI_ServiceResponse} 바디는 실제로
+ *       파싱되지도 않는다 — 이 예외가 {@code @CircuitBreaker}의 fallback 메서드로 전달돼 그대로
+ *       {@link ExternalPriceApiException}으로 전환된다(별도 {@code onStatus} 핸들러 불필요). 아래
+ *       {@code extractMatchingItem}의 null 체크는 200 + 스키마가 깨진 경우를 위한 별개의 방어
+ *       로직이다.</li>
  * </ul>
  *
  * <p><b>{@link #search}(Task 026) 실제 서비스키로 검증 완료</b>(2026-09-09, curl 직접 호출):
@@ -66,6 +71,15 @@ import java.util.regex.Pattern;
  * (과거→최신)으로 뒤집어 반환한다. 매칭 0건은 "해당 티커 없음"과 "그 범위에 거래일 데이터 없음"을
  * API 응답만으로 구분할 수 없어(둘 다 200 + 빈 배열, 실측 확인) {@link #getPrice}처럼
  * {@link TickerNotFoundException}을 던지지 않고 빈 리스트를 반환한다({@link #search}와 동일한 판단).
+ *
+ * <p><b>V2 전환</b>(2026-09-22, 공식 활용가이드 문서 대조 후 실제 서비스키 curl 재검증): 공공데이터포털이
+ * 오퍼레이션명·서비스 URL에 {@code _V2} 접미사가 붙은 신버전(예: {@code getStockPriceInfo_V2},
+ * {@code https://apis.data.go.kr/1160100/GetStockSecuritiesInfoService_V2})을 별도로 제공한다.
+ * V1({@code .../service/GetStockSecuritiesInfoService/getStockPriceInfo})도 이 시점 여전히 정상
+ * 응답했지만, 응답 스키마(header/body/items.item 구조, 숫자 필드 문자열화, 인증 실패 시
+ * {@code OpenAPI_ServiceResponse} 구조)가 V1과 완전히 동일함을 확인했고 공식 문서가 V2만 다루고
+ * 있어 V1 폐기 리스크를 피하기 위해 이 클라이언트는 V2로 전환했다(3개 메서드 모두). 자세한 실측
+ * 근거는 .claude/agents/stock-price-api.md의 "V2 전환" 절 참고.
  */
 @Component
 public class StockPriceClient {
@@ -121,7 +135,7 @@ public class StockPriceClient {
     @CircuitBreaker(name = "stock", fallbackMethod = "fallback")
     public Price getPrice(String ticker) {
         StockPriceApiResponse response = restClient.get()
-                .uri("/getStockPriceInfo?serviceKey={serviceKey}&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd={ticker}",
+                .uri("/getStockPriceInfo_V2?serviceKey={serviceKey}&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd={ticker}",
                         serviceKey, ticker)
                 .retrieve()
                 .body(StockPriceApiResponse.class);
@@ -174,7 +188,7 @@ public class StockPriceClient {
         boolean numeric = query.chars().allMatch(Character::isDigit);
         String param = numeric ? "likeSrtnCd" : "likeItmsNm";
         StockPriceApiResponse response = restClient.get()
-                .uri("/getStockPriceInfo?serviceKey={serviceKey}&numOfRows=20&pageNo=1&resultType=json&"
+                .uri("/getStockPriceInfo_V2?serviceKey={serviceKey}&numOfRows=20&pageNo=1&resultType=json&"
                         + param + "={query}", serviceKey, query)
                 .retrieve()
                 .body(StockPriceApiResponse.class);
@@ -228,7 +242,7 @@ public class StockPriceClient {
         int numOfRows = (int) Math.min(Math.max(calendarDays, 1), MAX_DAILY_SERIES_ROWS);
 
         StockPriceApiResponse response = restClient.get()
-                .uri("/getStockPriceInfo?serviceKey={serviceKey}&numOfRows={numOfRows}&pageNo=1&resultType=json"
+                .uri("/getStockPriceInfo_V2?serviceKey={serviceKey}&numOfRows={numOfRows}&pageNo=1&resultType=json"
                         + "&likeSrtnCd={ticker}&beginBasDt={begin}&endBasDt={end}",
                         serviceKey, numOfRows, ticker, begin.format(BAS_DT_FORMAT), end.format(BAS_DT_FORMAT))
                 .retrieve()

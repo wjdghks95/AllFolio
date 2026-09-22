@@ -48,7 +48,10 @@ allfolio:
   exchange-rate:
     base-url: https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest
   stock:
-    base-url: https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService
+    # 2026-09-22 V2 전환(실제 서비스키 curl 재검증, .claude/agents/stock-price-api.md 참고) —
+    # V1(.../service/GetStockSecuritiesInfoService)도 아직 살아있지만, 공식 활용가이드가 V2만
+    # 문서화하고 있어 V1 폐기 리스크를 피하기 위해 선제 전환했다. 응답 스키마는 V1과 동일.
+    base-url: https://apis.data.go.kr/1160100/GetStockSecuritiesInfoService_V2
     service-key: ${ALLFOLIO_STOCK_SERVICE_KEY:}
   twelvedata:
     base-url: https://api.twelvedata.com

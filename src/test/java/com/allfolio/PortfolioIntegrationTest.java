@@ -255,7 +255,7 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
     @Test
     void portfolioComputesEvaluationPnlWeightAndTotalsAcrossMixedAssetTypesViaExternalPriceApis() {
         stockWireMock.stubFor(get(urlEqualTo(
-                "/getStockPriceInfo?serviceKey=test-service-key&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd=PFV1STOCK"))
+                "/getStockPriceInfo_V2?serviceKey=test-service-key&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd=PFV1STOCK"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},"body":{"items":{"item":[{"basDt":"20260901","srtnCd":"PFV1STOCK","clpr":"70000"}]}}}}
@@ -342,7 +342,7 @@ class PortfolioIntegrationTest extends AbstractIntegrationTest {
         upbitWireMock.stubFor(get(urlEqualTo("/v1/ticker?markets=KRW-PFV3FAIL"))
                 .willReturn(aResponse().withStatus(500)));
         stockWireMock.stubFor(get(urlEqualTo(
-                "/getStockPriceInfo?serviceKey=test-service-key&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd=PFV3STOCK"))
+                "/getStockPriceInfo_V2?serviceKey=test-service-key&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd=PFV3STOCK"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},"body":{"items":{"item":[{"basDt":"20260901","srtnCd":"PFV3STOCK","clpr":"25000"}]}}}}

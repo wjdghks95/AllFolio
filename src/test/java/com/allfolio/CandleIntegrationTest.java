@@ -125,7 +125,7 @@ class CandleIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void getCandlesForStockKrwDayIntervalReturnsPublicDataPortalDailyBars() {
-        stockWireMock.stubFor(get(urlPathEqualTo("/getStockPriceInfo"))
+        stockWireMock.stubFor(get(urlPathEqualTo("/getStockPriceInfo_V2"))
                 .withQueryParam("serviceKey", equalTo("test-service-key"))
                 .withQueryParam("likeSrtnCd", equalTo("005930"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
@@ -266,7 +266,7 @@ class CandleIntegrationTest extends AbstractIntegrationTest {
      */
     @Test
     void getCandlesForStockIsNotAffectedByCandleThrottle() {
-        stockWireMock.stubFor(get(urlPathEqualTo("/getStockPriceInfo"))
+        stockWireMock.stubFor(get(urlPathEqualTo("/getStockPriceInfo_V2"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},

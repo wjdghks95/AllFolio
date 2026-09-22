@@ -37,14 +37,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <p>WireMock 스텁 스키마는 실제 서비스키로 curl 검증을 마쳤다(2026-09-01): {@code items.item}은
  * 배열, {@code basDt} 생략 시 최신 거래일 데이터 반환, 숫자 필드(clpr 등)는 JSON에서 따옴표 붙은
  * 문자열로 옴 — 전부 이 스텁에 반영됨. 인증 실패는 정상 응답과 전혀 다른
- * {@code OpenAPI_ServiceResponse}/{@code cmmMsgHeader} 스키마로 온다는 것도 실제 호출로 확인함
- * ({@link #getPriceThrowsExternalPriceApiExceptionOnAuthError()}).
+ * {@code OpenAPI_ServiceResponse}/{@code cmmMsgHeader} 스키마로, 그리고 HTTP 상태 코드는 200이
+ * 아니라 <b>403</b>으로 온다는 것도 실제 호출로 확인함(2026-09-22 V2 재검증,
+ * {@link #getPriceThrowsExternalPriceApiExceptionOnAuthError()}).
  */
 class StockPriceClientTest extends AbstractIntegrationTest {
 
     private static final String TICKER = "005930";
     private static final String SERVICE_KEY = "test-service-key";
-    private static final String REQUEST_PATH = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+    private static final String REQUEST_PATH = "/getStockPriceInfo_V2?serviceKey=" + SERVICE_KEY
             + "&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd=" + TICKER;
 
     private static WireMockServer wireMockServer;
@@ -122,7 +123,7 @@ class StockPriceClientTest extends AbstractIntegrationTest {
      */
     @Test
     void getPriceMapsRealTickerHyundaiMotorWithFullFieldSet() {
-        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+        String requestPath = "/getStockPriceInfo_V2?serviceKey=" + SERVICE_KEY
                 + "&numOfRows=1&pageNo=1&resultType=json&likeSrtnCd=005380";
         wireMockServer.stubFor(get(urlEqualTo(requestPath))
                 .willReturn(aResponse()
@@ -177,17 +178,20 @@ class StockPriceClientTest extends AbstractIntegrationTest {
     }
 
     /**
-     * 실제로 유효하지 않은 서비스키로 호출해 확인한 진짜 응답(2026-09-01):
+     * 실제로 유효하지 않은 서비스키로 호출해 확인한 진짜 응답(2026-09-22 V2 재검증, HTTP 403):
      * {@code {"OpenAPI_ServiceResponse":{"cmmMsgHeader":{"errMsg":"SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
-     * "returnAuthMsg":"등록되지 않은 서비스키","returnReasonCode":"30"}}}} — 정상 응답의
-     * {@code response.header.resultCode} 스키마와 전혀 다른 루트 구조라, StockPriceApiResponse가
-     * response 필드를 못 채워 null이 되고 방어 로직이 ExternalPriceApiException으로 전환한다.
+     * "returnAuthMsg":"등록되지 않은 서비스키","returnReasonCode":"30"}}}}. 상태 코드가 200이 아니라
+     * 403이므로 실제로는 {@code StockPriceApiResponse}로 파싱조차 되지 않는다 — RestClient 기본
+     * 에러 핸들링이 {@code .retrieve().body(...)} 시점에 {@code HttpClientErrorException}을 던지고,
+     * 그 예외가 {@code @CircuitBreaker}의 fallback 메서드에서 {@link ExternalPriceApiException}으로
+     * 전환된다(code-reviewer 지적으로 기존 200 스텁을 실측값인 403으로 정정, 이전에는 우연히
+     * response 필드 null 방어 로직 경로로도 같은 결과가 나와 구분되지 않았다).
      */
     @Test
     void getPriceThrowsExternalPriceApiExceptionOnAuthError() {
         wireMockServer.stubFor(get(urlEqualTo(REQUEST_PATH))
                 .willReturn(aResponse()
-                        .withStatus(200)
+                        .withStatus(403)
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {
@@ -207,7 +211,7 @@ class StockPriceClientTest extends AbstractIntegrationTest {
 
     @Test
     void searchUsesLikeItmsNmForNonNumericQuery() {
-        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+        String requestPath = "/getStockPriceInfo_V2?serviceKey=" + SERVICE_KEY
                 + "&numOfRows=20&pageNo=1&resultType=json&likeItmsNm=%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90";
         wireMockServer.stubFor(get(urlEqualTo(requestPath))
                 .willReturn(aResponse()
@@ -237,7 +241,7 @@ class StockPriceClientTest extends AbstractIntegrationTest {
 
     @Test
     void searchUsesLikeSrtnCdForNumericQueryAndDedupesDuplicateTickerAcrossDates() {
-        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+        String requestPath = "/getStockPriceInfo_V2?serviceKey=" + SERVICE_KEY
                 + "&numOfRows=20&pageNo=1&resultType=json&likeSrtnCd=" + TICKER;
         // 2026-09-09 실측: basDt를 지정하지 않으면 동일 종목의 여러 거래일 데이터가 최신순으로 온다
         // (하나의 종목코드만 매칭돼도 numOfRows 잔여분이 과거 날짜로 채워짐) — 클라이언트가 srtnCd
@@ -268,7 +272,7 @@ class StockPriceClientTest extends AbstractIntegrationTest {
 
     @Test
     void searchReturnsEmptyListWhenNoItemsMatch() {
-        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+        String requestPath = "/getStockPriceInfo_V2?serviceKey=" + SERVICE_KEY
                 + "&numOfRows=20&pageNo=1&resultType=json&likeItmsNm=%EC%A1%B4%EC%9E%AC%ED%95%98%EC%A7%80%EC%95%8A%EC%9D%8C";
         wireMockServer.stubFor(get(urlEqualTo(requestPath))
                 .willReturn(aResponse()
@@ -291,13 +295,17 @@ class StockPriceClientTest extends AbstractIntegrationTest {
         assertThat(results).isEmpty();
     }
 
+    /**
+     * 인증 실패의 실제 HTTP 상태 코드는 403이다(getPriceThrowsExternalPriceApiExceptionOnAuthError
+     * 참고) — search도 동일한 RestClient/CircuitBreaker 경로를 타므로 같은 상태 코드로 재현한다.
+     */
     @Test
     void searchThrowsExternalPriceApiExceptionOnAuthError() {
-        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+        String requestPath = "/getStockPriceInfo_V2?serviceKey=" + SERVICE_KEY
                 + "&numOfRows=20&pageNo=1&resultType=json&likeItmsNm=%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90";
         wireMockServer.stubFor(get(urlEqualTo(requestPath))
                 .willReturn(aResponse()
-                        .withStatus(200)
+                        .withStatus(403)
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {
@@ -322,7 +330,7 @@ class StockPriceClientTest extends AbstractIntegrationTest {
      */
     @Test
     void getDailySeriesMapsOhlcAndSortsAscendingByDate() {
-        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+        String requestPath = "/getStockPriceInfo_V2?serviceKey=" + SERVICE_KEY
                 + "&numOfRows=10&pageNo=1&resultType=json&likeSrtnCd=" + TICKER
                 + "&beginBasDt=20260901&endBasDt=20260910";
         wireMockServer.stubFor(get(urlEqualTo(requestPath))
@@ -363,7 +371,7 @@ class StockPriceClientTest extends AbstractIntegrationTest {
      */
     @Test
     void getDailySeriesReturnsEmptyListWhenNoItemsMatch() {
-        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+        String requestPath = "/getStockPriceInfo_V2?serviceKey=" + SERVICE_KEY
                 + "&numOfRows=10&pageNo=1&resultType=json&likeSrtnCd=" + TICKER
                 + "&beginBasDt=20261001&endBasDt=20261010";
         wireMockServer.stubFor(get(urlEqualTo(requestPath))
@@ -388,14 +396,18 @@ class StockPriceClientTest extends AbstractIntegrationTest {
         assertThat(bars).isEmpty();
     }
 
+    /**
+     * 인증 실패의 실제 HTTP 상태 코드는 403이다(getPriceThrowsExternalPriceApiExceptionOnAuthError
+     * 참고) — getDailySeries도 동일한 RestClient/CircuitBreaker 경로를 타므로 같은 상태 코드로 재현한다.
+     */
     @Test
     void getDailySeriesThrowsExternalPriceApiExceptionOnAuthError() {
-        String requestPath = "/getStockPriceInfo?serviceKey=" + SERVICE_KEY
+        String requestPath = "/getStockPriceInfo_V2?serviceKey=" + SERVICE_KEY
                 + "&numOfRows=10&pageNo=1&resultType=json&likeSrtnCd=" + TICKER
                 + "&beginBasDt=20260901&endBasDt=20260910";
         wireMockServer.stubFor(get(urlEqualTo(requestPath))
                 .willReturn(aResponse()
-                        .withStatus(200)
+                        .withStatus(403)
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {
