@@ -70,15 +70,26 @@ public class CandleService {
     private static final int UPBIT_PAGE_SIZE = 200;
 
     /**
+     * STOCK 캔들 응답 1회 최대 반환 건수. {@link #UPBIT_PAGE_SIZE}(COIN)와 동일한 값이다 — 사용자가
+     * "주식 차트도 코인만큼만 보여달라"고 명시적으로 요청해(2026-09-22) 첫 화면 노출량을 맞췄다.
+     * COIN과 달리 STOCK은 캐시({@link CandleCacheStore})에 이미 전체 기간이 채워져 있으므로, 이 값은
+     * 벤더 호출량이 아니라 순수하게 "캐시에서 응답으로 잘라 내려줄 페이지 크기"다.
+     */
+    private static final int STOCK_PAGE_SIZE = 200;
+
+    /**
      * Twelve Data {@code /time_series}의 {@code outputsize} 실측 상한(2026-09-11 curl 검증,
-     * {@code .claude/agents/twelvedata-api.md} 참고) — 5000건은 약 19년치라 이 프로젝트의
-     * {@code maxHistoryYears}(10년) 캡보다 넉넉하다. credit 소비가 {@code outputsize} 크기와
-     * 무관하게 요청 1회당 1로 고정임이 실측 확인됐으므로, 매번 최대값을 요청해 한 번의 호출로 캡
-     * 전체를 커버한다 — 그러면 {@link CandleCacheStore#mergeOlder}가 캡을 넘는 과거 데이터를 잘라내
-     * 첫 호출만으로 {@code oldestCovered}가 {@code maxHistoryStart}에 도달한다(추가 확장 호출이
-     * 사실상 불필요해짐). Twelve Data는 begin/end 같은 임의 과거 구간 파라미터를 제공하지 않아
-     * (항상 "최근 N건"만 응답), 이 값보다 작게 요청해도 더 이전 구간을 노려 받을 수 없다 — 그래서
-     * 최대값 고정이 유일하게 의미 있는 선택이다.
+     * {@code .claude/agents/twelvedata-api.md} 참고) — 5000건은 약 19~20년치다.
+     * {@code maxHistoryYears}를 "상장일부터 현재까지" 요구사항에 맞춰 50년으로 올린 뒤에는(2026-09-22)
+     * 이 관계가 역전됐다 — Twelve Data는 begin/end 같은 임의 과거 구간 파라미터를 제공하지 않고 항상
+     * "최근 N건"만 응답하므로, 이 outputsize 상한(~19~20년)이 우리 캡(50년)보다 오히려 작다. 즉
+     * <b>해외(USD) 종목은 이 벤더 제약이 실질 상한이 되어 "상장일부터"가 아니라 "Twelve Data가 줄 수
+     * 있는 최근 최대 약 19~20년까지"만 커버된다</b> — begin/end를 우리가 제어할 수 없어 이 이상은
+     * 우리 쪽에서 확장할 방법이 없다(실측으로 이미 확정된 벤더 제약). 그럼에도 credit 소비가
+     * {@code outputsize} 크기와 무관하게 요청 1회당 1로 고정임이 실측 확인됐으므로, 매번 최대값을
+     * 요청해 한 번의 호출로 벤더가 줄 수 있는 전체 범위를 커버한다 — {@link CandleCacheStore#mergeOlder}가
+     * (50년) 캡보다 과거 데이터가 있으면 잘라내지만, 실제로는 벤더가 19~20년치 이상을 주지 않으므로
+     * 이 케이스는 발생하지 않는다(추가 확장 호출도 어차피 같은 최신 구간만 돌아와 무의미).
      */
     private static final int TWELVEDATA_MAX_OUTPUTSIZE = 5000;
 
@@ -271,16 +282,19 @@ public class CandleService {
                     throw new IllegalStateException("STOCK 자산은 분봉을 지원하지 않습니다: " + interval);
         };
 
-        // STOCK은 캐시 미스 시 KRW·USD 둘 다 벤더가 줄 수 있는 최대 범위(캡 전체)를 한 번에
-        // 요청하는 전략이다(fetchVendorBars 참고) — 그래서 캐시가 한 번 채워지면 그 시점에 이미
-        // 벤더가 줄 수 있는 전부를 받은 것이고, 원천적으로 더 페이징할 과거 데이터가 없다. 예전엔
-        // entry.oldestCovered()가 캡에 도달했는지로 판정했는데, KRW·USD 둘 다 최초 1회 호출로 캡
-        // 이전 구간 자체를 요청하지 않는 케이스(예: 상장 이력이 캡보다 짧은 종목)에서는 캡에
-        // 도달하지 못했을 뿐 실제로는 더 받을 데이터가 없어 hasMoreHistory가 영구히 true로 남는
-        // 버그였다(Task 028 code-reviewer M2 실측). 항상 false로 고정한다.
-        boolean hasMoreHistory = false;
+        // STOCK은 캐시 미스 시 KRW·USD 둘 다 벤더가 줄 수 있는 최대 범위(캡 전체)를 한 번에 요청하는
+        // 전략이다(fetchVendorBars 참고) — 그래서 캐시에는 항상 벤더가 줄 수 있는 전부가 들어있고,
+        // 벤더를 향한 추가 페이징은 원천적으로 불필요하다(Task 028 code-reviewer M2). 다만 응답으로
+        // 내려주는 건 그 캐시 전체가 아니라 최신 STOCK_PAGE_SIZE건까지만이다(COIN과 첫 화면 노출량을
+        // 맞추기 위한 페이징, 2026-09-22) — aggregated는 이미 최신순 내림차순으로 정렬돼 있으므로
+        // 앞쪽 STOCK_PAGE_SIZE개가 곧 "가장 최근 N개"다. before 커서는 위에서 이미 캐시된 일봉을
+        // 필터링하는 데 재사용되므로, 프론트가 화면에 보이는 가장 오래된 봉의 bucketStart를 다음
+        // before로 보내면 그 시점 이후로는 이 페이지 슬라이싱이 자연히 다음 구간을 반환한다(캐시
+        // 자체는 이미 전체를 갖고 있어 벤더 재호출 없이 즉시 응답 가능).
+        boolean hasMoreHistory = aggregated.size() > STOCK_PAGE_SIZE;
+        List<DailyBar> paged = hasMoreHistory ? aggregated.subList(0, STOCK_PAGE_SIZE) : aggregated;
         int scale = PrecisionScale.scaleFor(AssetType.STOCK, asset.getCurrency());
-        List<CandleBarResponse> bars = aggregated.stream().map(bar -> toBarResponse(bar, scale)).toList();
+        List<CandleBarResponse> bars = paged.stream().map(bar -> toBarResponse(bar, scale)).toList();
         return new CandleSeriesResponse(bars, hasMoreHistory);
     }
 
@@ -372,7 +386,10 @@ public class CandleService {
             return twelveDataClient.getDailySeries(asset.getTicker(), TWELVEDATA_MAX_OUTPUTSIZE);
         }
         // 국내(공공데이터포털)는 begin/end 범위 조회를 지원한다(StockPriceClient.getDailySeries 실측
-        // 확인 — 10년 범위도 단일 페이지로 응답). 캐시 미스 시에만 호출되므로 항상 캡 전체
+        // 확인 — 10년 범위도 단일 페이지로 응답). maxHistoryYears를 50년으로 올린 뒤(2026-09-22)
+        // 요청 범위가 최대 50년까지 늘 수 있는데, 단일 페이지로 커버 가능한 응답 건수 상한
+        // (StockPriceClient의 MAX_DAILY_SERIES_ROWS)을 그에 맞춰 올리는 작업은 StockPriceClient
+        // 소관(동시 진행 중, 이 클래스의 책임 밖)이다. 캐시 미스 시에만 호출되므로 항상 캡 전체
         // (maxHistoryStart~오늘)를 한 번에 요청한다(Task 028 code-reviewer M2 — begin을 캡보다 좁게
         // 잡는 "확장" 재호출은 항상 begin=maxHistoryStart였던 최초 호출의 부분집합이라 새 데이터를
         // 받을 수 없어 제거했다).

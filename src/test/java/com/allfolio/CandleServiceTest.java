@@ -450,6 +450,58 @@ class CandleServiceTest {
         assertThat(response.bars().get(1).bucketStart()).isEqualTo(day1.toString());
     }
 
+    /**
+     * STOCK도 COIN(UPBIT_PAGE_SIZE=200)과 첫 화면 노출량을 맞추기 위해 응답을 최대 STOCK_PAGE_SIZE건
+     * (=200)으로 페이징한다(사용자 요청 "주식 차트도 코인만큼만", 2026-09-22). 캐시엔 전체 250건이
+     * 있어도 응답은 최신 200건까지만 반환하고 hasMoreHistory=true가 된다.
+     */
+    @Test
+    void stockDayPagesAtStockPageSizeAndSetsHasMoreHistoryTrue() {
+        givenAsset(AssetType.STOCK, "KRW", "005930");
+        LocalDate start = LocalDate.of(2020, 1, 1);
+        List<DailyBar> bars = java.util.stream.IntStream.range(0, 250)
+                .mapToObj(i -> new DailyBar(start.plusDays(i), bd("100"), bd("110"), bd("90"), bd("105")))
+                .toList();
+        CandleCacheEntry entry = new CandleCacheEntry(bars, start, start.plusDays(249), Instant.now());
+        when(candleCacheStore.find("candle:STOCK:005930")).thenReturn(Optional.of(entry));
+
+        CandleSeriesResponse response = candleService.getCandles(userId, assetId, "DAY", null);
+
+        assertThat(response.bars()).hasSize(200);
+        assertThat(response.hasMoreHistory()).isTrue();
+        // 가장 최근(첫 번째) 바는 캐시의 최신 날짜여야 한다(내림차순 정렬).
+        assertThat(response.bars().get(0).bucketStart()).isEqualTo(start.plusDays(249).toString());
+        // 페이지의 마지막(가장 오래된) 바는 200번째로 최근인 날짜여야 한다.
+        assertThat(response.bars().get(199).bucketStart()).isEqualTo(start.plusDays(50).toString());
+    }
+
+    /**
+     * 프론트는 항상 "현재 화면의 가장 오래된 봉의 bucketStart"를 다음 before로 보낸다(handleLoadMoreHistory).
+     * 그 커서로 재조회했을 때 중복·누락 없이 정확히 나머지가 반환되는지 검증한다.
+     */
+    @Test
+    void stockDayBeforeCursorAfterFirstPageReturnsRemainingBarsWithoutDuplicationOrGap() {
+        givenAsset(AssetType.STOCK, "KRW", "005930");
+        LocalDate start = LocalDate.of(2020, 1, 1);
+        List<DailyBar> bars = java.util.stream.IntStream.range(0, 250)
+                .mapToObj(i -> new DailyBar(start.plusDays(i), bd("100"), bd("110"), bd("90"), bd("105")))
+                .toList();
+        CandleCacheEntry entry = new CandleCacheEntry(bars, start, start.plusDays(249), Instant.now());
+        when(candleCacheStore.find("candle:STOCK:005930")).thenReturn(Optional.of(entry));
+
+        CandleSeriesResponse firstPage = candleService.getCandles(userId, assetId, "DAY", null);
+        String oldestVisibleBucketStart = firstPage.bars().get(firstPage.bars().size() - 1).bucketStart();
+
+        CandleSeriesResponse secondPage = candleService.getCandles(userId, assetId, "DAY", oldestVisibleBucketStart);
+
+        assertThat(secondPage.bars()).hasSize(50);
+        assertThat(secondPage.hasMoreHistory()).isFalse();
+        // 중복 없음: 두 번째 페이지의 가장 최근 바는 첫 페이지의 가장 오래된 바보다 정확히 하루 이전이어야 한다.
+        assertThat(secondPage.bars().get(0).bucketStart()).isEqualTo(start.plusDays(49).toString());
+        // 누락 없음: 두 번째 페이지의 가장 오래된 바는 캐시 전체의 가장 오래된 날짜(start)여야 한다.
+        assertThat(secondPage.bars().get(secondPage.bars().size() - 1).bucketStart()).isEqualTo(start.toString());
+    }
+
     private void givenAsset(AssetType assetType, String currency, String ticker) {
         User user = User.of("trader@example.com", "hash");
         Asset asset = Asset.of(user, ticker, "테스트 자산", assetType, currency);

@@ -84,15 +84,20 @@ allfolio:
   candle-cache:
     # EOD(하루 1회 갱신) 데이터라 price-cache.stock-fresh-ttl과 동일하게 길게 둔다.
     stock-daily-ttl: 12h
-    # 캔들 차트가 다루는 최대 조회 범위 상한(연 단위) — 무한정 과거로 캐시가 확장되는 것을 막는다.
-    max-history-years: 10
+    # 캔들 차트가 다루는 최대 조회 범위 상한(연 단위) — "상장일부터 현재까지" 요구사항(자산 상세 차트)을
+    # 충족하기 위해 넉넉한 고정 상한으로 50년을 둔다(사용자 확정, 2026-09-22). 무한정 과거로 캐시가
+    # 확장되는 것을 막는 상한 자체는 유지한다.
+    max-history-years: 50
     # cache stampede 방지용 티커 단위 락(CandleRangeLock) 만료 시간. 국내주식 10년 콜드 페치 실측
     # 3.7~3.9초(자산 상세 국내주식 차트 조회 실패 조사, 2026-09-18) — StockPriceClient는 이 실측치를
     # 반영해 read-timeout을 전역값(3s)보다 넉넉한 6s로 별도 설정했다(connect-timeout 2s 포함 worst
-    # case 8s, StockPriceClient의 READ_TIMEOUT 주석 참고). 그 위에 여유를 두어 15초로 잡는다 —
+    # case 8s, StockPriceClient의 READ_TIMEOUT 주석 참고). 그 위에 여유를 두어 15초로 잡았었다 —
     # 5초로는 벤더가 조금만 느려져도 fetch 도중 락이 만료돼 cache stampede 방지 목적이 무력화된다
-    # (Task 028 code-reviewer m3 실측).
-    range-lock-ttl: 15s
+    # (Task 028 code-reviewer m3 실측). max-history-years를 10→50으로 올리면서(2026-09-22) 국내주식
+    # 콜드 페치 데이터량이 대략 5배 늘 수 있어(StockPriceClient의 numOfRows·READ_TIMEOUT도 별도로 함께
+    # 상향 중) 기존 15초의 4배 수준인 60초로 보수적으로 상향한다 — 실측 전 추정치이며, 50년 범위 콜드
+    # 페치 실측 후 재조정이 필요하다.
+    range-lock-ttl: 60s
   # COIN 캔들 조회(GET /v1/assets/{id}/candles, COIN 자산) 사용자당 Throttle(Task 031 서브태스크 4).
   # 이 경로는 캐시가 전혀 없는 순수 패스스루라(candle-cache는 STOCK 전용) 30 VUs·30초 부하만으로도
   # 업비트가 실제 429를 반환하기 시작하고 우리 서버 응답의 98%가 503으로 저하됨을 실측 확인했다

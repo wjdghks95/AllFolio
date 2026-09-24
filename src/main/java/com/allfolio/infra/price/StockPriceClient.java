@@ -86,19 +86,41 @@ public class StockPriceClient {
 
     private static final DateTimeFormatter BAS_DT_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    // 2026-09-11 curl 실측으로 numOfRows=5000(10년 범위, 1642건)까지 단일 페이지 정상 응답을
-    // 확인했다. 이 프로젝트가 필요로 하는 차트 범위(최대 수년)는 여유롭게 커버하면서, 확인 안 된
-    // 구간까지 요청하지 않도록 실측 범위 안쪽인 10년(약 3660일)으로 상한을 둔다.
-    private static final int MAX_DAILY_SERIES_ROWS = 3660;
+    // 자산 상세 차트가 "상장일부터 현재까지"를 보여줘야 해서, 2026-09-22 사용자 확정으로 상한을
+    // 50년(약 18263 달력일, 여유를 둬 18300으로 반올림)까지 올렸다(넉넉한 고정 상한·단일 요청·
+    // 페이지네이션 미도입 — 사용자 확정 범위). 같은 날 실제 서비스키로 curl 재검증:
+    // 삼성전자(005930)에 beginBasDt=19750101&endBasDt=20260922(50년+ 범위)·numOfRows=18300으로
+    // 요청한 결과 HTTP 200 정상 응답했고, 서버가 echo한 numOfRows는 10000으로 클램프됐다(공식
+    // 활용가이드 "0.1 데이터 조회 관련 유의사항"의 10,000건 상한과 일치 — numOfRows=18300 요청
+    // 자체가 거부되지는 않음을 이번에 확인). 다만 실제 반환 건수는 totalCount=1650건에 그쳤는데,
+    // 이는 페이지네이션이나 서버 상한 때문이 아니라 이 API의 실제 시세 데이터가 종목과 무관하게
+    // 2020-01-02 이전으로는 존재하지 않기 때문이다(종목 필터 없이 시장 전체 대상으로
+    // beginBasDt를 2015~2019 여러 날짜로 바꿔가며 조회해도 전부 totalCount=0, 2020-01-09부터
+    // 데이터가 잡히는 것을 이 세션에서 직접 재현했다). 즉 2020-01-02 이전 상장 종목은 이 벤더
+    // 데이터 자체의 한계로 "상장일까지"라는 목표를 실제로 달성할 수 없다 — 코드 캡과 무관한
+    // 데이터 가용성 문제이므로 별도로 보고됨. 그럼에도 캡 자체는 향후 데이터가 계속 쌓이는 것과
+    // 아직 확인 못 한 다른 종목·기간 조합을 방어적으로 커버하기 위해 50년으로 올려둔다 — 실제로
+    // 5000건을 초과하는 단일 페이지 응답이(데이터가 그만큼 존재하는 경우) 잘림 없이 정상 반환되는지는
+    // 이번에도 실측하지 못했다(현재 시장 데이터가 종목당 최대 ~1700건 수준이라 그 이상을 인위적으로
+    // 유발할 방법이 없었음) — 이 리스크는 사용자가 인지하고 승인했다.
+    private static final int MAX_DAILY_SERIES_ROWS = 18300;
     private static final Pattern PERCENT_ENCODED = Pattern.compile("%[0-9A-Fa-f]{2}");
 
     // spring.http.clients.read-timeout(전역 3s)은 다른 3개 벤더(Upbit/환율/TwelveData)의 빠른 응답
-    // 기준으로 잡혀 있어, 이 클라이언트의 getDailySeries(10년 일봉 콜드 페치)에는 짧다 — 같은 파라미터로
+    // 기준으로 잡혀 있어, 이 클라이언트의 getDailySeries(일봉 콜드 페치)에는 짧다 — 같은 파라미터로
     // 공공데이터포털을 직접 호출해 실측한 결과 응답에 3.7~3.9초가 걸려 3초 read-timeout에 매번 걸리고
     // 캔들 조회가 100% 실패했다(자산 상세 페이지 국내주식 차트 조회 실패 신고로 재현·확인). getPrice/
     // search는 응답이 작아 이 여유 있는 타임아웃에서도 체감 지연이 늘지 않는다 — 다른 3개 클라이언트의
     // 빠른 실패 판정(3s)에는 영향 주지 않기 위해 이 클라이언트에만 전용 RestClient를 구성한다.
-    private static final Duration READ_TIMEOUT = Duration.ofSeconds(6);
+    //
+    // 2026-09-22, MAX_DAILY_SERIES_ROWS를 50년으로 올리며 재검토: 같은 날 실제로 50년 범위(005930,
+    // 1975~2026, numOfRows=18300)를 curl로 재현한 결과 3.93초로 기존 10년 실측(3.7~3.9초)과 거의
+    // 차이가 없었다 — 이유는 MAX_DAILY_SERIES_ROWS 주석에 적었듯 실제 데이터량 자체가 늘지 않았기
+    // 때문(이 벤더 데이터는 2020-01-02 이전 데이터가 없어, 캡을 올려도 오늘 기준 어떤 종목이든 실제
+    // 반환량은 ~1700건을 넘지 않는다). 다만 향후 데이터가 계속 쌓이거나, 이번에 재현하지 못한
+    // 5000건 초과 단일 페이지 응답의 실제 지연은 추정치일 뿐이다 — 사용자 요청대로 안전 마진을 둬
+    // 15초로 올린다(이 값 자체는 실측이 아닌 방어적 추정).
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(2);
 
     private final RestClient restClient;
