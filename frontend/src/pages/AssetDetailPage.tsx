@@ -1,5 +1,13 @@
 // 구조·동작: senior-frontend / 시각 표현·문구: ui-ux-designer
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import type {
   Asset,
@@ -230,6 +238,10 @@ export default function AssetDetailPage() {
   >({ status: 'loading' });
   const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  // 차트 가로 스크롤/줌아웃 자동 로드는 짧은 시간에 콜백이 연달아 여러 번 발생할 수 있어,
+  // state(loadingMoreHistory) 갱신 타이밍만 믿으면 재진입(중복 호출)이 샐 수 있다. 이 ref로
+  // 함수 진입 즉시(await 이전) 동기적으로 막는다 — state는 버튼 라벨/disabled 표시용으로 유지.
+  const loadingMoreHistoryRef = useRef(false);
 
   // 자산이 바뀌면(다른 자산 상세로 이동) 이전 자산 기준으로 고른 interval이 새 자산에서도
   // 유효하다는 보장이 없다(예: STOCK 상세에서 COIN 상세로) — 기본값으로 되돌린다.
@@ -512,10 +524,12 @@ export default function AssetDetailPage() {
   // before 커서로 넘긴다(포맷을 다시 만들 필요 없음, ROADMAP Task 028). 실패해도 기존 화면은
   // 무너지지 않고, 버튼 위 안내만 보여준 뒤 다시 누를 수 있게 둔다.
   const handleLoadMoreHistory = async () => {
+    if (loadingMoreHistoryRef.current) return;
     if (candleState.status !== 'ready' || !candleState.hasMoreHistory || candleState.bars.length === 0) {
       return;
     }
     const oldest = candleState.bars[0];
+    loadingMoreHistoryRef.current = true;
     setLoadingMoreHistory(true);
     setLoadMoreError(null);
     try {
@@ -536,6 +550,7 @@ export default function AssetDetailPage() {
       }
       setLoadMoreError(messageForErrorCode(err instanceof ApiError ? err.code : 'NETWORK_ERROR'));
     } finally {
+      loadingMoreHistoryRef.current = false;
       setLoadingMoreHistory(false);
     }
   };
@@ -750,6 +765,9 @@ export default function AssetDetailPage() {
                     bars={candleState.bars}
                     priceLines={candleChartPriceLines}
                     testId="asset-detail-chart-canvas"
+                    hasMoreHistory={candleState.hasMoreHistory}
+                    loadingMoreHistory={loadingMoreHistory}
+                    onNeedMoreHistory={handleLoadMoreHistory}
                   />
                   {/* 두 평단선 사이의 변화량. 캔버스 위에서 현재선과 예상선을 가르는 것은 색
                       하나뿐이라(잉크 ↔ 빨강/파랑), 부호와 ▲▼가 붙은 이 한 줄이 색을 못 읽는
@@ -771,29 +789,15 @@ export default function AssetDetailPage() {
                       </span>
                     </p>
                   ) : null}
-                  {/* 실패 안내는 버튼 위에 둔다 — 이 버튼이 곧 재시도 수단이라, 읽고 나서
-                      바로 아래 손이 닿는 자리에 눌러야 할 것이 있어야 한다(§6-3 배너의 자리). */}
+                  {/* 과거 구간 자동 로드(가로 스크롤/줌아웃, CandlestickChart의
+                      onNeedMoreHistory) 실패 안내. 버튼이 없어졌어도 실패했다는 사실은
+                      여전히 알려야 한다 — 사용자가 다시 스크롤/줌아웃하면 handleLoadMoreHistory가
+                      재시도된다. */}
                   {loadMoreError ? (
                     <div className="mt-3">
                       <Alert tone="error" testId="asset-detail-chart-load-more-error">
                         {loadMoreError}
                       </Alert>
-                    </div>
-                  ) : null}
-                  {candleState.hasMoreHistory ? (
-                    // 차트에서 과거는 왼쪽이다 — 버튼 라벨이 "무엇이 더 나오는지"를 말한다.
-                    // 진행 중에는 라벨을 바꾼다(§6-1: 로그인 → 로그인 중). 회색으로 죽은
-                    // 버튼만 남기면 눌렸는지 안 눌렸는지를 화면이 말하지 않는다.
-                    <div className="mt-3 flex justify-center">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={handleLoadMoreHistory}
-                        disabled={loadingMoreHistory}
-                        testId="asset-detail-chart-load-more"
-                      >
-                        {loadingMoreHistory ? '불러오는 중' : '과거 구간 더 보기'}
-                      </Button>
                     </div>
                   ) : null}
                 </>

@@ -13,6 +13,7 @@ import {
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
+  type LogicalRange,
   type UTCTimestamp,
 } from 'lightweight-charts';
 import type { CandleBarResponse, Money } from '../api/types';
@@ -48,6 +49,12 @@ function formatTickPrice(price: number): string {
   return TICK_FORMATTERS.fine.format(price);
 }
 
+// 캔들 하나의 최대 폭(px). fitContent()는 캔들 개수가 적으면 이 폭을 넘어서까지 캔들을 늘려
+// 채우려 하므로(년봉 7개가 90px까지 뚱뚱해진 실측 사례) createChart의 maxBarSpacing으로 상한을
+// 두고, 아래 "캔들이 컨테이너를 못 채우는 경우" 판정에도 같은 값을 재사용해 두 계산이 어긋나지
+// 않게 한다.
+const MAX_BAR_SPACING = 48;
+
 // COIN의 bucketStart는 Instant 문자열("2026-09-11T00:00:00Z"), STOCK은 LocalDate 문자열
 // ("2026-09-11")이다. 날짜만 있는 ISO 문자열도 Date가 UTC 자정으로 해석하므로 변환 함수 하나로
 // 두 경우를 함께 처리할 수 있다.
@@ -69,15 +76,49 @@ export interface CandlestickChartProps {
   bars: CandleBarResponse[];
   priceLines?: PriceLineSpec[];
   testId?: string;
+  // 가로 스크롤/줌아웃으로 왼쪽(과거) 끝에 가까워지면 onNeedMoreHistory를 호출해 자동으로 더
+  // 불러온다. 세 prop 모두 옵셔널이라 호출부가 페이징을 지원하지 않아도(더미 데이터 등) 동작한다.
+  hasMoreHistory?: boolean;
+  loadingMoreHistory?: boolean;
+  onNeedMoreHistory?: () => void;
 }
 
-export default function CandlestickChart({ bars, priceLines = [], testId }: CandlestickChartProps) {
+export default function CandlestickChart({
+  bars,
+  priceLines = [],
+  testId,
+  hasMoreHistory,
+  loadingMoreHistory,
+  onNeedMoreHistory,
+}: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  // 현재 차트 인스턴스에 아직 최초 fitContent()를 안 했는지 여부. 차트 생성 useEffect에서
+  // 차트를 새로 만들 때마다 false로 리셋된다(아래 그 지점 주석 참고) — 자산/interval 전환처럼
+  // 컴포넌트가 통째로 리마운트되는 경우는 물론, React.StrictMode의 이중 이펙트 실행처럼
+  // 컴포넌트는 그대로인데 차트 인스턴스만 다시 만들어지는 경우도 함께 커버한다. 반면 과거 구간
+  // 병합(자동 스크롤 로드)과 SSE 실시간 갱신은 같은 차트 인스턴스를 유지한 채 bars만 바뀌므로
+  // fitContent가 다시 불리지 않아 사용자가 보던 확대/스크롤 위치가 유지된다.
+  const hasFitRef = useRef(false);
+  // 캔들이 적어 왼쪽 정렬 분기로 들어간 경우, 그때 고정한 논리 범위의 오른쪽 경계(to 값)를
+  // 기억해둔다. null이면 "왼쪽 정렬 모드가 아니다"라는 뜻이라 아래 클램프 로직이 개입하지
+  // 않는다 — 캔들이 많아 fitContent()+fixRightEdge(항상 켠 상태)로 이미 완벽히 막혀 있는
+  // 일반적인 경우를 건드리면 안 된다. hasFitRef와 마찬가지로 차트 생성 이펙트에서 차트가 새로
+  // 만들어질 때마다 null로 리셋된다.
+  const lockedRightBoundRef = useRef<number | null>(null);
   // 아래 autoscaleInfoProvider가 읽는 현재 평단선 값들. 라이브러리는 가격선을 세로 스케일
   // 계산에 넣지 않아서, 평단가가 화면에 보이는 캔들 범위 밖이면 이 서비스의 시그니처(§5)가
   // 통째로 잘려 나간다 — 375px 삼성전자 화면에서 실측(캔들 62,900~67,200 / 평단 60,000).
   const priceLineValuesRef = useRef<number[]>([]);
+  // 차트 생성 useEffect는 deps `[]`라 재구독하지 않는다 — 매 렌더 최신 prop 값을 읽기 위해
+  // priceLineValuesRef와 같은 패턴으로 ref에 동기화해 둔다(렌더 중 직접 대입, 별도 useEffect 없음).
+  const hasMoreHistoryRef = useRef(hasMoreHistory);
+  hasMoreHistoryRef.current = hasMoreHistory;
+  const loadingMoreHistoryRef = useRef(loadingMoreHistory);
+  loadingMoreHistoryRef.current = loadingMoreHistory;
+  const onNeedMoreHistoryRef = useRef(onNeedMoreHistory);
+  onNeedMoreHistoryRef.current = onNeedMoreHistory;
   // 차트(및 series)가 이미 폐기됐는지 여부. 언마운트 시 아래 세 useEffect의 cleanup이 선언 순서
   // (차트 생성 → 데이터 → 평단선) 그대로 실행되는데, 차트 cleanup의 chart.remove()가 series까지
   // 통째로 폐기한 뒤 평단선 cleanup이 그 폐기된 series에 removePriceLine을 호출하면
@@ -108,7 +149,22 @@ export default function CandlestickChart({ bars, priceLines = [], testId }: Cand
       rightPriceScale: { borderColor: CHART_TOKEN.rule },
       // 코인 1분봉에서 눈금이 날짜만 반복되지 않도록 시각 표시를 허용한다(초 단위는 쓰지 않는다).
       // 일·주·월·년봉에서는 라이브러리가 간격을 보고 날짜 눈금을 그대로 쓴다.
-      timeScale: { borderColor: CHART_TOKEN.rule, timeVisible: true, secondsVisible: false },
+      // fixLeftEdge/fixRightEdge: 로드된 캔들 범위 밖(빈 캔버스)으로 줌아웃·스크롤되지 않도록
+      // 막는다 — "과거 구간 더 로드"(handleVisibleLogicalRangeChange)는 range.from이 0 근처(<=10)에
+      // 다가가는 것으로 판단하므로, from이 음수로 넘어가는 것만 막는 fixLeftEdge와 충돌하지 않는다.
+      // fixRightEdge는 라이브러리 내부에서 "마지막 캔들 오른쪽 여백(rightOffset)의 상한을 0으로
+      // 강제"하는 방식으로 동작해서(소스 확인), 캔들이 적어 왼쪽 정렬 + 오른쪽 여백을 의도적으로
+      // 두려는 경우와는 구조적으로 양립하지 않는다 — 그 경우는 아래 bars useEffect에서 최초
+      // 배치 시 한 번만 꺼서 처리한다(그 지점 주석 참고). maxBarSpacing: 캔들이 적은 interval
+      // (년봉 등)에서 자동 배치 계산이 이 상한을 넘지 않게 한다(비정상적으로 뚱뚱한 캔들 방지).
+      timeScale: {
+        borderColor: CHART_TOKEN.rule,
+        timeVisible: true,
+        secondsVisible: false,
+        fixLeftEdge: true,
+        fixRightEdge: true,
+        maxBarSpacing: MAX_BAR_SPACING,
+      },
       localization: { priceFormatter: formatTickPrice },
       // 크로스헤어는 손익 축(빨강/파랑)을 건드리지 않는 무채로 둔다 — 커서를 따라다니는 선이
       // 유채색이면 "유채색은 정보일 때만"(§2-3)이 깨지고 캔들 색과 같은 층위로 읽힌다.
@@ -132,8 +188,12 @@ export default function CandlestickChart({ bars, priceLines = [], testId }: Cand
       // 남아 그것이 평단선처럼 읽혔다(실측). 마지막 종가는 가격축 뱃지로만 남긴다.
       priceLineVisible: false,
       lastValueVisible: true,
-      // 평단선을 세로 스케일 계산에 함께 넣는다 — 시그니처가 범위 밖이라는 이유로 사라지면
-      // 이 카드는 "가격 흐름"만 남고 "내 평단은 어디인가"에 답하지 못한다(§1·§5).
+      // 평단선을 세로 스케일 계산에 항상 함께 넣는다 — 시그니처가 범위 밖이라는 이유로
+      // 사라지면 이 카드는 "가격 흐름"만 남고 "내 평단은 어디인가"에 답하지 못한다(§1·§5).
+      // 평단가와 캔들 범위가 아주 크게 벌어지면(예: 비트코인 1분봉) 세로축이 그 차이를 담도록
+      // 늘어나면서 캔들 자체가 눌려 보일 수 있지만, "주식 차트는 괴리가 커도 평단선이 항상
+      // 보인다"는 사용자 확인 기준에 맞춰 항상 포함시키는 쪽으로 유지한다(사용자가 명시적으로
+      // 선택한 트레이드오프).
       autoscaleInfoProvider: (original: () => AutoscaleInfo | null): AutoscaleInfo | null => {
         const base = original();
         const values = priceLineValuesRef.current.filter((value) => Number.isFinite(value));
@@ -149,11 +209,50 @@ export default function CandlestickChart({ bars, priceLines = [], testId }: Cand
       },
     });
     seriesRef.current = series;
+    chartRef.current = chart;
     disposedRef.current = false;
+    // hasFitRef는 "이 차트 인스턴스에 아직 fitContent를 안 했다"는 뜻이라 컴포넌트가 아니라
+    // 차트 인스턴스에 종속돼야 한다. React.StrictMode(개발 모드)는 이 이펙트를
+    // mount→cleanup→mount로 한 번 더 실행하는데, 그 첫 실행(임시 차트)에서 이미 fit이 끝나
+    // hasFitRef가 true로 남아있으면, 실제로 화면에 남는 두 번째 차트는 fit을 건너뛰어 버린다
+    // (캔들 개수가 적은 interval에서 실측 재현 — 캔들이 오른쪽에 몰리고 왼쪽이 빈 채로 남음).
+    // 차트가 새로 생성될 때마다 리셋하면 진짜/가짜 마운트 모두 자신의 차트 인스턴스 기준으로
+    // 한 번만 fit되어 이 문제가 사라진다.
+    hasFitRef.current = false;
+    lockedRightBoundRef.current = null;
+
+    // 가로 스크롤/줌아웃으로 왼쪽(과거) 끝이 가까워지면 자동으로 더 불러온다. from은 로드된
+    // 데이터 중 몇 번째 캔들이 화면 왼쪽 끝인지를 가리키는 논리 인덱스(0 = 가장 오래된 캔들,
+    // 음수면 그보다 더 왼쪽 빈 공간이 보인다는 뜻)라 작을수록 과거 끝에 가깝다는 신호다.
+    // 이미 로딩 중이거나 더 불러올 구간이 없으면 건너뛴다("과거 구간 더 보기" 버튼과 동일 조건).
+    const LOAD_MORE_THRESHOLD = 10;
+    // 부동소수점 오차 방지용 여유값 — lockedRightBoundRef와 정확히 같은 range.to가 와도(되돌린
+    // 직후 재구독 등) 다시 되돌리기를 반복하지 않는다.
+    const RIGHT_BOUND_EPSILON = 0.01;
+    const handleVisibleLogicalRangeChange = (range: LogicalRange | null) => {
+      if (!range) return;
+      // 캔들이 적어 왼쪽 정렬 + 오른쪽 여백으로 고정해둔 차트(lockedRightBoundRef가 null이
+      // 아님)는 fixRightEdge를 켤 수 없어(위 timeScale 옵션 주석 참고) 사용자가 마우스 휠로
+      // 계속 축소하면 라이브러리의 느슨한 기본 상한("화면에 최소 2개 캔들만 남으면 됨")까지
+      // 여백이 더 벌어질 수 있다. 그 상한 대신 우리가 최초에 고정해둔 경계를 넘어가면 즉시
+      // 원래 범위로 되돌려 더 벌어지지 않게 막는다.
+      const lockedRightBound = lockedRightBoundRef.current;
+      if (lockedRightBound !== null && range.to > lockedRightBound + RIGHT_BOUND_EPSILON) {
+        chart.timeScale().setVisibleLogicalRange({ from: -0.5, to: lockedRightBound });
+        return;
+      }
+      if (range.from > LOAD_MORE_THRESHOLD) return;
+      if (!hasMoreHistoryRef.current || loadingMoreHistoryRef.current) return;
+      onNeedMoreHistoryRef.current?.();
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
+
     return () => {
       disposedRef.current = true;
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
       chart.remove();
       seriesRef.current = null;
+      chartRef.current = null;
     };
   }, []);
 
@@ -170,6 +269,37 @@ export default function CandlestickChart({ bars, priceLines = [], testId }: Cand
         close: toChartNumber(bar.close),
       })),
     );
+    // 마운트 후 최초로 데이터가 채워질 때만 배치를 한 번 결정한다. 이후 과거 구간 병합·SSE
+    // 갱신으로 bars가 다시 바뀌어도 사용자가 보던 확대/스크롤 위치를 건드리지 않는다.
+    if (!hasFitRef.current && bars.length > 0) {
+      const chart = chartRef.current;
+      const containerWidth = containerRef.current?.clientWidth ?? 0;
+      const contentWidth = bars.length * MAX_BAR_SPACING;
+      if (containerWidth > 0 && contentWidth < containerWidth) {
+        // 캔들 개수가 적어 정상 폭(MAX_BAR_SPACING)으로 그려도 컨테이너를 다 채우지 못하는
+        // 경우: fitContent()는 마지막 캔들을 오른쪽 끝에 고정하는 rightOffset 기반이라 이
+        // 상황에서 캔들을 억지로 늘리거나(과거에 90px까지 뚱뚱해졌던 문제) 오른쪽에 몰아
+        // 붙인다. 왼쪽부터 정상 폭으로 채우고 남는 공간을 오른쪽에 남기려면 논리 범위를
+        // 직접 지정해야 한다.
+        //
+        // fixRightEdge(마운트 시 켬)는 rightOffset(마지막 캔들 오른쪽 여백)의 상한을 항상 0으로
+        // 강제해서, 오른쪽에 의도적으로 여백을 두는 이 배치와 함께 켜둘 수 없다(라이브러리
+        // 소스로 확인 — 켠 채로 setVisibleLogicalRange를 불러도 같은 호출 안에서 즉시 0으로
+        // 되돌려짐). 이 분기로 들어오는 경우는 대개 '년' 단위처럼 더 불러올 과거가 없는
+        // 경우(hasMoreHistory=false)라 이후 캔들 수가 늘어나 다시 채울 필요가 생기지
+        // 않으므로, 이 차트 인스턴스에서는 다시 켜지 않는다.
+        chart?.applyOptions({ timeScale: { fixRightEdge: false } });
+        const visibleSlots = containerWidth / MAX_BAR_SPACING;
+        const rightBound = -0.5 + visibleSlots;
+        chart?.timeScale().setVisibleLogicalRange({ from: -0.5, to: rightBound });
+        // 이 값을 넘어 오른쪽으로 더 축소/스크롤되지 못하게 위 handleVisibleLogicalRangeChange가
+        // 감시할 경계로 기억해둔다.
+        lockedRightBoundRef.current = rightBound;
+      } else {
+        chart?.timeScale().fitContent();
+      }
+      hasFitRef.current = true;
+    }
   }, [bars]);
 
   // 평단가 수평선(현재/예상) — priceLines가 바뀌면 기존 선을 지우고 새로 긋는다.

@@ -23,10 +23,14 @@ vi.mock('../components/CandlestickChart', () => ({
     bars,
     priceLines = [],
     testId,
+    onNeedMoreHistory,
   }: {
     bars: CandleBarResponse[];
     priceLines?: { id: string; price: string; title: string }[];
     testId?: string;
+    hasMoreHistory?: boolean;
+    loadingMoreHistory?: boolean;
+    onNeedMoreHistory?: () => void;
   }) => (
     <div data-testid={testId}>
       <span data-testid={`${testId}-bar-count`}>{bars.length}</span>
@@ -42,6 +46,20 @@ vi.mock('../components/CandlestickChart', () => ({
           {line.title}
         </span>
       ))}
+      {/* 실제 CandlestickChart는 가로 스크롤/줌아웃 시 lightweight-charts의
+          subscribeVisibleLogicalRangeChange 콜백에서 onNeedMoreHistory를 호출한다(별도
+          CandlestickChart.test.tsx가 검증). 이 페이지 테스트는 canvas 렌더러 없이 "왼쪽 끝
+          근접" 이벤트를 흉내 낼 버튼으로 배선(AssetDetailPage가 콜백을 올바르게 넘기는지)만
+          확인한다. */}
+      {onNeedMoreHistory ? (
+        <button
+          type="button"
+          data-testid={`${testId}-need-more-history`}
+          onClick={onNeedMoreHistory}
+        >
+          need-more-history
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -739,8 +757,6 @@ describe('AssetDetailPage 캔들 차트(F007, Task 028)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('asset-detail-chart-canvas-bar-count').textContent).toBe('2'),
     );
-    // hasMoreHistory가 false면 "과거 더 보기" 버튼이 없어야 한다.
-    expect(screen.queryByTestId('asset-detail-chart-load-more')).toBeNull();
   });
 
   it('기간(interval)을 바꾸면 새 interval로 재조회해 차트를 갱신한다', async () => {
@@ -841,7 +857,28 @@ describe('AssetDetailPage 캔들 차트(F007, Task 028)', () => {
     expect(candleCallCount).toBe(2);
   });
 
-  it('"과거 더 보기"를 누르면 이전 구간을 병합해 보여주고, 더 없으면 버튼이 사라진다', async () => {
+  it('"과거 구간 더 보기" 버튼은 더 이상 렌더되지 않는다(가로 스크롤/줌아웃 자동 로드로 대체)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const firstPage: CandleSeriesResponse = {
+      bars: [bar('2026-09-02', '61000'), bar('2026-09-01', '60000')],
+      hasMoreHistory: true,
+    };
+    mockGetRoutes(fetchMock, {
+      asset: samsungFixture,
+      portfolio: portfolioResponseFor(samsungPortfolioItem),
+      candles: firstPage,
+    });
+    renderAssetDetailPage(SAMSUNG_ID);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('asset-detail-chart-canvas-bar-count').textContent).toBe('2'),
+    );
+    // hasMoreHistory가 true라도(더 불러올 과거 구간이 있어도) 버튼은 렌더되지 않는다.
+    expect(screen.queryByTestId('asset-detail-chart-load-more')).toBeNull();
+  });
+
+  it('차트 가로 스크롤/줌아웃으로 과거 끝에 가까워지면(onNeedMoreHistory) 이전 구간을 병합한다', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const firstPage: CandleSeriesResponse = {
@@ -855,8 +892,6 @@ describe('AssetDetailPage 캔들 차트(F007, Task 028)', () => {
     mockGetRoutes(fetchMock, {
       asset: samsungFixture,
       portfolio: portfolioResponseFor(samsungPortfolioItem),
-      // 오름차순으로 뒤집었을 때 가장 오래된 bar(2026-09-01)의 bucketStart가 그대로 before로
-      // 넘어와야 한다(ROADMAP Task 028 — 포맷을 다시 만들 필요 없음).
       candles: (url) => (url.searchParams.get('before') === '2026-09-01' ? olderPage : firstPage),
     });
     renderAssetDetailPage(SAMSUNG_ID);
@@ -864,15 +899,54 @@ describe('AssetDetailPage 캔들 차트(F007, Task 028)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('asset-detail-chart-canvas-bar-count').textContent).toBe('2'),
     );
-    expect(screen.getByTestId('asset-detail-chart-load-more')).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId('asset-detail-chart-load-more'));
+    fireEvent.click(screen.getByTestId('asset-detail-chart-canvas-need-more-history'));
 
     await waitFor(() =>
       expect(screen.getByTestId('asset-detail-chart-canvas-bar-count').textContent).toBe('4'),
     );
-    // 더 과거 구간이 없다는 응답을 받았으니 버튼은 사라져야 한다.
-    expect(screen.queryByTestId('asset-detail-chart-load-more')).toBeNull();
+  });
+
+  it('자동 로드 콜백이 짧은 시간에 연달아 호출돼도 과거 구간 조회는 한 번만 나간다(재진입 방지)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    let olderCallCount = 0;
+    const firstPage: CandleSeriesResponse = {
+      bars: [bar('2026-09-02', '61000'), bar('2026-09-01', '60000')],
+      hasMoreHistory: true,
+    };
+    const olderPage: CandleSeriesResponse = {
+      bars: [bar('2026-08-31', '59500'), bar('2026-08-30', '59000')],
+      hasMoreHistory: false,
+    };
+    mockGetRoutes(fetchMock, {
+      asset: samsungFixture,
+      portfolio: portfolioResponseFor(samsungPortfolioItem),
+      candles: (url) => {
+        if (url.searchParams.get('before') === '2026-09-01') {
+          olderCallCount += 1;
+          return olderPage;
+        }
+        return firstPage;
+      },
+    });
+    renderAssetDetailPage(SAMSUNG_ID);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('asset-detail-chart-canvas-bar-count').textContent).toBe('2'),
+    );
+
+    // lightweight-charts의 콜백이 스크롤/줌 중 짧은 시간에 여러 번 연달아 발생할 수 있는 상황을
+    // 흉내 낸다 — state(loadingMoreHistory) 갱신을 기다리지 않고 곧바로 두 번 더 누른다.
+    const trigger = screen.getByTestId('asset-detail-chart-canvas-need-more-history');
+    fireEvent.click(trigger);
+    fireEvent.click(trigger);
+    fireEvent.click(trigger);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('asset-detail-chart-canvas-bar-count').textContent).toBe('4'),
+    );
+    expect(olderCallCount).toBe(1);
   });
 
   it('캔들 조회 중에는 로딩 스켈레톤을 보여준다', async () => {
