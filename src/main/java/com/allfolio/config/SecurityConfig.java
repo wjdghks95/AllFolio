@@ -9,6 +9,7 @@ import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -90,6 +91,8 @@ public class SecurityConfig {
                                 "/v1/auth/refresh", "/v1/auth/logout").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**",
                                 "/actuator/info", "/actuator/prometheus").permitAll()
+                        // 정적 프론트엔드(jar 내 static/) — 로그인 전에도 앱 셸을 받아야 한다.
+                        .requestMatchers(HttpMethod.GET, "/", "/index.html", "/favicon.svg", "/assets/**").permitAll()
                         // 보안 필터는 ERROR 디스패치에도 적용된다 — 열어두지 않으면 404/500이 401로 뒤바뀐다.
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())

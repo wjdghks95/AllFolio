@@ -70,3 +70,31 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
+
+// 프론트엔드(Vite) 빌드 산출물을 jar의 static/ 으로 통합한다 (단일 배포 아티팩트).
+// VITE_API_BASE_URL은 일부러 넘기지 않는다 — frontend/.env의 빈 값을 그대로 써서 상대경로(same-origin) 호출을 유지한다.
+// -PskipFrontend 를 주면 npm 빌드/복사를 건너뛴다(백엔드만 반복 빌드할 때 opt-out).
+val skipFrontend = providers.gradleProperty("skipFrontend").isPresent
+
+val frontendBuild by tasks.registering(Exec::class) {
+    enabled = !skipFrontend
+    workingDir = file("frontend")
+    commandLine("sh", "-c", "npm ci && npm run build")
+    // 입력/출력을 선언해 프론트 변경이 없으면 up-to-date 로 건너뛴다(테스트마다 npm ci 방지).
+    inputs.dir("frontend/src")
+    inputs.dir("frontend/public")
+    inputs.files(fileTree("frontend") {
+        include("index.html", "package.json", "package-lock.json", "tsconfig*.json", "vite.config.ts", ".env*")
+    })
+    outputs.dir("frontend/dist")
+}
+
+tasks.processResources {
+    if (!skipFrontend) {
+        dependsOn(frontendBuild)
+        // 소스 트리(src/main/resources)는 건드리지 않고 빌드 출력에만 복사한다.
+        from("frontend/dist") {
+            into("static")
+        }
+    }
+}
